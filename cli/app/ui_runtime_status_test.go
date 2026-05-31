@@ -90,6 +90,70 @@ func TestRuntimeStatusLineShowsGoalProgressWord(t *testing.T) {
 	}
 }
 
+func TestStatusLineRenderDoesNotRefreshMainViewWhenCacheMissing(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{
+		Session: clientui.RuntimeSessionView{SessionID: "session-1"},
+		Status: clientui.RuntimeStatus{
+			ContextUsage: clientui.RuntimeContextUsage{UsedTokens: 100, WindowTokens: 1_000},
+		},
+	}}
+	client := newTestSessionRuntimeClient(reads, &leaseRetryRuntimeControlClient{})
+	m := newSizedProjectedClosedUIModel(client, 120, 20, WithUISessionID("session-1"))
+	clearSessionRuntimeClientMainViewCache(client)
+	reads.count.Store(0)
+
+	_ = uiViewLayout{model: m}.renderStatusLine(120, uiThemeStyles(m.theme))
+
+	if got := reads.count.Load(); got != 0 {
+		t.Fatalf("status-line render performed %d synchronous main-view reads, want 0", got)
+	}
+}
+
+func TestViewRenderDoesNotRefreshMainViewWhenCacheMissing(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{
+		Session: clientui.RuntimeSessionView{SessionID: "session-1"},
+		Status: clientui.RuntimeStatus{
+			ContextUsage: clientui.RuntimeContextUsage{UsedTokens: 100, WindowTokens: 1_000},
+		},
+	}}
+	client := newTestSessionRuntimeClient(reads, &leaseRetryRuntimeControlClient{})
+	m := newSizedProjectedClosedUIModel(client, 120, 20, WithUISessionID("session-1"))
+	clearSessionRuntimeClientMainViewCache(client)
+	reads.count.Store(0)
+
+	_ = m.View()
+
+	if got := reads.count.Load(); got != 0 {
+		t.Fatalf("view render performed %d synchronous main-view reads, want 0", got)
+	}
+}
+
+func TestSlashCommandPickerRenderDoesNotRefreshMainViewWhenCacheMissing(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{
+		Session: clientui.RuntimeSessionView{SessionID: "session-1"},
+		Status:  clientui.RuntimeStatus{ParentSessionID: "parent-1"},
+	}}
+	client := newTestSessionRuntimeClient(reads, &leaseRetryRuntimeControlClient{})
+	m := newSizedProjectedClosedUIModel(client, 120, 20, WithUISessionID("session-1"))
+	m.input = "/ba"
+	m.refreshSlashCommandFilterFromInput()
+	clearSessionRuntimeClientMainViewCache(client)
+	reads.count.Store(0)
+
+	_ = m.View()
+
+	if got := reads.count.Load(); got != 0 {
+		t.Fatalf("slash-command render performed %d synchronous main-view reads, want 0", got)
+	}
+}
+
+func clearSessionRuntimeClientMainViewCache(client *sessionRuntimeClient) {
+	client.mu.Lock()
+	client.hasMainView = false
+	client.mainView = clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: client.sessionID}}
+	client.mu.Unlock()
+}
+
 func TestRuntimeStatusLocalFallbackSkipsTrailingDeveloperFeedback(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{

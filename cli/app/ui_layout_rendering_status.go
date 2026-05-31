@@ -234,7 +234,7 @@ func (l uiViewLayout) renderServerOwnershipSection(style uiStyles) string {
 }
 
 func (l uiViewLayout) renderContextUsage(style uiStyles) string {
-	usage := l.model.runtimeStatus().ContextUsage
+	usage := l.model.cachedRuntimeStatus().ContextUsage
 	if usage.WindowTokens <= 0 {
 		return ""
 	}

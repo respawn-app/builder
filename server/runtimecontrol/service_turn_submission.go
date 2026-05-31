@@ -25,19 +25,20 @@ func (s *Service) SubmitUserTurn(ctx context.Context, req serverapi.RuntimeSubmi
 		if err != nil {
 			return serverapi.RuntimeSubmitUserTurnResponse{}, err
 		}
-		shouldCompact, err := engine.ShouldCompactBeforeUserMessage(ctx, memoReq.Text)
+		runCtx := detachedRuntimeContext(ctx)
+		shouldCompact, err := engine.ShouldCompactBeforeUserMessage(runCtx, memoReq.Text)
 		if err != nil {
 			return serverapi.RuntimeSubmitUserTurnResponse{}, err
 		}
 		if shouldCompact {
-			if err := engine.CompactContextForPreSubmit(ctx); err != nil {
+			if err := engine.CompactContextForPreSubmit(runCtx); err != nil {
 				return serverapi.RuntimeSubmitUserTurnResponse{}, err
 			}
 		}
 		if err := engine.RecordPromptHistory(memoReq.Text); err != nil {
 			return serverapi.RuntimeSubmitUserTurnResponse{}, err
 		}
-		msg, err := engine.SubmitUserMessage(ctx, memoReq.Text)
+		msg, err := engine.SubmitUserMessage(runCtx, memoReq.Text)
 		if err != nil {
 			return serverapi.RuntimeSubmitUserTurnResponse{}, err
 		}

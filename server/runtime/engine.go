@@ -311,10 +311,11 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	e.ensureLifecycle()
+	interruptErr := e.Interrupt()
 	e.lifecycleMu.Lock()
 	if e.lifecycleClosed {
 		e.lifecycleMu.Unlock()
-		return nil
+		return interruptErr
 	}
 	e.lifecycleClosed = true
 	cancel := e.lifecycleCancel
@@ -323,7 +324,7 @@ func (e *Engine) Close() error {
 		cancel()
 	}
 	e.lifecycleWG.Wait()
-	return nil
+	return interruptErr
 }
 
 func (e *Engine) ensureLifecycle() {

@@ -108,10 +108,13 @@ func TestOpenMigratesRuntimeLeaseLivenessColumnsAway(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	columns := runtimeLeaseColumns(t, store.db)
-	for _, removed := range []string{"state", "released_at_unix_ms", "expires_at_unix_ms"} {
+	for _, removed := range []string{"state", "expires_at_unix_ms"} {
 		if columns[removed] {
 			t.Fatalf("runtime_leases column %q should have been removed; columns=%+v", removed, columns)
 		}
+	}
+	if !columns["released_at_unix_ms"] {
+		t.Fatalf("runtime_leases.released_at_unix_ms should exist after release-state migration; columns=%+v", columns)
 	}
 	if _, err := store.ValidateRuntimeLease(t.Context(), "session-1", "lease-1"); err != nil {
 		t.Fatalf("ValidateRuntimeLease after migration: %v", err)
@@ -146,6 +149,9 @@ func TestOpenMigratesCommentsAndRuntimeLeasesToMinimalStorage(t *testing.T) {
 		if columnExists(t, store.db, "runtime_leases", column) {
 			t.Fatalf("runtime_leases.%s should have been removed", column)
 		}
+	}
+	if !columnExists(t, store.db, "runtime_leases", "released_at_unix_ms") {
+		t.Fatal("runtime_leases.released_at_unix_ms should exist after release-state migration")
 	}
 	comments, err := store.DB().QueryContext(t.Context(), `SELECT id, body FROM task_comments ORDER BY updated_at_unix_ms DESC`)
 	if err != nil {

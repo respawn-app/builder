@@ -95,6 +95,15 @@ func (b *sessionActivityBroker) Publish(evt clientui.Event) {
 	}
 }
 
+func (b *sessionActivityBroker) SubscriberCount() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subscribers)
+}
+
 func (b *sessionActivityBroker) canReplayLocked(afterSequence uint64) bool {
 	if afterSequence == 0 || afterSequence == b.nextSeq {
 		return true

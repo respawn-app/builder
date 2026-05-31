@@ -38,9 +38,10 @@ type ProjectWorkflowLinkRecord struct {
 }
 
 type RuntimeLease struct {
-	ID              string
-	SessionID       string
-	CreatedAtUnixMs int64
+	ID               string
+	SessionID        string
+	CreatedAtUnixMs  int64
+	ReleasedAtUnixMs int64
 }
 
 type Session struct {

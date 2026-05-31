@@ -783,7 +783,8 @@ const getRuntimeLeaseByID = `-- name: GetRuntimeLeaseByID :one
 SELECT
     id,
     session_id,
-    created_at_unix_ms
+    created_at_unix_ms,
+    released_at_unix_ms
 FROM runtime_leases
 WHERE id = ?1
 LIMIT 1
@@ -792,7 +793,12 @@ LIMIT 1
 func (q *Queries) GetRuntimeLeaseByID(ctx context.Context, leaseID string) (RuntimeLease, error) {
 	row := q.db.QueryRowContext(ctx, getRuntimeLeaseByID, leaseID)
 	var i RuntimeLease
-	err := row.Scan(&i.ID, &i.SessionID, &i.CreatedAtUnixMs)
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.CreatedAtUnixMs,
+		&i.ReleasedAtUnixMs,
+	)
 	return i, err
 }
 
@@ -4330,6 +4336,25 @@ func (q *Queries) ListWorktreesByWorkspaceID(ctx context.Context, workspaceID st
 		return nil, err
 	}
 	return items, nil
+}
+
+const releaseRuntimeLease = `-- name: ReleaseRuntimeLease :exec
+UPDATE runtime_leases
+SET released_at_unix_ms = ?1
+WHERE id = ?2
+  AND session_id = ?3
+  AND released_at_unix_ms = 0
+`
+
+type ReleaseRuntimeLeaseParams struct {
+	ReleasedAtUnixMs int64
+	LeaseID          string
+	SessionID        string
+}
+
+func (q *Queries) ReleaseRuntimeLease(ctx context.Context, arg ReleaseRuntimeLeaseParams) error {
+	_, err := q.db.ExecContext(ctx, releaseRuntimeLease, arg.ReleasedAtUnixMs, arg.LeaseID, arg.SessionID)
+	return err
 }
 
 const setProjectDisplayName = `-- name: SetProjectDisplayName :execrows
