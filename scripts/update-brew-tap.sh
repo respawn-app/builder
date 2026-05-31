@@ -176,7 +176,7 @@ class ${formula_class} < Formula
   license "AGPL-3.0-only"
 
   bottle do
-    root_url "https://ghcr.io/v2/respawn-app/tap"
+    root_url "https://ghcr.io/v2/respawn-llc/tap"
   end
 
   depends_on "go" => :build
