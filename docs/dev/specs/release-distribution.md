@@ -33,6 +33,6 @@
 ## Homebrew
 
 - Homebrew tap automation is part of a release, not an optional follow-up.
-- The release workflow updates `respawn-app/homebrew-tap` through `scripts/update-brew-tap.sh` for formula `builder-cli`.
+- The release workflow updates `respawn-llc/homebrew-tap` through `scripts/update-brew-tap.sh` for formula `builder-cli`.
 - The tap PR must run `brew test-bot`; on success, `brew pr-pull` publishes bottle metadata to tap `master`.
 - If app release publication succeeds but tap update fails, fix release plumbing first if needed, then create a tap-only change for the same published version. Do not cut a second app release.

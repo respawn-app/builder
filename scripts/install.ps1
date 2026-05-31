@@ -3,7 +3,7 @@ param([string]$Version = $env:BUILDER_VERSION, [string]$InstallDir = "",
     [switch]$Force, [switch]$NoServiceRestart, [switch]$Help)
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
-$DefaultRepo = "respawn-app/builder"
+$DefaultRepo = "respawn-llc/builder"
 $Repo = $env:BUILDER_REPO
 if ([string]::IsNullOrWhiteSpace($Repo)) {
     $Repo = $DefaultRepo
@@ -30,7 +30,7 @@ Options:
   -Help                    Show this help.
 Environment:
   BUILDER_VERSION       Override version.
-  BUILDER_REPO          Override repo. Default: respawn-app/builder.
+  BUILDER_REPO          Override repo. Default: respawn-llc/builder.
   BUILDER_RELEASE_BASE  Override release base URL.
   GITHUB_TOKEN          GitHub token for API rate limits.
   GH_TOKEN              GitHub token for API rate limits.

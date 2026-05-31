@@ -9,7 +9,7 @@ Updates the Homebrew tap formula for builder-cli with a new tag tarball + sha256
 
 Defaults:
   --version : $BUILDER_VERSION, $GITHUB_REF_NAME, or latest git tag in this repo
-  --repo    : respawn-app/builder
+  --repo    : respawn-llc/builder
   --formula : builder-cli
   --tap     : $BUILDER_TAP_PATH, $HOMEBREW_TAP_PATH, else ../homebrew-tap (relative to repo root)
 
@@ -31,7 +31,7 @@ require_option_value() {
 }
 
 version=""
-repo="respawn-app/builder"
+repo="respawn-llc/builder"
 formula="builder-cli"
 tap_dir=""
 do_commit="false"

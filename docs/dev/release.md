@@ -17,11 +17,11 @@ Use `workflow_dispatch`. It is the simplest path and does not require the `autor
 4. Trigger the release workflow:
 
 ```bash
-gh workflow run release.yml --repo respawn-app/builder
+gh workflow run release.yml --repo respawn-llc/builder
 ```
 
-5. Wait for the `release` workflow in `respawn-app/builder` to finish.
-6. Wait for the tap automation in `respawn-app/homebrew-tap` to finish.
+5. Wait for the `release` workflow in `respawn-llc/builder` to finish.
+6. Wait for the tap automation in `respawn-llc/homebrew-tap` to finish.
 7. Verify the GitHub release and Homebrew install.
 
 ## What The App Release Workflow Does
@@ -36,7 +36,7 @@ The `release` workflow in `/.github/workflows/release.yml`:
 6. Verifies the checksum manifest and smoke-tests packaged binaries on Linux, macOS, and Windows before publishing.
 7. Smoke-tests the Windows installer against staged release assets before publishing.
 8. Publishes the GitHub release.
-9. Checks out `respawn-app/homebrew-tap`.
+9. Checks out `respawn-llc/homebrew-tap`.
 10. Runs `scripts/update-brew-tap.sh` for formula `builder-cli`.
 11. Opens a PR in the tap repo with label `pr-pull`.
 
@@ -54,7 +54,7 @@ The tap repo automation is part of the release, not an optional follow-up.
 If the app release workflow publishes `vX.Y.Z` successfully but fails in `update_brew_tap`, do not cut a second app release.
 
 1. Fix the workflow or tap updater script on `main` first if the failure is in release plumbing.
-2. Create the tap change manually from this repo using `scripts/update-brew-tap.sh` against a fresh clone of `respawn-app/homebrew-tap` on a branch like `chore/builder-cli-vX.Y.Z`.
+2. Create the tap change manually from this repo using `scripts/update-brew-tap.sh` against a fresh clone of `respawn-llc/homebrew-tap` on a branch like `chore/builder-cli-vX.Y.Z`.
 3. Open the tap PR with label `pr-pull`.
 4. Wait for `brew test-bot`, then `brew pr-pull`, and only then consider the release complete.
 
@@ -62,8 +62,8 @@ If the app release workflow publishes `vX.Y.Z` successfully but fails in `update
 
 Verify all of these before considering the release done:
 
-1. The GitHub release `vX.Y.Z` exists in `respawn-app/builder` and contains the expected assets plus `checksums.txt`.
-2. The tap PR in `respawn-app/homebrew-tap` is closed by the automation.
+1. The GitHub release `vX.Y.Z` exists in `respawn-llc/builder` and contains the expected assets plus `checksums.txt`.
+2. The tap PR in `respawn-llc/homebrew-tap` is closed by the automation.
 3. The formula on tap `master` has the new tag URL and bottle block.
 4. A standalone Unix install works and passes checksum verification when the release publishes `checksums.txt`:
 
