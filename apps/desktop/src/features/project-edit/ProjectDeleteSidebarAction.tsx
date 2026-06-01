@@ -1,14 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 
-import type { ProjectDeleteResponse } from "../../api";
 import { errorMessage } from "../../api/errors";
-import { clearLastProjectRouteForProject } from "../../app/lastProjectRoute";
-import { useAppNavigation } from "../../app/navigation";
 import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
-import { useSidebar } from "../../app/sidebarContext";
 import { useAppServices } from "../../app/useAppServices";
 import { useStatusController } from "../../app/useStatusController";
 import { Button } from "../../ui";
@@ -17,19 +13,16 @@ import {
   projectDeleteConfirmationWindowOptions,
   type ProjectDeleteConfirmationTarget,
 } from "./ProjectDeleteConfirmation";
-import { useProjectDelete, useProjectDeleteConfirmedEvents } from "./useProjectEditData";
+import { useProjectDeleteController } from "./ProjectDeleteController";
 
 export function ProjectDeleteSidebarAction({ projectID }: Readonly<{ projectID: string }>) {
   const { t } = useTranslation();
   const { api, nativeBridge } = useAppServices();
-  const { closeSidebar } = useSidebar();
-  const navigation = useAppNavigation();
   const { push } = useStatusController();
   const connection = useConnectionSnapshot();
-  const deleteMutation = useProjectDelete(projectID);
   const [previewing, setPreviewing] = useState(false);
-  const pendingTargetsRef = useRef(new Map<string, ProjectDeleteConfirmationTarget>());
-  const disabled = connection.phase !== "connected" || previewing || deleteMutation.isPending;
+  const deleteController = useProjectDeleteController();
+  const disabled = connection.phase !== "connected" || previewing || deleteController.deleting;
 
   const pushDeleteToast = useCallback(
     (id: string, tone: "info" | "success" | "danger", body: string, title = t("projectEdit.deleteTitle")) => {
@@ -38,78 +31,27 @@ export function ProjectDeleteSidebarAction({ projectID }: Readonly<{ projectID: 
     [push, t],
   );
 
-  const completeDelete = useCallback(
-    async (target: ProjectDeleteConfirmationTarget, close?: () => void): Promise<void> => {
-      try {
-        const response = await deleteMutation.mutateAsync(target.impact);
-        if (!response.deleted) {
-          pushDeleteToast(
-            "project-delete-blocked",
-            "danger",
-            blockerMessage(response) || t("projectEdit.deleteBlocked"),
-            t("projectEdit.deleteBlocked"),
-          );
-          return;
-        }
-        pendingTargetsRef.current.delete(target.requestID);
-        close?.();
-        clearLastProjectRouteForProject(projectID);
-        closeSidebar("closed");
-        await navigation.openHome();
-        pushDeleteToast("project-delete-deleted", "success", t("projectEdit.deleteDeleted"));
-        if (response.cleanupWarnings.length > 0) {
-          pushDeleteToast(
-            "project-delete-cleanup-warnings",
-            "info",
-            response.cleanupWarnings.map((warning) => warning.message).join("\n"),
-            t("projectEdit.deleteWarnings"),
-          );
-        }
-      } catch (error) {
-        pushDeleteToast("project-delete-error", "danger", errorMessage(error));
-      }
-    },
-    [closeSidebar, deleteMutation, navigation, projectID, pushDeleteToast, t],
-  );
-
   const confirmationDialog = useNativeDialogFallback<ProjectDeleteConfirmationTarget>({
     errorNoticeID: "project-delete-window-error",
     errorTitle: t("projectEdit.deleteWindowError"),
     nativeAvailable: nativeBridge.capabilities.dialogWindows,
     openNative: async (target) => {
-      pendingTargetsRef.current.set(target.requestID, target);
+      deleteController.registerNativeTarget(target);
       await nativeBridge.dialogs.openWindow(
         projectDeleteConfirmationWindowOptions(target, t("projectEdit.deleteTitle")),
       );
     },
     renderFallback: (target, close) => (
       <ProjectDeleteFallbackDialog
-        disabled={deleteMutation.isPending}
+        disabled={deleteController.deleting}
         onCancel={close}
         onConfirm={(nextTarget) => {
-          void completeDelete(nextTarget, close);
+          void deleteController.completeDelete(nextTarget, close);
         }}
         target={target}
       />
     ),
   });
-
-  const handleConfirmed = useCallback(
-    (confirmation: Readonly<{ requestID: string; projectID: string }>) => {
-      if (confirmation.projectID !== projectID) {
-        return;
-      }
-      const target = pendingTargetsRef.current.get(confirmation.requestID);
-      if (target === undefined) {
-        pushDeleteToast("project-delete-confirmation-expired", "danger", t("projectEdit.deleteExpired"));
-        return;
-      }
-      void completeDelete(target);
-    },
-    [completeDelete, projectID, pushDeleteToast, t],
-  );
-
-  useProjectDeleteConfirmedEvents(nativeBridge, handleConfirmed);
 
   const requestDelete = useCallback(async (): Promise<void> => {
     if (disabled) {
@@ -118,7 +60,7 @@ export function ProjectDeleteSidebarAction({ projectID }: Readonly<{ projectID: 
     setPreviewing(true);
     try {
       const impact = await api.previewProjectDelete(projectID);
-      if (impact.blockers.length > 0) {
+      if (impact.blockers.length > 0 && !impact.resumeRequired) {
         pushDeleteToast(
           "project-delete-preview-blocked",
           "danger",
@@ -153,13 +95,6 @@ export function ProjectDeleteSidebarAction({ projectID }: Readonly<{ projectID: 
       </Button>
     </>
   );
-}
-
-function blockerMessage(response: ProjectDeleteResponse): string {
-  if (response.blockers.length > 0) {
-    return response.blockers.map((blocker) => blocker.message).join("\n");
-  }
-  return response.impact.blockers.map((blocker) => blocker.message).join("\n");
 }
 
 function createRequestID(): string {

@@ -69,16 +69,21 @@ export function useProjectWorkspaceUnlink(projectID: string) {
 }
 
 export function useProjectDelete(projectID: string) {
+  return useProjectDeleteMutation(projectID);
+}
+
+export function useProjectDeleteMutation(projectID = "") {
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (impact: ProjectDeleteImpact) => api.deleteProject(impact, impact.resumeRequired),
     onSuccess: async (response) => {
+      const targetProjectID = response.impact.projectID || projectID;
       if (response.deleted) {
-        await invalidateProjectDeleteQueries(queryClient, projectID);
+        await invalidateProjectDeleteQueries(queryClient, targetProjectID);
         return;
       }
-      await invalidateProjectEditQueries(queryClient, projectID);
+      await invalidateProjectEditQueries(queryClient, targetProjectID);
     },
   });
 }

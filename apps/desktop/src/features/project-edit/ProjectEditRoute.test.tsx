@@ -224,7 +224,7 @@ describe("ProjectEditRoute", () => {
     });
     const requestID = opened[0]?.params.requestID;
     expect(typeof requestID).toBe("string");
-    const confirmHandler = confirmHandlers[0];
+    const confirmHandler = confirmHandlers.at(-1);
     expect(confirmHandler).toBeDefined();
     if (confirmHandler === undefined || typeof requestID !== "string") {
       throw new Error("project delete confirmation handler was not registered");
@@ -239,6 +239,134 @@ describe("ProjectEditRoute", () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole("complementary", { name: "Project" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("resumes project delete when preview reports an active delete job blocker", async () => {
+    const services = createTestServices([
+      {
+        method: "server.readiness.get",
+        result: startupRoutes[0]?.result,
+      },
+      {
+        method: "project.home.list",
+        result: {
+          projects: [projectSummary],
+          next_page_token: "",
+          generated_at_unix_ms: 1,
+        },
+      },
+      globalAttentionRoute,
+      { method: "project.edit.get", result: projectEditResponse },
+      {
+        method: "project.deletePreview",
+        result: {
+          impact: {
+            ...projectDeleteImpact,
+            delete_job_state: "active",
+            resume_required: true,
+            blockers: [
+              {
+                code: "deletion_in_progress",
+                message: "A project deletion is already in progress.",
+                count: 1,
+              },
+            ],
+          },
+        },
+      },
+      {
+        method: "project.delete",
+        result: {
+          deleted: true,
+          impact: { ...projectDeleteImpact, delete_job_state: "active", resume_required: true },
+          blockers: [],
+          cleanup_warnings: [],
+        },
+      },
+    ]);
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
+    const sidebar = await screen.findByRole("complementary", { name: "Project" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete project" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete project?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume deletion" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "project.delete",
+        params: { ...projectDeleteRequestParams, resume: true },
+      });
+    });
+  });
+
+  it("handles native project delete confirmation after the Project sidebar closes", async () => {
+    const opened: NativeDialogWindowOptions[] = [];
+    const confirmHandlers: ((confirmation: { requestID: string; projectID: string }) => void)[] = [];
+    const services = createTestServices(
+      [
+        {
+          method: "server.readiness.get",
+          result: startupRoutes[0]?.result,
+        },
+        {
+          method: "project.home.list",
+          result: {
+            projects: [projectSummary],
+            next_page_token: "",
+            generated_at_unix_ms: 1,
+          },
+        },
+        globalAttentionRoute,
+        { method: "project.edit.get", result: projectEditResponse },
+        {
+          method: "project.deletePreview",
+          result: { impact: projectDeleteImpact },
+        },
+        {
+          method: "project.delete",
+          result: {
+            deleted: true,
+            impact: projectDeleteImpact,
+            blockers: [],
+            cleanup_warnings: [],
+          },
+        },
+      ],
+      projectDeleteNativeDialogBridge(opened, (handler) => {
+        confirmHandlers.push(handler);
+      }),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
+    const sidebar = await screen.findByRole("complementary", { name: "Project" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete project" }));
+
+    await waitFor(() => {
+      expect(opened).toHaveLength(1);
+    });
+    const requestID = opened[0]?.params.requestID;
+    const confirmHandler = confirmHandlers.at(-1);
+    if (confirmHandler === undefined || typeof requestID !== "string") {
+      throw new Error("project delete confirmation handler was not registered");
+    }
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("complementary", { name: "Project" })).not.toBeInTheDocument();
+    });
+    confirmHandler({ projectID: "project-1", requestID });
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "project.delete",
+        params: projectDeleteRequestParams,
+      });
     });
   });
 
