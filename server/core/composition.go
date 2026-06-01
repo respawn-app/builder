@@ -16,6 +16,8 @@ import (
 	"builder/server/metadata"
 	"builder/server/processoutput"
 	"builder/server/processview"
+	"builder/server/projectdelete"
+	"builder/server/projectgate"
 	"builder/server/projectview"
 	"builder/server/promptactivity"
 	"builder/server/promptcontrol"
@@ -79,6 +81,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 	storeOptions := metadataStore.AuthoritativeSessionStoreOptions()
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
+	projectGate := projectgate.New()
 	projectService, err := projectview.NewMetadataService(metadataStore, "")
 	if err != nil {
 		_ = rootLease.Close()
@@ -90,6 +93,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
 	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...).
+		WithProjectSideEffectGate(projectGate).
 		WithGeneratedRecoveredWarningProvider(func() (string, bool, error) {
 			nonEmpty, err := generated.RecoveredRootNonEmpty()
 			if err != nil {
@@ -104,13 +108,14 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	worktreeService := worktree.NewService(metadataStore, nil, runtimeRegistry, sessionRuntimeService, runtimeSupport.Background, runtimeControlService, worktree.ServiceOptions{BaseDir: cfg.Settings.Worktrees.BaseDir, SetupScript: cfg.Settings.Worktrees.SetupScript})
-	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings, rpccontract.AllowedPreAuthMethods())
 	authStatusService := authstatus.NewService(authSupport.AuthManager, cfg.Settings)
 	serverStatusService := serverstatus.NewService(authSupport.AuthManager, cfg)
 	updateStatusService := updatestatus.NewService(buildinfo.Version)
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode).WithUpdateStatusProvider(updateStatusService)
-	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
+	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).
+		WithControllerLeaseVerifier(sessionRuntimeService).
+		WithProjectDeleteGuard(metadataStore, projectGate)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	var workflowRuntimeStarter *workflowrunner.Starter
 	var workflowScheduler *workflowscheduler.Service
@@ -138,7 +143,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: view: %w", err)
 	}
-	workflowRuntimeStarter, err = workflowrunner.NewStarter(cfg, metadataStore, workflowStore, authSupport.AuthManager, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, workflowrunner.StarterOptions{Worktrees: taskWorktreeEnsurer{service: worktreeService}})
+	workflowRuntimeStarter, err = workflowrunner.NewStarter(cfg, metadataStore, workflowStore, authSupport.AuthManager, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, workflowrunner.StarterOptions{Worktrees: taskWorktreeEnsurer{service: worktreeService}, ProjectGate: projectGate})
 	if err != nil {
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: runtime starter: %w", err)
@@ -154,6 +159,13 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: service: %w", err)
 	}
+	projectDeleteService, err := projectdelete.New(metadataStore, projectGate, projectdelete.WithRuntimeRegistry(runtimeRegistry), projectdelete.WithScheduler(workflowScheduler), projectdelete.WithProcesses(runtimeSupport.Background))
+	if err != nil {
+		cleanupNewFailure()
+		return nil, fmt.Errorf("projects bundle: delete service: %w", err)
+	}
+	projectService.WithProjectDeleteService(projectDeleteService)
+	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	core := &Core{bundles: composeBundles(bundleCompositionInput{
 		cfg:                     cfg,
 		containerDir:            containerDir,
@@ -164,6 +176,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		sessionStoreRegistry:    sessionStoreRegistry,
 		runtimeRegistry:         runtimeRegistry,
 		projectViews:            projectViews,
+		projectGate:             projectGate,
 		authBootstrapService:    authBootstrapService,
 		authStatusService:       authStatusService,
 		askService:              askService,
@@ -191,21 +204,29 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 			return nil, fmt.Errorf("projects bundle: workspace binding: %w", err)
 		}
 		if err == nil {
-			core.bundles.Projects.projectID = binding.ProjectID
-			core.bundles.Projects.containerDir = config.ProjectSessionsRoot(cfg, binding.ProjectID)
-			if err := os.MkdirAll(core.bundles.Projects.containerDir, 0o755); err != nil {
-				_ = core.Close()
-				return nil, fmt.Errorf("projects bundle: sessions root: %w", err)
-			}
-			core.bundles.Sessions.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+			deleteImpact, err := metadataStore.GetProjectDeleteImpact(context.Background(), binding.ProjectID)
 			if err != nil {
 				_ = core.Close()
-				return nil, fmt.Errorf("sessions bundle: session launch client: %w", err)
+				return nil, fmt.Errorf("projects bundle: delete state: %w", err)
 			}
-			core.bundles.Sessions.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
-			if err != nil {
-				_ = core.Close()
-				return nil, fmt.Errorf("sessions bundle: run prompt client: %w", err)
+			if strings.TrimSpace(deleteImpact.DeleteJobState) == "" {
+				core.bundles.Projects.projectID = binding.ProjectID
+				projectDeleteService.SetAttachedProjectID(binding.ProjectID)
+				core.bundles.Projects.containerDir = config.ProjectSessionsRoot(cfg, binding.ProjectID)
+				if err := os.MkdirAll(core.bundles.Projects.containerDir, 0o755); err != nil {
+					_ = core.Close()
+					return nil, fmt.Errorf("projects bundle: sessions root: %w", err)
+				}
+				core.bundles.Sessions.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+				if err != nil {
+					_ = core.Close()
+					return nil, fmt.Errorf("sessions bundle: session launch client: %w", err)
+				}
+				core.bundles.Sessions.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+				if err != nil {
+					_ = core.Close()
+					return nil, fmt.Errorf("sessions bundle: run prompt client: %w", err)
+				}
 			}
 		}
 	}

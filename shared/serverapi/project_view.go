@@ -178,6 +178,79 @@ type ProjectWorkspaceUnlinkBlocker struct {
 	Count   int    `json:"count,omitempty"`
 }
 
+type ProjectDeletePreviewRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+type ProjectDeletePreviewResponse struct {
+	Impact ProjectDeleteImpact `json:"impact"`
+}
+
+type ProjectDeleteRequest struct {
+	ProjectID                    string `json:"project_id"`
+	ImpactToken                  string `json:"impact_token"`
+	ExpectedWorkspaceCount       int    `json:"expected_workspace_count"`
+	ExpectedWorkflowLinkCount    int    `json:"expected_workflow_link_count"`
+	ExpectedTaskCount            int    `json:"expected_task_count"`
+	ExpectedTerminalTaskCount    int    `json:"expected_terminal_task_count"`
+	ExpectedNonTerminalTaskCount int    `json:"expected_non_terminal_task_count"`
+	ExpectedSessionCount         int    `json:"expected_session_count"`
+	ExpectedSessionArtifactCount int    `json:"expected_session_artifact_count"`
+	Resume                       bool   `json:"resume,omitempty"`
+}
+
+type ProjectDeleteResponse struct {
+	Deleted         bool                   `json:"deleted"`
+	Impact          ProjectDeleteImpact    `json:"impact"`
+	Blockers        []ProjectDeleteBlocker `json:"blockers,omitempty"`
+	CleanupWarnings []ProjectDeleteWarning `json:"cleanup_warnings,omitempty"`
+}
+
+type ProjectDeleteImpact struct {
+	ProjectID                     string                 `json:"project_id"`
+	ProjectKey                    string                 `json:"project_key"`
+	DisplayName                   string                 `json:"display_name"`
+	WorkspaceCount                int                    `json:"workspace_count"`
+	WorkflowLinkCount             int                    `json:"workflow_link_count"`
+	TaskCount                     int                    `json:"task_count"`
+	TerminalTaskCount             int                    `json:"terminal_task_count"`
+	NonTerminalTaskCount          int                    `json:"non_terminal_task_count"`
+	SessionCount                  int                    `json:"session_count"`
+	SessionArtifactCount          int                    `json:"session_artifact_count"`
+	ActiveSessionCount            int                    `json:"active_session_count"`
+	ActiveNodePlacementCount      int                    `json:"active_node_placement_count"`
+	PendingApprovalCount          int                    `json:"pending_approval_count"`
+	WaitingQuestionCount          int                    `json:"waiting_question_count"`
+	ActiveRunCount                int                    `json:"active_run_count"`
+	RunnableRunCount              int                    `json:"runnable_run_count"`
+	CrossProjectRunSessionCount   int                    `json:"cross_project_run_session_count"`
+	LiveRuntimeSessionCount       int                    `json:"live_runtime_session_count"`
+	RunningBackgroundProcessCount int                    `json:"running_background_process_count"`
+	QueuedWorkCount               int                    `json:"queued_work_count"`
+	SchedulerReservationCount     int                    `json:"scheduler_reservation_count"`
+	ImpactToken                   string                 `json:"impact_token"`
+	DeleteJobState                string                 `json:"delete_job_state,omitempty"`
+	ResumeRequired                bool                   `json:"resume_required,omitempty"`
+	PendingArtifactCount          int                    `json:"pending_artifact_count"`
+	CleanedArtifactCount          int                    `json:"cleaned_artifact_count"`
+	MissingArtifactCount          int                    `json:"missing_artifact_count"`
+	FailedArtifactCount           int                    `json:"failed_artifact_count"`
+	SkippedNotBuilderOwnedCount   int                    `json:"skipped_not_builder_owned_count"`
+	Blockers                      []ProjectDeleteBlocker `json:"blockers,omitempty"`
+}
+
+type ProjectDeleteBlocker struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Count   int    `json:"count,omitempty"`
+}
+
+type ProjectDeleteWarning struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
 type ProjectAttachWorkspaceRequest struct {
 	ProjectID     string `json:"project_id"`
 	WorkspaceRoot string `json:"workspace_root"`
@@ -267,6 +340,32 @@ func (r ProjectWorkspaceUnlinkRequest) Validate() error {
 	}
 	if strings.TrimSpace(r.WorkspaceID) == "" {
 		return errors.New("workspace_id is required")
+	}
+	return nil
+}
+
+func (r ProjectDeletePreviewRequest) Validate() error {
+	if strings.TrimSpace(r.ProjectID) == "" {
+		return errors.New("project_id is required")
+	}
+	return nil
+}
+
+func (r ProjectDeleteRequest) Validate() error {
+	if strings.TrimSpace(r.ProjectID) == "" {
+		return errors.New("project_id is required")
+	}
+	if !r.Resume && strings.TrimSpace(r.ImpactToken) == "" {
+		return errors.New("impact_token is required")
+	}
+	if r.ExpectedWorkspaceCount < 0 ||
+		r.ExpectedWorkflowLinkCount < 0 ||
+		r.ExpectedTaskCount < 0 ||
+		r.ExpectedTerminalTaskCount < 0 ||
+		r.ExpectedNonTerminalTaskCount < 0 ||
+		r.ExpectedSessionCount < 0 ||
+		r.ExpectedSessionArtifactCount < 0 {
+		return errors.New("expected delete counts must be non-negative")
 	}
 	return nil
 }

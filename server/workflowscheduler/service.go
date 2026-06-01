@@ -188,6 +188,19 @@ func (s *Service) ActiveCount() int {
 	return len(s.active)
 }
 
+func (s *Service) ActiveRequests() []StartRunRequest {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]StartRunRequest, 0, len(s.active))
+	for _, req := range s.active {
+		out = append(out, req)
+	}
+	return out
+}
+
 func (s *Service) RuntimeFinished(runID workflow.RunID, generation int64) {
 	s.mu.Lock()
 	current, ok := s.active[runID]

@@ -7,7 +7,13 @@ import { useAppNavigation } from "../../app/navigation";
 import { useAppServices } from "../../app/useAppServices";
 import { HomeListCard } from "../../ui";
 
-export function ProjectRow({ project }: Readonly<{ project: ProjectSummary }>) {
+export function ProjectRow({
+  onEdit,
+  project,
+}: Readonly<{
+  onEdit: (projectID: string) => void;
+  project: ProjectSummary;
+}>) {
   const navigation = useAppNavigation();
   const { homePath, nativeBridge } = useAppServices();
   const editLabel = useProjectEditLabel(project.name);
@@ -24,7 +30,7 @@ export function ProjectRow({ project }: Readonly<{ project: ProjectSummary }>) {
           aria-label={editLabel}
           className="absolute top-[var(--space-3)] right-[var(--space-3)] grid h-9 w-9 place-items-center rounded-full border border-[var(--color-outline)] bg-[var(--color-island-1)] text-[var(--color-on-island)]"
           onClick={() => {
-            void navigation.openProjectEdit(project.id);
+            onEdit(project.id);
           }}
           type="button"
         >

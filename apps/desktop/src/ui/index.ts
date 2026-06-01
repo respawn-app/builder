@@ -1,12 +1,12 @@
 export { Badge } from "./Badge";
 export type { BadgeTone } from "./Badge";
 export { Button } from "./Button";
-export type { ButtonVariant } from "./Button";
+export type { ButtonSize, ButtonVariant } from "./Button";
 export { DisabledInteractionGuard } from "./DisabledInteractionGuard";
 export type { DisabledInteractionGuardProps } from "./DisabledInteractionGuard";
 export { Dialog } from "./Dialog";
 export { TextArea, TextInput } from "./Field";
-export { fieldLabelClassName } from "./fieldStyles";
+export { fieldControlHeightCssValue, fieldLabelClassName } from "./fieldStyles";
 export { identifierInputAttributes } from "./inputAttributes";
 export { SelectField } from "./SelectField";
 export type { SelectFieldOption, SelectFieldProps } from "./SelectField";

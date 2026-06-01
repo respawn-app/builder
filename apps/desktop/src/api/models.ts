@@ -87,6 +87,58 @@ export type WorkspaceUnlinkResponse = Readonly<{
   project: ProjectSummary | null;
 }>;
 
+export type ProjectDeleteBlocker = Readonly<{
+  code: string;
+  message: string;
+  count: number;
+}>;
+
+export type ProjectDeleteWarning = Readonly<{
+  code: string;
+  message: string;
+  sessionID: string;
+}>;
+
+export type ProjectDeleteImpact = Readonly<{
+  projectID: string;
+  projectKey: string;
+  displayName: string;
+  workspaceCount: number;
+  workflowLinkCount: number;
+  taskCount: number;
+  terminalTaskCount: number;
+  nonTerminalTaskCount: number;
+  sessionCount: number;
+  sessionArtifactCount: number;
+  activeSessionCount: number;
+  activeNodePlacementCount: number;
+  pendingApprovalCount: number;
+  waitingQuestionCount: number;
+  activeRunCount: number;
+  runnableRunCount: number;
+  crossProjectRunSessionCount: number;
+  liveRuntimeSessionCount: number;
+  runningBackgroundProcessCount: number;
+  queuedWorkCount: number;
+  schedulerReservationCount: number;
+  impactToken: string;
+  deleteJobState: string;
+  resumeRequired: boolean;
+  pendingArtifactCount: number;
+  cleanedArtifactCount: number;
+  missingArtifactCount: number;
+  failedArtifactCount: number;
+  skippedNotBuilderOwnedCount: number;
+  blockers: readonly ProjectDeleteBlocker[];
+}>;
+
+export type ProjectDeleteResponse = Readonly<{
+  deleted: boolean;
+  impact: ProjectDeleteImpact;
+  blockers: readonly ProjectDeleteBlocker[];
+  cleanupWarnings: readonly ProjectDeleteWarning[];
+}>;
+
 export type ProjectBinding = Readonly<{
   projectID: string;
   projectKey: string;

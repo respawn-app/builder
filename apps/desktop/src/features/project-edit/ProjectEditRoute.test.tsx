@@ -5,18 +5,20 @@ import {
   type NativeDirectorySelection,
   type NativeDialogWindowOptions,
 } from "@builder/desktop-native-bridge";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import type { JsonValue } from "../../api/json";
 import { App } from "../../App";
+import { AppProviders } from "../../app/AppProviders";
 import { createTestServices, startupRoutes } from "../../testSupport/appServices";
+import { ProjectEditRoute } from "./ProjectEditRoute";
 
 const originalHistoryLengthDescriptor = Object.getOwnPropertyDescriptor(window.history, "length");
 
 describe("ProjectEditRoute", () => {
   beforeEach(() => {
-    window.history.replaceState(null, "", "/projects/project-1/edit");
+    window.history.replaceState(null, "", "/");
   });
 
   afterEach(() => {
@@ -36,18 +38,18 @@ describe("ProjectEditRoute", () => {
       { method: "project.defaultWorkspace.set", result: { project: projectSummary } },
     ]);
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     await screen.findByRole("heading", { name: "Workspaces" });
-    expect(screen.getByTestId("route-transition-frame")).toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("project-edit-route")).not.toHaveClass("island-glass");
     expect(screen.getByDisplayValue("PROJ")).toBeDisabled();
     expect(screen.queryByLabelText("Default workspace")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: " Project " } });
     expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save name" })).toHaveClass(
-      "aspect-square",
-      "self-stretch",
+      "h-[var(--project-name-control-height)]",
+      "w-[var(--project-name-control-height)]",
       "rounded-full",
     );
 
@@ -79,7 +81,7 @@ describe("ProjectEditRoute", () => {
     expect(screen.getByRole("button", { name: "Unlink /tmp/project" }).className).not.toContain("hover:");
   });
 
-  it("uses Home pencil entry for edit route and shows duplicate attach info without mutation", async () => {
+  it("opens project edit as a Home sidebar destination and shows duplicate attach info without mutation", async () => {
     window.history.replaceState(null, "", "/");
     const services = createTestServices(
       [
@@ -104,13 +106,222 @@ describe("ProjectEditRoute", () => {
     render(<App services={services} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
-    await screen.findByRole("heading", { name: "Workspaces" });
+    const sidebar = await screen.findByRole("complementary", { name: "Project" });
+    await within(sidebar).findByRole("heading", { name: "Workspaces" });
+    expect(window.location.pathname).toBe("/");
 
-    fireEvent.click(screen.getByRole("button", { name: "Attach workspace" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Attach workspace" }));
 
     await waitFor(() => {
       expect(services.transport.calls.some((call) => call.method === "project.attachWorkspace")).toBe(false);
     });
+  });
+
+  it("renders project delete in the Project sidebar header and shows preview blockers", async () => {
+    const services = createTestServices([
+      {
+        method: "server.readiness.get",
+        result: startupRoutes[0]?.result,
+      },
+      {
+        method: "project.home.list",
+        result: {
+          projects: [projectSummary],
+          next_page_token: "",
+          generated_at_unix_ms: 1,
+        },
+      },
+      globalAttentionRoute,
+      { method: "project.edit.get", result: projectEditResponse },
+      {
+        method: "project.deletePreview",
+        result: {
+          impact: {
+            ...projectDeleteImpact,
+            blockers: [
+              {
+                code: "active_runs",
+                message: "1 active run still belongs to this project.",
+                count: 1,
+              },
+            ],
+          },
+        },
+      },
+    ]);
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
+    const sidebar = await screen.findByRole("complementary", { name: "Project" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete project" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "project.deletePreview",
+        params: { project_id: "project-1" },
+      });
+    });
+    expect(within(sidebar).queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens project delete in a native confirmation window and deletes after confirmed event", async () => {
+    const opened: NativeDialogWindowOptions[] = [];
+    const confirmHandlers: ((confirmation: { requestID: string; projectID: string }) => void)[] = [];
+    const services = createTestServices(
+      [
+        {
+          method: "server.readiness.get",
+          result: startupRoutes[0]?.result,
+        },
+        {
+          method: "project.home.list",
+          result: {
+            projects: [projectSummary],
+            next_page_token: "",
+            generated_at_unix_ms: 1,
+          },
+        },
+        globalAttentionRoute,
+        { method: "project.edit.get", result: projectEditResponse },
+        {
+          method: "project.deletePreview",
+          result: { impact: projectDeleteImpact },
+        },
+        {
+          method: "project.delete",
+          result: {
+            deleted: true,
+            impact: projectDeleteImpact,
+            blockers: [],
+            cleanup_warnings: [],
+          },
+        },
+      ],
+      projectDeleteNativeDialogBridge(opened, (handler) => {
+        confirmHandlers.push(handler);
+      }),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
+    const sidebar = await screen.findByRole("complementary", { name: "Project" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete project" }));
+
+    await waitFor(() => {
+      expect(opened).toHaveLength(1);
+    });
+    expect(opened[0]).toMatchObject({
+      initialWidth: 460,
+      route: "/native-dialog/project-delete-confirm",
+      title: "Delete project?",
+      params: {
+        projectID: "project-1",
+        taskCount: "2",
+        sessionArtifactCount: "1",
+      },
+    });
+    const requestID = opened[0]?.params.requestID;
+    expect(typeof requestID).toBe("string");
+    const confirmHandler = confirmHandlers[0];
+    expect(confirmHandler).toBeDefined();
+    confirmHandler?.({ projectID: "project-1", requestID: requestID as string });
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "project.delete",
+        params: projectDeleteRequestParams,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("complementary", { name: "Project" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("falls back to inline project delete confirmation when native dialogs are unavailable", async () => {
+    const services = createTestServices([
+      {
+        method: "server.readiness.get",
+        result: startupRoutes[0]?.result,
+      },
+      {
+        method: "project.home.list",
+        result: {
+          projects: [projectSummary],
+          next_page_token: "",
+          generated_at_unix_ms: 1,
+        },
+      },
+      globalAttentionRoute,
+      { method: "project.edit.get", result: projectEditResponse },
+      {
+        method: "project.deletePreview",
+        result: { impact: projectDeleteImpact },
+      },
+      {
+        method: "project.delete",
+        result: {
+          deleted: true,
+          impact: projectDeleteImpact,
+          blockers: [],
+          cleanup_warnings: [],
+        },
+      },
+    ]);
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
+    const sidebar = await screen.findByRole("complementary", { name: "Project" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete project" }));
+
+    await screen.findByRole("dialog", { name: "Delete project?" });
+    expect(screen.getByText("Workspace files, folders, repos, and worktrees stay on disk.")).toBeInTheDocument();
+    expect(screen.getByText("Reusable workflow definitions stay available.")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Delete project?" })).getByRole("button", {
+      name: "Delete project",
+    }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "project.delete",
+        params: projectDeleteRequestParams,
+      });
+    });
+  });
+
+  it("keeps the native project delete dialog event-only", async () => {
+    window.history.pushState(
+      null,
+      "",
+      "/native-dialog/project-delete-confirm?projectID=project-1&projectKey=PROJ&displayName=Project&requestID=request-1&impactToken=token-1&workspaceCount=2&workflowLinkCount=1&taskCount=2&terminalTaskCount=2&nonTerminalTaskCount=0&sessionCount=1&sessionArtifactCount=1",
+    );
+    let closeCount = 0;
+    const confirmations: { requestID: string; projectID: string }[] = [];
+    const services = createTestServices(
+      [],
+      projectDeleteNativeWindowBridge(
+        (confirmation) => {
+          confirmations.push(confirmation);
+        },
+        () => {
+          closeCount += 1;
+        },
+      ),
+    );
+
+    render(<App services={services} />);
+
+    expect(await screen.findByRole("dialog", { name: "Delete project?" })).toBeInTheDocument();
+    expect(services.transport.calls.map((call) => call.method)).not.toContain("server.readiness.get");
+    fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
+
+    await waitFor(() => {
+      expect(closeCount).toBe(1);
+    });
+    expect(confirmations).toEqual([{ projectID: "project-1", requestID: "request-1" }]);
+    expect(services.transport.calls).toEqual([]);
   });
 
   it("attaches new workspace through native picker", async () => {
@@ -136,7 +347,7 @@ describe("ProjectEditRoute", () => {
       directoryBridge("/tmp/project-extra"),
     );
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     fireEvent.click(await screen.findByRole("button", { name: "Attach workspace" }));
 
@@ -169,7 +380,7 @@ describe("ProjectEditRoute", () => {
       },
     ]);
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     fireEvent.click(await screen.findByRole("button", { name: "Unlink /tmp/project-alt" }));
     await screen.findByRole("dialog");
@@ -190,7 +401,7 @@ describe("ProjectEditRoute", () => {
       nativeDialogBridge(opened),
     );
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     fireEvent.click(await screen.findByRole("button", { name: "Unlink /tmp/project-alt" }));
 
@@ -355,7 +566,7 @@ describe("ProjectEditRoute", () => {
       rejectingNativeDialogBridge(opened),
     );
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     fireEvent.click(await screen.findByRole("button", { name: "Unlink /tmp/project-alt" }));
 
@@ -395,7 +606,7 @@ describe("ProjectEditRoute", () => {
       },
     ]);
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     await waitFor(() => {
       expect(services.transport.calls).toContainEqual({
@@ -411,12 +622,20 @@ describe("ProjectEditRoute", () => {
       { method: "project.edit.get", result: projectEditResponse },
     ]);
 
-    render(<App services={services} />);
+    renderProjectEdit(services);
 
     await screen.findByRole("heading", { name: "Workspaces" });
     expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
   });
 });
+
+function renderProjectEdit(services: Parameters<typeof AppProviders>[0]["services"]): void {
+  render(
+    <AppProviders services={services}>
+      <ProjectEditRoute projectId="project-1" />
+    </AppProviders>,
+  );
+}
 
 function directoryBridge(path: string): NativeBridge {
   const base = createBrowserNativeBridge();
@@ -502,6 +721,54 @@ function nativeWindowCloseBridge(
   };
 }
 
+function projectDeleteNativeDialogBridge(
+  opened: NativeDialogWindowOptions[],
+  onListen: (handler: (confirmation: { requestID: string; projectID: string }) => void) => void,
+): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      dialogWindows: true,
+    },
+    dialogs: {
+      async openWindow(options): Promise<void> {
+        opened.push(options);
+      },
+    },
+    projectDelete: {
+      ...base.projectDelete,
+      async onDeleteConfirmed(handler): Promise<() => void> {
+        onListen(handler);
+        return () => undefined;
+      },
+    },
+  };
+}
+
+function projectDeleteNativeWindowBridge(
+  onConfirm: (confirmation: { requestID: string; projectID: string }) => void,
+  onClose: () => void,
+): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    projectDelete: {
+      ...base.projectDelete,
+      async confirmDelete(confirmation): Promise<void> {
+        onConfirm(confirmation);
+      },
+    },
+    window: {
+      ...base.window,
+      async closeCurrent(): Promise<void> {
+        onClose();
+      },
+    },
+  };
+}
+
 function dialogRect(width: number, height: number): DOMRect {
   return {
     bottom: height,
@@ -568,6 +835,52 @@ const projectSummary = {
   task_count: 0,
   attention_count: 0,
   workflow_count: 1,
+};
+
+const projectDeleteImpact = {
+  project_id: "project-1",
+  project_key: "PROJ",
+  display_name: "Project",
+  workspace_count: 2,
+  workflow_link_count: 1,
+  task_count: 2,
+  terminal_task_count: 2,
+  non_terminal_task_count: 0,
+  session_count: 1,
+  session_artifact_count: 1,
+  active_session_count: 0,
+  active_node_placement_count: 0,
+  pending_approval_count: 0,
+  waiting_question_count: 0,
+  active_run_count: 0,
+  runnable_run_count: 0,
+  cross_project_run_session_count: 0,
+  live_runtime_session_count: 0,
+  running_background_process_count: 0,
+  queued_work_count: 0,
+  scheduler_reservation_count: 0,
+  impact_token: "token-1",
+  delete_job_state: "",
+  resume_required: false,
+  pending_artifact_count: 0,
+  cleaned_artifact_count: 0,
+  missing_artifact_count: 0,
+  failed_artifact_count: 0,
+  skipped_not_builder_owned_count: 0,
+  blockers: [],
+};
+
+const projectDeleteRequestParams = {
+  project_id: "project-1",
+  impact_token: "token-1",
+  expected_workspace_count: 2,
+  expected_workflow_link_count: 1,
+  expected_task_count: 2,
+  expected_terminal_task_count: 2,
+  expected_non_terminal_task_count: 0,
+  expected_session_count: 1,
+  expected_session_artifact_count: 1,
+  resume: false,
 };
 
 const globalAttentionRoute = {

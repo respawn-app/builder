@@ -73,6 +73,17 @@ func (r *RuntimeRegistry) IsSessionRuntimeActive(sessionID string) bool {
 	return r.directory.Active(sessionID)
 }
 
+func (r *RuntimeRegistry) HasQueuedUserWork(sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	entry := r.directory.Entry(sessionID)
+	if entry == nil || entry.engine == nil {
+		return false
+	}
+	return entry.engine.HasQueuedUserWork()
+}
+
 func (r *RuntimeRegistry) PublishRuntimeEvent(sessionID string, evt runtime.Event) {
 	if r == nil {
 		return

@@ -26,6 +26,9 @@ type HeadlessBootstrap struct {
 	SessionLaunch   *sessionlaunch.Service
 	AuthManager     *auth.Manager
 	FastModeState   *runtime.FastModeState
+	ProjectID       string
+	ProjectGuard    ProjectDeleteGuard
+	ProjectGate     ProjectSideEffectGate
 	Background      *shelltool.Manager
 	RuntimeRegistry interface {
 		primaryrun.Gate
@@ -33,6 +36,14 @@ type HeadlessBootstrap struct {
 		PublishRuntimeEvent(sessionID string, evt runtime.Event)
 	}
 	BackgroundRouter runtimewire.BackgroundRouter
+}
+
+type ProjectDeleteGuard interface {
+	RequireNoProjectDeleteInProgress(ctx context.Context, projectID string) error
+}
+
+type ProjectSideEffectGate interface {
+	WithProject(ctx context.Context, projectID string, fn func(context.Context) error) error
 }
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
@@ -49,6 +60,26 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req 
 	if l.boot.SessionLaunch == nil {
 		return nil, errors.New("headless session launch service is required")
 	}
+	var runtimePlan *headlessRuntimePlan
+	var warnings []string
+	err := l.withProjectSideEffectGate(ctx, func(ctx context.Context) error {
+		if err := l.requireNoProjectDelete(ctx); err != nil {
+			return err
+		}
+		var err error
+		runtimePlan, warnings, err = l.prepareHeadlessPromptInsideGate(ctx, req, progress)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &headlessPromptRuntime{plan: runtimePlan, warnings: warnings}, nil
+}
+
+func (l *headlessPromptLauncher) prepareHeadlessPromptInsideGate(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (*headlessRuntimePlan, []string, error) {
+	if err := l.requireNoProjectDelete(ctx); err != nil {
+		return nil, nil, err
+	}
 	launchReq := serverapi.SessionPlanRequest{
 		ClientRequestID:   req.ClientRequestID,
 		Mode:              serverapi.SessionLaunchModeHeadless,
@@ -59,17 +90,34 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req 
 	}
 	result, err := l.boot.SessionLaunch.PlanLaunchSession(ctx, launchReq)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	plan := result.Plan
 	if plan.Store.Meta().Goal != nil {
-		return nil, fmt.Errorf("%w", ErrHeadlessGoalSession)
+		return nil, nil, fmt.Errorf("%w", ErrHeadlessGoalSession)
 	}
 	runtimePlan, err := l.prepareRuntime(plan, progress)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &headlessPromptRuntime{plan: runtimePlan, warnings: result.Warnings}, nil
+	return runtimePlan, result.Warnings, nil
+}
+
+func (l *headlessPromptLauncher) withProjectSideEffectGate(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
+		return errors.New("headless prompt callback is required")
+	}
+	if l == nil || l.boot.ProjectGate == nil || strings.TrimSpace(l.boot.ProjectID) == "" {
+		return fn(ctx)
+	}
+	return l.boot.ProjectGate.WithProject(ctx, l.boot.ProjectID, fn)
+}
+
+func (l *headlessPromptLauncher) requireNoProjectDelete(ctx context.Context) error {
+	if l == nil || l.boot.ProjectGuard == nil || strings.TrimSpace(l.boot.ProjectID) == "" {
+		return nil
+	}
+	return l.boot.ProjectGuard.RequireNoProjectDeleteInProgress(ctx, l.boot.ProjectID)
 }
 
 type headlessRuntimePlan struct {

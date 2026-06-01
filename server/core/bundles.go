@@ -11,6 +11,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/processoutput"
 	"builder/server/processview"
+	"builder/server/projectgate"
 	"builder/server/promptactivity"
 	"builder/server/promptcontrol"
 	"builder/server/registry"
@@ -72,6 +73,7 @@ type ProjectBundle struct {
 	containerDir string
 	projectID    string
 	projectViews client.ProjectViewClient
+	projectGate  *projectgate.Gate
 }
 
 type PromptBundle struct {
@@ -183,6 +185,7 @@ type bundleCompositionInput struct {
 	sessionStoreRegistry    *registry.SessionStoreRegistry
 	runtimeRegistry         *registry.RuntimeRegistry
 	projectViews            client.ProjectViewClient
+	projectGate             *projectgate.Gate
 	authBootstrapService    *authbootstrap.Service
 	authStatusService       *authstatus.Service
 	askService              *askview.Service
@@ -226,7 +229,7 @@ func composeBundles(in bundleCompositionInput) *Bundles {
 		},
 		Persistence: newPersistenceBundle(in.rootLease, in.metadataStore, in.sessionStoreRegistry),
 		Processes:   newProcessBundle(in.processService, in.processOutputService),
-		Projects:    newProjectBundle(in.cfg, in.containerDir, in.projectViews),
+		Projects:    newProjectBundle(in.cfg, in.containerDir, in.projectViews, in.projectGate),
 		Prompts:     newPromptBundle(in.askService, in.approvalService, in.promptControlService, in.promptActivityService),
 		Runtime:     newRuntimeBundle(in.runtimeSupport, in.runtimeRegistry, in.runtimeControlService, in.sessionRuntimeService, in.sessionActivityService),
 		Sessions:    newSessionBundle(in.sessionViewService, in.sessionLifecycleService),
@@ -261,11 +264,12 @@ func newProcessBundle(processService *processview.Service, processOutputService 
 	}
 }
 
-func newProjectBundle(cfg config.App, containerDir string, projectViews client.ProjectViewClient) *ProjectBundle {
+func newProjectBundle(cfg config.App, containerDir string, projectViews client.ProjectViewClient, projectGate *projectgate.Gate) *ProjectBundle {
 	return &ProjectBundle{
 		cfg:          cfg,
 		containerDir: containerDir,
 		projectViews: projectViews,
+		projectGate:  projectGate,
 	}
 }
 

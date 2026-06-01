@@ -3,9 +3,11 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 import { cx } from "./classes";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+export type ButtonSize = "default" | "icon";
 
 export type ButtonProps = Readonly<{
     children: ReactNode;
+    size?: ButtonSize;
     variant?: ButtonVariant;
 }> &
     ButtonHTMLAttributes<HTMLButtonElement>;
@@ -13,6 +15,7 @@ export type ButtonProps = Readonly<{
 export function Button({
     children,
     className,
+    size = "default",
     style,
     variant = "secondary",
     type = "button",
@@ -21,7 +24,8 @@ export function Button({
     return (
         <button
             className={cx(
-                "rounded-[var(--radius-m)] border border-[var(--button-border)] bg-[var(--button-bg)] px-[10px] py-[4px] text-[var(--button-color)] disabled:cursor-not-allowed disabled:opacity-55",
+                "border border-[var(--button-border)] bg-[var(--button-bg)] text-[var(--button-color)] disabled:cursor-not-allowed disabled:opacity-55",
+                buttonSizeClassNames[size],
                 className,
             )}
             style={{ ...buttonVariantStyles[variant], ...style }}
@@ -32,6 +36,11 @@ export function Button({
         </button>
     );
 }
+
+const buttonSizeClassNames = {
+    default: "rounded-[var(--radius-m)] px-[10px] py-[4px]",
+    icon: "grid h-9 w-9 shrink-0 place-items-center rounded-full p-0",
+} satisfies Record<ButtonSize, string>;
 
 type ButtonVariantStyle = CSSProperties & Record<"--button-bg" | "--button-border" | "--button-color", string>;
 

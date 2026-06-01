@@ -129,9 +129,9 @@
 
 ## Project Edit And Workspaces
 
-- Project edit is a full main-shell page route `/projects/$projectId/edit`.
-- It is not a native child window.
-- Back uses app/browser history when available; fallback is Home.
+- Project edit opens as a Home sidebar destination.
+- It is not a native child window and has no full-page project-edit route.
+- Closing the sidebar returns to the current Home surface.
 - Project key is read-only.
 - Project name is editable and validates like project creation: 1-80 visible chars, no edge whitespace, one line.
 - Project name and default workspace changes are saved explicitly.
@@ -149,6 +149,13 @@
 - Unlink must not cascade-delete session/task/worktree history.
 - Unlink is allowed when only terminal historical tasks reference the workspace and their history remains readable through durable snapshots.
 - Unlink confirmation is simple modal, no type-to-confirm, with copy explaining app-state effects, files stay on disk, completed history remains readable, and active work blocks unlink.
+- Project delete is available from the Project edit sidebar header as a destructive action with native confirmation when native dialogs are available.
+- Project deletion is server-backed and uses preview counts plus a confirmation token; the GUI never removes a project by local cache mutation alone.
+- Project deletion never deletes workspace files, workspace folders, user repositories, worktrees, or reusable workflow definitions.
+- Project deletion hard-deletes the project's Builder-owned metadata/history and Builder-owned session artifact directories under the persistence root.
+- Project deletion blocks active sessions, non-terminal tasks, pending approvals/questions, active/runnable runs, queued work, scheduler reservations, live runtime sessions, running background processes, and the actively attached project.
+- Project deletion cleanup is sequential, file-first, and resumable through the same delete action when a delete job already exists.
+- Deleting a project closes the edit sidebar, returns Home to the project list, and refreshes project/task/workflow/session caches.
 
 ## Workflow Board
 

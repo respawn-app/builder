@@ -11,6 +11,8 @@ import type {
   PendingAsk,
   ProjectWorkflowLink,
   ProjectBinding,
+  ProjectDeleteImpact,
+  ProjectDeleteResponse,
   ProjectEdit,
   ProjectMutationResponse,
   ProjectPage,
@@ -37,6 +39,8 @@ import type {
 import {
   bindingPlanSchema,
   projectCreateSchema,
+  projectDeletePreviewSchema,
+  projectDeleteResponseSchema,
   projectEditSchema,
   projectMutationResponseSchema,
   projectPageSchema,
@@ -178,6 +182,33 @@ export class BuilderApiClient {
       await this.transport.call("project.unlinkWorkspace", {
         project_id: projectID,
         workspace_id: workspaceID,
+      }),
+    );
+  }
+
+  async previewProjectDelete(projectID: string): Promise<ProjectDeleteImpact> {
+    return parse(
+      "project.deletePreview",
+      projectDeletePreviewSchema,
+      await this.transport.call("project.deletePreview", { project_id: projectID }),
+    );
+  }
+
+  async deleteProject(impact: ProjectDeleteImpact, resume = impact.resumeRequired): Promise<ProjectDeleteResponse> {
+    return parse(
+      "project.delete",
+      projectDeleteResponseSchema,
+      await this.transport.call("project.delete", {
+        project_id: impact.projectID,
+        impact_token: impact.impactToken,
+        expected_workspace_count: impact.workspaceCount,
+        expected_workflow_link_count: impact.workflowLinkCount,
+        expected_task_count: impact.taskCount,
+        expected_terminal_task_count: impact.terminalTaskCount,
+        expected_non_terminal_task_count: impact.nonTerminalTaskCount,
+        expected_session_count: impact.sessionCount,
+        expected_session_artifact_count: impact.sessionArtifactCount,
+        resume,
       }),
     );
   }

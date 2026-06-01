@@ -25,6 +25,8 @@ type Service struct {
 	authManager     *auth.Manager
 	controller      ControllerLeaseVerifier
 	storeOptions    []session.StoreOption
+	projectGuard    ProjectDeleteGuard
+	projectGate     ProjectSideEffectGate
 	drafts          *requestmemo.Memo[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse]
 	transitions     *requestmemo.Memo[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]
 }
@@ -45,6 +47,15 @@ type sessionStoreResolver interface {
 
 type ControllerLeaseVerifier interface {
 	RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error
+}
+
+type ProjectDeleteGuard interface {
+	ProjectIDForSession(ctx context.Context, sessionID string) (string, error)
+	RequireNoProjectDeleteInProgress(ctx context.Context, projectID string) error
+}
+
+type ProjectSideEffectGate interface {
+	WithProject(ctx context.Context, projectID string, fn func(context.Context) error) error
 }
 
 func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
@@ -129,6 +140,15 @@ func (s *Service) WithPersistenceRoot(root string) *Service {
 		return nil
 	}
 	s.persistenceRoot = strings.TrimSpace(root)
+	return s
+}
+
+func (s *Service) WithProjectDeleteGuard(guard ProjectDeleteGuard, gate ProjectSideEffectGate) *Service {
+	if s == nil {
+		return nil
+	}
+	s.projectGuard = guard
+	s.projectGate = gate
 	return s
 }
 
@@ -250,25 +270,37 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 		if err != nil {
 			return serverapi.SessionResolveTransitionResponse{}, err
 		}
+		projectID, err := s.projectIDForSession(ctx, req.SessionID)
+		if err != nil {
+			return serverapi.SessionResolveTransitionResponse{}, err
+		}
 		forkUserMessageIndex, resolveErr := s.resolveForkUserMessageIndex(req.Transition)
 		if resolveErr != nil {
 			return serverapi.SessionResolveTransitionResponse{}, resolveErr
 		}
-		resolved, err := serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
-			Store: store,
-			Transition: serverlifecycle.Transition{
-				Action:               req.Transition.Action,
-				InitialPrompt:        req.Transition.InitialPrompt,
-				InitialInput:         req.Transition.InitialInput,
-				TargetSessionID:      req.Transition.TargetSessionID,
-				ForkUserMessageIndex: forkUserMessageIndex,
-				ParentSessionID:      req.Transition.ParentSessionID,
-			},
+		var resolved serverlifecycle.Resolved
+		err = s.withProjectSideEffectGate(ctx, projectID, func(ctx context.Context) error {
+			if err := s.requireNoProjectDelete(ctx, projectID); err != nil {
+				return err
+			}
+			var err error
+			resolved, err = serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
+				Store: store,
+				Transition: serverlifecycle.Transition{
+					Action:               req.Transition.Action,
+					InitialPrompt:        req.Transition.InitialPrompt,
+					InitialInput:         req.Transition.InitialInput,
+					TargetSessionID:      req.Transition.TargetSessionID,
+					ForkUserMessageIndex: forkUserMessageIndex,
+					ParentSessionID:      req.Transition.ParentSessionID,
+				},
+			})
+			if err != nil {
+				return err
+			}
+			return s.preserveForkExecutionTarget(ctx, req.SessionID, resolved.NextSessionID)
 		})
 		if err != nil {
-			return serverapi.SessionResolveTransitionResponse{}, err
-		}
-		if err := s.preserveForkExecutionTarget(ctx, req.SessionID, resolved.NextSessionID); err != nil {
 			return serverapi.SessionResolveTransitionResponse{}, err
 		}
 		return serverapi.SessionResolveTransitionResponse{
@@ -301,6 +333,59 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 		ForceNewSession: resolved.ForceNewSession,
 		ShouldContinue:  resolved.ShouldContinue,
 	}, nil
+}
+
+func (s *Service) projectIDForSession(ctx context.Context, sessionID string) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	if s.projectGuard != nil {
+		return s.projectGuard.ProjectIDForSession(ctx, sessionID)
+	}
+	if strings.TrimSpace(s.persistenceRoot) == "" {
+		return "", nil
+	}
+	metadataStore, err := metadata.Open(s.persistenceRoot)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = metadataStore.Close() }()
+	projectID, err := metadataStore.ProjectIDForSession(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return projectID, err
+}
+
+func (s *Service) requireNoProjectDelete(ctx context.Context, projectID string) error {
+	if strings.TrimSpace(projectID) == "" {
+		return nil
+	}
+	if s == nil {
+		return nil
+	}
+	if s.projectGuard != nil {
+		return s.projectGuard.RequireNoProjectDeleteInProgress(ctx, projectID)
+	}
+	if strings.TrimSpace(s.persistenceRoot) == "" {
+		return nil
+	}
+	metadataStore, err := metadata.Open(s.persistenceRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = metadataStore.Close() }()
+	return metadataStore.RequireNoProjectDeleteInProgress(ctx, projectID)
+}
+
+func (s *Service) withProjectSideEffectGate(ctx context.Context, projectID string, fn func(context.Context) error) error {
+	if fn == nil {
+		return errors.New("session lifecycle callback is required")
+	}
+	if s == nil || s.projectGate == nil || strings.TrimSpace(projectID) == "" {
+		return fn(ctx)
+	}
+	return s.projectGate.WithProject(ctx, projectID, fn)
 }
 
 func (s *Service) preserveForkExecutionTarget(ctx context.Context, parentSessionID string, childSessionID string) error {

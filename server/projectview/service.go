@@ -16,8 +16,14 @@ import (
 )
 
 type Service struct {
-	metadata  *metadata.Store
-	projectID string
+	metadata      *metadata.Store
+	projectID     string
+	projectDelete projectDeleteService
+}
+
+type projectDeleteService interface {
+	PreviewProjectDelete(ctx context.Context, req serverapi.ProjectDeletePreviewRequest) (serverapi.ProjectDeletePreviewResponse, error)
+	DeleteProject(ctx context.Context, req serverapi.ProjectDeleteRequest) (serverapi.ProjectDeleteResponse, error)
 }
 
 const (
@@ -32,6 +38,13 @@ func NewMetadataService(metadataStore *metadata.Store, projectID string) (*Servi
 		return nil, errors.New("metadata store is required")
 	}
 	return &Service{metadata: metadataStore, projectID: strings.TrimSpace(projectID)}, nil
+}
+
+func (s *Service) WithProjectDeleteService(deleteService projectDeleteService) *Service {
+	if s != nil {
+		s.projectDelete = deleteService
+	}
+	return s
 }
 
 func (s *Service) ProjectID() string {
@@ -306,6 +319,32 @@ func (s *Service) UnlinkWorkspaceFromProject(ctx context.Context, req serverapi.
 		resp.Project = &projects[0]
 	}
 	return resp, nil
+}
+
+func (s *Service) PreviewProjectDelete(ctx context.Context, req serverapi.ProjectDeletePreviewRequest) (serverapi.ProjectDeletePreviewResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectDeletePreviewResponse{}, err
+	}
+	if s == nil || s.projectDelete == nil {
+		return serverapi.ProjectDeletePreviewResponse{}, errors.New("project delete service is required")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectDeletePreviewResponse{}, err
+	}
+	return s.projectDelete.PreviewProjectDelete(ctx, req)
+}
+
+func (s *Service) DeleteProject(ctx context.Context, req serverapi.ProjectDeleteRequest) (serverapi.ProjectDeleteResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectDeleteResponse{}, err
+	}
+	if s == nil || s.projectDelete == nil {
+		return serverapi.ProjectDeleteResponse{}, errors.New("project delete service is required")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectDeleteResponse{}, err
+	}
+	return s.projectDelete.DeleteProject(ctx, req)
 }
 
 func (s *Service) selectSingleAvailableWorkspace(ctx context.Context) (serverapi.ProjectWorkspacePlanSelected, bool, error) {

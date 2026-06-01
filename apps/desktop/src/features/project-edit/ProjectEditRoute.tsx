@@ -8,7 +8,6 @@ import { useAppServices } from "../../app/useAppServices";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
 import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useStatusController } from "../../app/useStatusController";
-import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { ErrorState, LoadingState, TextInput, VirtualizedInfiniteList } from "../../ui";
 import {
   ProjectNameField,
@@ -36,7 +35,6 @@ export function ProjectEditRoute({ projectId }: Readonly<{ projectId: string }>)
   const pages = query.data?.pages;
   const project = pages?.[0];
   const workspaces = useMemo(() => pages?.flatMap((page) => page.workspaces) ?? [], [pages]);
-  useWindowChromeTitle(project?.displayName ?? null);
 
   if (query.isPending) {
     return <LoadingState body={t("states.loading")} reveal={false} title={t("projectEdit.loadingTitle")} />;
@@ -208,7 +206,7 @@ function ProjectEditContent({
   return (
     <section
       aria-labelledby="workspaces-title"
-      className="island-glass h-full min-h-0 overflow-hidden rounded-[var(--radius-xl)]"
+      className="h-full min-h-0 overflow-hidden"
       data-testid="project-edit-route"
     >
       {unlinkDialog.fallback}

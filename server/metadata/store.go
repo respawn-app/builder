@@ -322,30 +322,35 @@ func (s *Store) UpsertWorktreeRecord(ctx context.Context, record WorktreeRecord)
 	if err != nil {
 		return err
 	}
-	if err := s.queries.UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{
-		ID:                strings.TrimSpace(record.ID),
-		WorkspaceID:       strings.TrimSpace(record.WorkspaceID),
-		CanonicalRootPath: canonicalRoot,
-		BuilderManaged:    boolToInt64(record.BuilderManaged),
-		CreatedBranch:     boolToInt64(record.CreatedBranch),
-		OriginSessionID:   strings.TrimSpace(record.OriginSessionID),
-		GitMetadataJson:   defaultJSONObject(record.GitMetadataJSON),
-		CreatedAtUnixMs:   createdAt.UnixMilli(),
-		UpdatedAtUnixMs:   updatedAt.UnixMilli(),
-	}); err != nil {
-		return fmt.Errorf("upsert worktree: %w", err)
-	}
-	return nil
+	return s.withWorkspaceOwnedWriteTx(ctx, strings.TrimSpace(record.WorkspaceID), func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		if err := tx.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{
+			ID:                strings.TrimSpace(record.ID),
+			WorkspaceID:       strings.TrimSpace(record.WorkspaceID),
+			CanonicalRootPath: canonicalRoot,
+			BuilderManaged:    boolToInt64(record.BuilderManaged),
+			CreatedBranch:     boolToInt64(record.CreatedBranch),
+			OriginSessionID:   strings.TrimSpace(record.OriginSessionID),
+			GitMetadataJson:   defaultJSONObject(record.GitMetadataJSON),
+			CreatedAtUnixMs:   createdAt.UnixMilli(),
+			UpdatedAtUnixMs:   updatedAt.UnixMilli(),
+		}); err != nil {
+			return fmt.Errorf("upsert worktree: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) DeleteWorktreeRecordByID(ctx context.Context, worktreeID string) error {
 	if s == nil || s.queries == nil {
 		return errors.New("metadata store is required")
 	}
-	if _, err := s.queries.DeleteWorktreeByID(ctx, strings.TrimSpace(worktreeID)); err != nil {
-		return fmt.Errorf("delete worktree by id: %w", err)
-	}
-	return nil
+	trimmedWorktreeID := strings.TrimSpace(worktreeID)
+	return s.withWorktreeOwnedWriteTx(ctx, trimmedWorktreeID, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		if _, err := tx.Queries().DeleteWorktreeByID(ctx, trimmedWorktreeID); err != nil {
+			return fmt.Errorf("delete worktree by id: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) UpdateSessionExecutionTargetByID(ctx context.Context, sessionID string, workspaceID string, worktreeID string, cwdRelpath string) error {
@@ -370,14 +375,16 @@ func (s *Store) UpdateSessionExecutionTargetByID(ctx context.Context, sessionID 
 		UpdatedAtUnixMs: time.Now().UTC().UnixMilli(),
 		SessionID:       strings.TrimSpace(sessionID),
 	}
-	rows, err := s.queries.UpdateSessionExecutionTargetByID(ctx, params)
-	if err != nil {
-		return fmt.Errorf("update session execution target: %w", err)
-	}
-	if rows == 0 {
-		return session.ErrSessionNotFound
-	}
-	return nil
+	return s.WithSessionOwnedWriteTx(ctx, strings.TrimSpace(sessionID), func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		rows, err := tx.Queries().UpdateSessionExecutionTargetByID(ctx, params)
+		if err != nil {
+			return fmt.Errorf("update session execution target: %w", err)
+		}
+		if rows == 0 {
+			return session.ErrSessionNotFound
+		}
+		return nil
+	})
 }
 
 // DeleteSessionRecordByID removes a session metadata row and dependent records.
@@ -385,10 +392,13 @@ func (s *Store) DeleteSessionRecordByID(ctx context.Context, sessionID string) e
 	if s == nil || s.db == nil {
 		return errors.New("metadata store is required")
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, strings.TrimSpace(sessionID)); err != nil {
-		return fmt.Errorf("delete session record: %w", err)
-	}
-	return nil
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	return s.WithSessionOwnedWriteTx(ctx, trimmedSessionID, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, trimmedSessionID); err != nil {
+			return fmt.Errorf("delete session record: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) ListSessionsTargetingWorktree(ctx context.Context, worktreeID string) ([]WorktreeSessionBlocker, error) {
@@ -504,27 +514,20 @@ func (s *Store) UpdateProjectDisplayName(ctx context.Context, projectID string, 
 		return errors.New("project id is required")
 	}
 	now := time.Now().UTC().UnixMilli()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin project display name tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	q := s.queries.WithTx(tx)
-	updated, err := q.SetProjectDisplayName(ctx, sqlitegen.SetProjectDisplayNameParams{
-		ProjectID:       trimmedProjectID,
-		DisplayName:     displayName,
-		UpdatedAtUnixMs: now,
+	return s.WithProjectOwnedWriteTx(ctx, []string{trimmedProjectID}, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		updated, err := tx.Queries().SetProjectDisplayName(ctx, sqlitegen.SetProjectDisplayNameParams{
+			ProjectID:       trimmedProjectID,
+			DisplayName:     displayName,
+			UpdatedAtUnixMs: now,
+		})
+		if err != nil {
+			return fmt.Errorf("set project display name: %w", err)
+		}
+		if updated == 0 {
+			return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
+		}
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("set project display name: %w", err)
-	}
-	if updated == 0 {
-		return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit project display name tx: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) SetProjectDefaultWorkspace(ctx context.Context, projectID string, workspaceID string) error {
@@ -549,28 +552,21 @@ func (s *Store) SetProjectDefaultWorkspace(ctx context.Context, projectID string
 	if strings.TrimSpace(workspace.ProjectID) != trimmedProjectID {
 		return fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin default workspace tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	q := s.queries.WithTx(tx)
 	now := time.Now().UTC().UnixMilli()
-	updatedProject, err := q.SetProjectPrimaryWorkspace(ctx, sqlitegen.SetProjectPrimaryWorkspaceParams{
-		WorkspaceID:     trimmedWorkspaceID,
-		UpdatedAtUnixMs: now,
-		ProjectID:       trimmedProjectID,
+	return s.WithProjectOwnedWriteTx(ctx, []string{trimmedProjectID}, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		updatedProject, err := tx.Queries().SetProjectPrimaryWorkspace(ctx, sqlitegen.SetProjectPrimaryWorkspaceParams{
+			WorkspaceID:     trimmedWorkspaceID,
+			UpdatedAtUnixMs: now,
+			ProjectID:       trimmedProjectID,
+		})
+		if err != nil {
+			return fmt.Errorf("set project primary workspace: %w", err)
+		}
+		if updatedProject == 0 {
+			return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
+		}
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("set project primary workspace: %w", err)
-	}
-	if updatedProject == 0 {
-		return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit default workspace tx: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) UnlinkProjectWorkspace(ctx context.Context, projectID string, workspaceID string) ([]serverapi.ProjectWorkspaceUnlinkBlocker, error) {
@@ -603,38 +599,40 @@ func (s *Store) UnlinkProjectWorkspace(ctx context.Context, projectID string, wo
 	if len(blockers) > 0 {
 		return blockers, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin workspace unlink tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	q := s.queries.WithTx(tx)
-	workspace, err = q.GetWorkspaceByID(ctx, trimmedWorkspaceID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
+	var resultBlockers []serverapi.ProjectWorkspaceUnlinkBlocker
+	err = s.WithProjectOwnedWriteTx(ctx, []string{trimmedProjectID}, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		q := tx.Queries()
+		workspace, err = q.GetWorkspaceByID(ctx, trimmedWorkspaceID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
+			}
+			return fmt.Errorf("get workspace by id: %w", err)
 		}
-		return nil, fmt.Errorf("get workspace by id: %w", err)
-	}
-	if strings.TrimSpace(workspace.ProjectID) != trimmedProjectID {
-		return nil, fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
-	}
-	blockers, err = workspaceUnlinkBlockersWithQueries(ctx, q, trimmedProjectID, workspace)
+		if strings.TrimSpace(workspace.ProjectID) != trimmedProjectID {
+			return fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
+		}
+		resultBlockers, err = workspaceUnlinkBlockersWithQueries(ctx, q, trimmedProjectID, workspace)
+		if err != nil {
+			return err
+		}
+		if len(resultBlockers) > 0 {
+			return nil
+		}
+		rows, err := q.DeleteWorkspaceBindingByID(ctx, sqlitegen.DeleteWorkspaceBindingByIDParams{ProjectID: trimmedProjectID, WorkspaceID: trimmedWorkspaceID})
+		if err != nil {
+			return fmt.Errorf("delete workspace binding: %w", err)
+		}
+		if rows == 0 {
+			return fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if len(blockers) > 0 {
-		return blockers, nil
-	}
-	rows, err := q.DeleteWorkspaceBindingByID(ctx, sqlitegen.DeleteWorkspaceBindingByIDParams{ProjectID: trimmedProjectID, WorkspaceID: trimmedWorkspaceID})
-	if err != nil {
-		return nil, fmt.Errorf("delete workspace binding: %w", err)
-	}
-	if rows == 0 {
-		return nil, fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit workspace unlink tx: %w", err)
+	if len(resultBlockers) > 0 {
+		return resultBlockers, nil
 	}
 	return nil, nil
 }
@@ -1559,12 +1557,17 @@ func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string) (Runti
 	if record.SessionID == "" {
 		return RuntimeLeaseRecord{}, errors.New("session id is required")
 	}
-	if err := s.queries.InsertRuntimeLease(ctx, sqlitegen.InsertRuntimeLeaseParams{
-		ID:              record.LeaseID,
-		SessionID:       record.SessionID,
-		CreatedAtUnixMs: record.CreatedAt.UnixMilli(),
+	if err := s.WithSessionOwnedWriteTx(ctx, record.SessionID, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		if err := tx.Queries().InsertRuntimeLease(ctx, sqlitegen.InsertRuntimeLeaseParams{
+			ID:              record.LeaseID,
+			SessionID:       record.SessionID,
+			CreatedAtUnixMs: record.CreatedAt.UnixMilli(),
+		}); err != nil {
+			return fmt.Errorf("insert runtime lease: %w", err)
+		}
+		return nil
 	}); err != nil {
-		return RuntimeLeaseRecord{}, fmt.Errorf("insert runtime lease: %w", err)
+		return RuntimeLeaseRecord{}, err
 	}
 	return record, nil
 }
@@ -1620,12 +1623,17 @@ func (s *Store) ReleaseRuntimeLease(ctx context.Context, sessionID string, lease
 		return record, nil
 	}
 	releasedAt := time.Now().UTC()
-	if err := s.queries.ReleaseRuntimeLease(ctx, sqlitegen.ReleaseRuntimeLeaseParams{
-		LeaseID:          trimmedLeaseID,
-		SessionID:        trimmedSessionID,
-		ReleasedAtUnixMs: releasedAt.UnixMilli(),
+	if err := s.WithSessionOwnedWriteTx(ctx, trimmedSessionID, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		if err := tx.Queries().ReleaseRuntimeLease(ctx, sqlitegen.ReleaseRuntimeLeaseParams{
+			LeaseID:          trimmedLeaseID,
+			SessionID:        trimmedSessionID,
+			ReleasedAtUnixMs: releasedAt.UnixMilli(),
+		}); err != nil {
+			return fmt.Errorf("release runtime lease: %w", err)
+		}
+		return nil
 	}); err != nil {
-		return RuntimeLeaseRecord{}, fmt.Errorf("release runtime lease: %w", err)
+		return RuntimeLeaseRecord{}, err
 	}
 	return s.getRuntimeLeaseByID(ctx, trimmedLeaseID)
 }
@@ -1717,28 +1725,30 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 	if err != nil {
 		return err
 	}
-	return s.queries.UpsertSession(ctx, sqlitegen.UpsertSessionParams{
-		ID:                 snapshot.Meta.SessionID,
-		ProjectID:          binding.ProjectID,
-		WorkspaceID:        sql.NullString{String: binding.WorkspaceID, Valid: strings.TrimSpace(binding.WorkspaceID) != ""},
-		WorktreeID:         worktreeID,
-		ArtifactRelpath:    relpath,
-		Name:               snapshot.Meta.Name,
-		FirstPromptPreview: snapshot.Meta.FirstPromptPreview,
-		InputDraft:         snapshot.Meta.InputDraft,
-		ParentSessionID:    snapshot.Meta.ParentSessionID,
-		CreatedAtUnixMs:    snapshot.Meta.CreatedAt.UTC().UnixMilli(),
-		UpdatedAtUnixMs:    snapshot.Meta.UpdatedAt.UTC().UnixMilli(),
-		LastSequence:       snapshot.Meta.LastSequence,
-		ModelRequestCount:  snapshot.Meta.ModelRequestCount,
-		InFlightStep:       boolToInt64(snapshot.Meta.InFlightStep),
-		AgentsInjected:     boolToInt64(snapshot.Meta.AgentsInjected),
-		LaunchVisible:      boolToInt64(sessionLaunchVisible(snapshot.Meta)),
-		CwdRelpath:         cwdRelpath,
-		ContinuationJson:   continuationJSON,
-		LockedJson:         lockedJSON,
-		UsageStateJson:     usageStateJSON,
-		MetadataJson:       metadataJSON,
+	return s.WithProjectOwnedWriteTx(ctx, []string{binding.ProjectID}, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		return tx.Queries().UpsertSession(ctx, sqlitegen.UpsertSessionParams{
+			ID:                 snapshot.Meta.SessionID,
+			ProjectID:          binding.ProjectID,
+			WorkspaceID:        sql.NullString{String: binding.WorkspaceID, Valid: strings.TrimSpace(binding.WorkspaceID) != ""},
+			WorktreeID:         worktreeID,
+			ArtifactRelpath:    relpath,
+			Name:               snapshot.Meta.Name,
+			FirstPromptPreview: snapshot.Meta.FirstPromptPreview,
+			InputDraft:         snapshot.Meta.InputDraft,
+			ParentSessionID:    snapshot.Meta.ParentSessionID,
+			CreatedAtUnixMs:    snapshot.Meta.CreatedAt.UTC().UnixMilli(),
+			UpdatedAtUnixMs:    snapshot.Meta.UpdatedAt.UTC().UnixMilli(),
+			LastSequence:       snapshot.Meta.LastSequence,
+			ModelRequestCount:  snapshot.Meta.ModelRequestCount,
+			InFlightStep:       boolToInt64(snapshot.Meta.InFlightStep),
+			AgentsInjected:     boolToInt64(snapshot.Meta.AgentsInjected),
+			LaunchVisible:      boolToInt64(sessionLaunchVisible(snapshot.Meta)),
+			CwdRelpath:         cwdRelpath,
+			ContinuationJson:   continuationJSON,
+			LockedJson:         lockedJSON,
+			UsageStateJson:     usageStateJSON,
+			MetadataJson:       metadataJSON,
+		})
 	})
 }
 

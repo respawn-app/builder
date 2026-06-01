@@ -43,6 +43,7 @@ type Service struct {
 	storeOptions             []session.StoreOption
 	recoveredWarning         string
 	recoveredWarningProvider func() (string, bool, error)
+	projectGate              ProjectSideEffectGate
 
 	mu      sync.Mutex
 	handles map[string]*runtimeHandle
@@ -50,6 +51,10 @@ type Service struct {
 	idleUnloadDelay        time.Duration
 	runFinishedUnloadDelay time.Duration
 	idleTimers             map[string]*runtimeIdleTimer
+}
+
+type ProjectSideEffectGate interface {
+	WithProject(ctx context.Context, projectID string, fn func(context.Context) error) error
 }
 
 type runtimeHandle struct {
@@ -134,6 +139,14 @@ func (s *Service) WithGeneratedRecoveredWarningProvider(provider func() (string,
 	return s
 }
 
+func (s *Service) WithProjectSideEffectGate(gate ProjectSideEffectGate) *Service {
+	if s == nil {
+		return nil
+	}
+	s.projectGate = gate
+	return s
+}
+
 type recoveredWarningEntry struct {
 	Visibility transcript.EntryVisibility `json:"visibility,omitempty"`
 	Role       string                     `json:"role"`
@@ -175,6 +188,24 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	projectID, err := s.projectIDForSession(ctx, sessionID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	var response serverapi.SessionRuntimeActivateResponse
+	err = s.withProjectSideEffectGate(ctx, projectID, func(ctx context.Context) error {
+		if err := s.requireNoProjectDelete(ctx, projectID); err != nil {
+			return err
+		}
+		var err error
+		response, err = s.activateSessionRuntimeInsideGate(ctx, req)
+		return err
+	})
+	return response, err
+}
+
+func (s *Service) activateSessionRuntimeInsideGate(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
 	ownerID := strings.TrimSpace(req.OwnerID)
@@ -311,6 +342,30 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	s.cancelScheduledIdleUnload(sessionID)
 	cleanup = nil
 	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func (s *Service) projectIDForSession(ctx context.Context, sessionID string) (string, error) {
+	if s == nil || s.metadataStore == nil {
+		return "", errors.New("metadata store is required")
+	}
+	return s.metadataStore.ProjectIDForSession(ctx, sessionID)
+}
+
+func (s *Service) requireNoProjectDelete(ctx context.Context, projectID string) error {
+	if s == nil || s.metadataStore == nil {
+		return errors.New("metadata store is required")
+	}
+	return s.metadataStore.RequireNoProjectDeleteInProgress(ctx, projectID)
+}
+
+func (s *Service) withProjectSideEffectGate(ctx context.Context, projectID string, fn func(context.Context) error) error {
+	if fn == nil {
+		return errors.New("session runtime callback is required")
+	}
+	if s == nil || s.projectGate == nil || strings.TrimSpace(projectID) == "" {
+		return fn(ctx)
+	}
+	return s.projectGate.WithProject(ctx, projectID, fn)
 }
 
 func (s *Service) externalSessionRuntimeActive(sessionID string) bool {

@@ -14,4 +14,21 @@ describe("Button", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toHaveAttribute("type", "button");
     expect(screen.getByTestId("danger-icon")).toHaveAttribute("stroke", "currentColor");
   });
+
+  it("uses square centered sizing for icon-only actions", () => {
+    render(
+      <Button aria-label="Close" size="icon" variant="ghost">
+        <svg aria-hidden="true" />
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Close" })).toHaveClass(
+      "grid",
+      "h-9",
+      "w-9",
+      "place-items-center",
+      "rounded-full",
+      "p-0",
+    );
+  });
 });

@@ -20,6 +20,37 @@ type Project struct {
 	PrimaryWorkspaceID           string
 }
 
+type ProjectDeleteFinalizerBypass struct {
+	ProjectID string
+	Token     string
+}
+
+type ProjectDeleteJob struct {
+	ProjectID                    string
+	ImpactToken                  string
+	State                        string
+	ExpectedWorkspaceCount       int64
+	ExpectedWorkflowLinkCount    int64
+	ExpectedTaskCount            int64
+	ExpectedTerminalTaskCount    int64
+	ExpectedNonTerminalTaskCount int64
+	ExpectedSessionCount         int64
+	ExpectedSessionArtifactCount int64
+	CreatedAtUnixMs              int64
+	UpdatedAtUnixMs              int64
+	CompletedAtUnixMs            int64
+}
+
+type ProjectDeleteSessionArtifact struct {
+	ProjectID       string
+	SessionID       string
+	ArtifactRelpath string
+	ExpectedRelpath string
+	State           string
+	LastError       string
+	UpdatedAtUnixMs int64
+}
+
 type ProjectWorkflowLink struct {
 	ID              string
 	ProjectID       string

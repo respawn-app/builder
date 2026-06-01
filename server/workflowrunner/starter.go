@@ -69,6 +69,7 @@ type Starter struct {
 	storeOptions     []session.StoreOption
 	clientFactory    func(workflowscheduler.StartRunRequest) llm.Client
 	worktrees        TaskWorktreeEnsurer
+	projectGate      ProjectSideEffectGate
 	finished         func(workflow.RunID, int64)
 
 	mu     sync.Mutex
@@ -81,6 +82,11 @@ type Starter struct {
 type StarterOptions struct {
 	ClientFactory func(workflowscheduler.StartRunRequest) llm.Client
 	Worktrees     TaskWorktreeEnsurer
+	ProjectGate   ProjectSideEffectGate
+}
+
+type ProjectSideEffectGate interface {
+	WithProject(ctx context.Context, projectID string, fn func(context.Context) error) error
 }
 
 func NewStarter(cfg config.App, metadataStore *metadata.Store, store RuntimeStore, authManager *auth.Manager, background *shelltool.Manager, backgroundRouter runtimewire.BackgroundRouter, runtimes RuntimeEventRegistry, opts StarterOptions) (*Starter, error) {
@@ -104,6 +110,7 @@ func NewStarter(cfg config.App, metadataStore *metadata.Store, store RuntimeStor
 		storeOptions:     metadataStore.AuthoritativeSessionStoreOptions(),
 		clientFactory:    opts.ClientFactory,
 		worktrees:        opts.Worktrees,
+		projectGate:      opts.ProjectGate,
 		cancel:           map[workflow.RunID]context.CancelFunc{},
 		task:             map[workflow.RunID]workflow.TaskID{},
 	}, nil
@@ -125,14 +132,33 @@ func (s *Starter) StartWorkflowRun(ctx context.Context, req workflowscheduler.St
 		return errors.New("workflow runtime starter closed")
 	}
 	s.mu.Unlock()
+	input, err := s.store.GetRunStartContext(ctx, req.RunID)
+	if err != nil {
+		return err
+	}
+	return s.withProjectSideEffectGate(ctx, input.Task.ProjectID, func(ctx context.Context) error {
+		if err := s.metadata.RequireNoProjectDeleteInProgress(ctx, input.Task.ProjectID); err != nil {
+			return err
+		}
+		return s.startWorkflowRunInsideGate(ctx, req, input)
+	})
+}
+
+func (s *Starter) startWorkflowRunInsideGate(ctx context.Context, req workflowscheduler.StartRunRequest, input workflowstore.RunStartContext) error {
+	if err := s.metadata.RequireNoProjectDeleteInProgress(ctx, input.Task.ProjectID); err != nil {
+		return err
+	}
 	if s.worktrees != nil {
 		if err := s.worktrees.EnsureTaskWorktree(ctx, string(req.TaskID)); err != nil {
 			return err
 		}
 	}
-	input, err := s.store.GetRunStartContext(ctx, req.RunID)
-	if err != nil {
-		return err
+	if strings.TrimSpace(input.WorktreeID) == "" || strings.TrimSpace(input.WorktreeRoot) == "" {
+		refreshed, err := s.store.GetRunStartContext(ctx, req.RunID)
+		if err != nil {
+			return err
+		}
+		input = refreshed
 	}
 	if strings.TrimSpace(input.WorktreeID) == "" || strings.TrimSpace(input.WorktreeRoot) == "" {
 		return fmt.Errorf("workflow task %q has no managed worktree", input.Task.ID)
@@ -172,6 +198,16 @@ func (s *Starter) StartWorkflowRun(ctx context.Context, req workflowscheduler.St
 	}
 	go s.run(runCtx, req, input, plan, warnings)
 	return nil
+}
+
+func (s *Starter) withProjectSideEffectGate(ctx context.Context, projectID string, fn func(context.Context) error) error {
+	if fn == nil {
+		return errors.New("workflow runtime callback is required")
+	}
+	if s == nil || s.projectGate == nil || strings.TrimSpace(projectID) == "" {
+		return fn(ctx)
+	}
+	return s.projectGate.WithProject(ctx, projectID, fn)
 }
 
 func (s *Starter) registerRun(req workflowscheduler.StartRunRequest, cancel context.CancelFunc) bool {

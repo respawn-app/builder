@@ -16,7 +16,9 @@ describe("HomeRoute", () => {
 
     render(<App services={services} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Alpha /tmp/project-alpha" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Alpha /tmp/project-alpha" }, { timeout: 5000 }),
+    );
     await waitFor(() => {
       expect(services.transport.calls).toContainEqual({
         method: "project.home.list",

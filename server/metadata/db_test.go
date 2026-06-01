@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -50,6 +51,721 @@ func TestOpenSuppressesGooseStatusLogging(t *testing.T) {
 	if strings.Contains(buf.String(), "goose:") {
 		t.Fatalf("did not expect goose status log output, got %q", buf.String())
 	}
+}
+
+func TestProjectDeleteJobBlocksRawSessionInsert(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+
+	_, err := store.db.ExecContext(t.Context(), `
+INSERT INTO sessions (
+    id,
+    project_id,
+    workspace_id,
+    worktree_id,
+    artifact_relpath,
+    name,
+    first_prompt_preview,
+    input_draft,
+    parent_session_id,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    last_sequence,
+    model_request_count,
+    in_flight_step,
+    agents_injected,
+    launch_visible,
+    cwd_relpath,
+    continuation_json,
+    locked_json,
+    usage_state_json,
+    metadata_json
+) VALUES (
+    'session-delete-blocked',
+    ?,
+    ?,
+    NULL,
+    ?,
+    'Blocked',
+    '',
+    '',
+    '',
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    0,
+    1,
+    '.',
+    '{}',
+    '{}',
+    '{}',
+    '{}'
+)`, binding.ProjectID, binding.WorkspaceID, filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-delete-blocked")), now, now)
+	if err == nil || !strings.Contains(err.Error(), "project_delete_in_progress") {
+		t.Fatalf("session insert error = %v, want project_delete_in_progress", err)
+	}
+}
+
+func TestProjectDeleteJobBlocksRawTaskInsert(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	seedWorkflowGraph(t, store.db, binding.ProjectID, now)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+
+	_, err := store.db.ExecContext(t.Context(), `
+INSERT INTO tasks (
+    id,
+    project_workflow_link_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+) VALUES (
+    'task-delete-blocked',
+    'link-1',
+    1,
+    1,
+    'BLD-1',
+    'Blocked',
+    '',
+    ?,
+    ?,
+    '{}'
+)`, now, now)
+	if err == nil || !strings.Contains(err.Error(), "project_delete_in_progress") {
+		t.Fatalf("task insert error = %v, want project_delete_in_progress", err)
+	}
+}
+
+func TestProjectDeleteFinalizerBypassAllowsRawProjectDelete(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+	if _, err := store.db.ExecContext(t.Context(), `INSERT INTO project_delete_finalizer_bypass (project_id, token) VALUES (?, 'token-1')`, binding.ProjectID); err != nil {
+		t.Fatalf("insert finalizer bypass: %v", err)
+	}
+
+	if _, err := store.db.ExecContext(t.Context(), `DELETE FROM projects WHERE id = ?`, binding.ProjectID); err != nil {
+		t.Fatalf("delete project with finalizer bypass: %v", err)
+	}
+	var projectCount int
+	if err := store.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM projects WHERE id = ?`, binding.ProjectID).Scan(&projectCount); err != nil {
+		t.Fatalf("scan project count: %v", err)
+	}
+	if projectCount != 0 {
+		t.Fatalf("project count after bypass delete = %d, want 0", projectCount)
+	}
+}
+
+func TestTaskRunSessionMustBelongToTaskProject(t *testing.T) {
+	store, _, bindingA := newMetadataTestStore(t)
+	bindingB, err := store.RegisterWorkspaceBinding(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatalf("register second workspace: %v", err)
+	}
+	now := int64(1234)
+	seedWorkflowGraph(t, store.db, bindingA.ProjectID, now)
+	execSeed(t, store.db, "task project A", `INSERT INTO tasks (
+    id,
+    project_workflow_link_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+) VALUES ('task-project-a', 'link-1', 1, 1, 'BLD-1', 'Project A task', '', ?, ?, '{}')`, now, now)
+	execSeed(t, store.db, "placement project A", `INSERT INTO task_node_placements (
+    id,
+    task_id,
+    node_id,
+    state,
+    created_at_unix_ms,
+    updated_at_unix_ms
+) VALUES ('placement-project-a', 'task-project-a', 'node-agent', 'active', ?, ?)`, now, now)
+	execSeed(t, store.db, "session project B", `INSERT INTO sessions (
+    id,
+    project_id,
+    workspace_id,
+    worktree_id,
+    artifact_relpath,
+    name,
+    first_prompt_preview,
+    input_draft,
+    parent_session_id,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    last_sequence,
+    model_request_count,
+    in_flight_step,
+    agents_injected,
+    launch_visible,
+    cwd_relpath,
+    continuation_json,
+    locked_json,
+    usage_state_json,
+    metadata_json
+) VALUES (
+    'session-project-b',
+    ?,
+    ?,
+    NULL,
+    ?,
+    'Project B',
+    '',
+    '',
+    '',
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    0,
+    1,
+    '.',
+    '{}',
+    '{}',
+    '{}',
+    '{}'
+)`, bindingB.ProjectID, bindingB.WorkspaceID, filepath.ToSlash(filepath.Join("projects", bindingB.ProjectID, "sessions", "session-project-b")), now, now)
+
+	_, err = store.db.ExecContext(t.Context(), `INSERT INTO task_runs (
+    id,
+    placement_id,
+    session_id,
+    run_generation,
+    workflow_revision_seen,
+    automation_requested_at_unix_ms,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    started_at_unix_ms,
+    completed_at_unix_ms,
+    interrupted_at_unix_ms,
+    interruption_reason,
+    interruption_detail_json,
+    waiting_ask_id,
+    final_answer_violation_count,
+    invalid_completion_count,
+    run_start_snapshot_json,
+    metadata_json
+) VALUES (
+    'run-cross-project',
+    'placement-project-a',
+    'session-project-b',
+    0,
+    1,
+    0,
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    '',
+    '{}',
+    '',
+    0,
+    0,
+    '{}',
+    '{}'
+)`, now, now)
+	if err == nil || !strings.Contains(err.Error(), "task run session must belong to the task project") {
+		t.Fatalf("cross-project task run insert error = %v, want same-project trigger", err)
+	}
+}
+
+func TestWithProjectOwnedWriteTxRejectsActiveDeleteJob(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+	called := false
+
+	err := store.WithProjectOwnedWriteTx(t.Context(), []string{binding.ProjectID}, func(context.Context, *ProjectOwnedWriteTx) error {
+		called = true
+		return nil
+	})
+	if err == nil || !errors.Is(err, ErrProjectDeleteInProgress) {
+		t.Fatalf("WithProjectOwnedWriteTx error = %v, want ErrProjectDeleteInProgress", err)
+	}
+	if called {
+		t.Fatal("write callback ran for project with active delete job")
+	}
+}
+
+func TestWithProjectOwnedWriteTxCommitsWhenProjectIsNotDeleting(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	err := store.WithProjectOwnedWriteTx(t.Context(), []string{binding.ProjectID}, func(ctx context.Context, tx *ProjectOwnedWriteTx) error {
+		_, execErr := tx.ExecContext(ctx, `UPDATE projects SET display_name = 'Updated by helper' WHERE id = ?`, binding.ProjectID)
+		return execErr
+	})
+	if err != nil {
+		t.Fatalf("WithProjectOwnedWriteTx: %v", err)
+	}
+	var displayName string
+	if err := store.db.QueryRowContext(t.Context(), `SELECT display_name FROM projects WHERE id = ?`, binding.ProjectID).Scan(&displayName); err != nil {
+		t.Fatalf("scan display name: %v", err)
+	}
+	if displayName != "Updated by helper" {
+		t.Fatalf("display name = %q, want helper update", displayName)
+	}
+}
+
+func TestWithSessionOwnedWriteTxRejectsActiveDeleteJob(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	insertProjectDeleteSessionForTest(t, store, binding.ProjectID, binding.WorkspaceID, "session-owned-write", now)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+	called := false
+
+	err := store.WithSessionOwnedWriteTx(t.Context(), "session-owned-write", func(context.Context, *ProjectOwnedWriteTx) error {
+		called = true
+		return nil
+	})
+	if err == nil || !errors.Is(err, ErrProjectDeleteInProgress) {
+		t.Fatalf("WithSessionOwnedWriteTx error = %v, want ErrProjectDeleteInProgress", err)
+	}
+	if called {
+		t.Fatal("write callback ran for session with active delete job")
+	}
+}
+
+func TestPrepareProjectDeleteCreatesActiveJobAndManifest(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	seedWorkflowGraph(t, store.db, binding.ProjectID, now)
+	execSeed(t, store.db, "terminal task", `INSERT INTO tasks (
+    id,
+    project_workflow_link_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+) VALUES ('task-terminal-delete', 'link-1', 1, 1, 'BLD-1', 'Terminal', '', ?, ?, '{}')`, now, now)
+	execSeed(t, store.db, "terminal placement", `INSERT INTO task_node_placements (
+    id,
+    task_id,
+    node_id,
+    state,
+    created_at_unix_ms,
+    updated_at_unix_ms
+) VALUES ('placement-terminal-delete', 'task-terminal-delete', 'node-done', 'active', ?, ?)`, now, now)
+	insertProjectDeleteSessionForTest(t, store, binding.ProjectID, binding.WorkspaceID, "session-prepare-delete", now)
+
+	impact, err := store.GetProjectDeleteImpact(t.Context(), binding.ProjectID)
+	if err != nil {
+		t.Fatalf("GetProjectDeleteImpact: %v", err)
+	}
+	if impact.WorkspaceCount != 1 || impact.WorkflowLinkCount != 1 || impact.TaskCount != 1 || impact.TerminalTaskCount != 1 || impact.NonTerminalTaskCount != 0 || impact.SessionCount != 1 || impact.SessionArtifactCount != 1 {
+		t.Fatalf("impact = %+v, want expected delete counts", impact)
+	}
+	if strings.TrimSpace(impact.ImpactToken) == "" {
+		t.Fatal("impact token is empty")
+	}
+	prepared, err := store.PrepareProjectDelete(t.Context(), ProjectDeletePrepareRequest{
+		ProjectID:                    binding.ProjectID,
+		ImpactToken:                  impact.ImpactToken,
+		ExpectedWorkspaceCount:       impact.WorkspaceCount,
+		ExpectedWorkflowLinkCount:    impact.WorkflowLinkCount,
+		ExpectedTaskCount:            impact.TaskCount,
+		ExpectedTerminalTaskCount:    impact.TerminalTaskCount,
+		ExpectedNonTerminalTaskCount: impact.NonTerminalTaskCount,
+		ExpectedSessionCount:         impact.SessionCount,
+		ExpectedSessionArtifactCount: impact.SessionArtifactCount,
+	})
+	if err != nil {
+		t.Fatalf("PrepareProjectDelete: %v", err)
+	}
+	if prepared.Resumed {
+		t.Fatal("PrepareProjectDelete returned resumed for new job")
+	}
+	if prepared.Impact.DeleteJobState != "active" || prepared.Impact.PendingArtifactCount != 1 {
+		t.Fatalf("prepared impact = %+v, want active job with one pending artifact", prepared.Impact)
+	}
+	if len(prepared.Manifest) != 1 || prepared.Manifest[0].SessionID != "session-prepare-delete" || prepared.Manifest[0].State != "pending" {
+		t.Fatalf("manifest = %+v, want one pending session artifact", prepared.Manifest)
+	}
+
+	err = store.UpdateProjectDisplayName(t.Context(), binding.ProjectID, "Blocked After Prepare")
+	if err == nil || !errors.Is(err, ErrProjectDeleteInProgress) {
+		t.Fatalf("UpdateProjectDisplayName after prepare error = %v, want ErrProjectDeleteInProgress", err)
+	}
+}
+
+func TestPrepareProjectDeleteRejectsChangedImpact(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	impact, err := store.GetProjectDeleteImpact(t.Context(), binding.ProjectID)
+	if err != nil {
+		t.Fatalf("GetProjectDeleteImpact: %v", err)
+	}
+	_, err = store.PrepareProjectDelete(t.Context(), ProjectDeletePrepareRequest{
+		ProjectID:                    binding.ProjectID,
+		ImpactToken:                  impact.ImpactToken,
+		ExpectedWorkspaceCount:       impact.WorkspaceCount + 1,
+		ExpectedWorkflowLinkCount:    impact.WorkflowLinkCount,
+		ExpectedTaskCount:            impact.TaskCount,
+		ExpectedTerminalTaskCount:    impact.TerminalTaskCount,
+		ExpectedNonTerminalTaskCount: impact.NonTerminalTaskCount,
+		ExpectedSessionCount:         impact.SessionCount,
+		ExpectedSessionArtifactCount: impact.SessionArtifactCount,
+	})
+	if err == nil || !errors.Is(err, ErrProjectDeleteImpactChanged) {
+		t.Fatalf("PrepareProjectDelete error = %v, want ErrProjectDeleteImpactChanged", err)
+	}
+	assertRowCount(t, store.db, "project_delete_jobs", "project_id = ?", 0, binding.ProjectID)
+}
+
+func TestPrepareProjectDeleteResumePreservesTerminalManifestState(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	insertProjectDeleteSessionForTest(t, store, binding.ProjectID, binding.WorkspaceID, "session-resume-delete", now)
+	impact, err := store.GetProjectDeleteImpact(t.Context(), binding.ProjectID)
+	if err != nil {
+		t.Fatalf("GetProjectDeleteImpact: %v", err)
+	}
+	prepared, err := store.PrepareProjectDelete(t.Context(), ProjectDeletePrepareRequest{
+		ProjectID:                    binding.ProjectID,
+		ImpactToken:                  impact.ImpactToken,
+		ExpectedWorkspaceCount:       impact.WorkspaceCount,
+		ExpectedWorkflowLinkCount:    impact.WorkflowLinkCount,
+		ExpectedTaskCount:            impact.TaskCount,
+		ExpectedTerminalTaskCount:    impact.TerminalTaskCount,
+		ExpectedNonTerminalTaskCount: impact.NonTerminalTaskCount,
+		ExpectedSessionCount:         impact.SessionCount,
+		ExpectedSessionArtifactCount: impact.SessionArtifactCount,
+	})
+	if err != nil {
+		t.Fatalf("PrepareProjectDelete: %v", err)
+	}
+	if len(prepared.Manifest) != 1 {
+		t.Fatalf("manifest length = %d, want 1", len(prepared.Manifest))
+	}
+	if err := store.UpdateProjectDeleteArtifactState(t.Context(), ProjectDeleteArtifactStateRequest{
+		ProjectID: binding.ProjectID,
+		SessionID: "session-resume-delete",
+		State:     "cleaned",
+	}); err != nil {
+		t.Fatalf("UpdateProjectDeleteArtifactState: %v", err)
+	}
+	resumed, err := store.PrepareProjectDelete(t.Context(), ProjectDeletePrepareRequest{ProjectID: binding.ProjectID, Resume: true})
+	if err != nil {
+		t.Fatalf("PrepareProjectDelete resume: %v", err)
+	}
+	if !resumed.Resumed || resumed.Manifest[0].State != "cleaned" || resumed.Impact.CleanedArtifactCount != 1 {
+		t.Fatalf("resumed = %+v, want cleaned terminal state preserved", resumed)
+	}
+}
+
+func TestFinalizeProjectDeleteHardDeletesProjectRowsAndJob(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	seedWorkflowGraph(t, store.db, binding.ProjectID, now)
+	execSeed(t, store.db, "project task", `INSERT INTO tasks (
+    id,
+    project_workflow_link_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+) VALUES ('task-finalize-delete', 'link-1', 1, 1, 'BLD-1', 'Delete me', '', ?, ?, '{}')`, now, now)
+	execSeed(t, store.db, "project session", `INSERT INTO sessions (
+    id,
+    project_id,
+    workspace_id,
+    worktree_id,
+    artifact_relpath,
+    name,
+    first_prompt_preview,
+    input_draft,
+    parent_session_id,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    last_sequence,
+    model_request_count,
+    in_flight_step,
+    agents_injected,
+    launch_visible,
+    cwd_relpath,
+    continuation_json,
+    locked_json,
+    usage_state_json,
+    metadata_json
+) VALUES (
+    'session-finalize-delete',
+    ?,
+    ?,
+    NULL,
+    ?,
+    'Delete me',
+    '',
+    '',
+    '',
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    0,
+    1,
+    '.',
+    '{}',
+    '{}',
+    '{}',
+    '{}'
+)`, binding.ProjectID, binding.WorkspaceID, filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-finalize-delete")), now, now)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+	execSeed(t, store.db, "cleaned manifest", `INSERT INTO project_delete_session_artifacts (
+    project_id,
+    session_id,
+    artifact_relpath,
+    expected_relpath,
+    state,
+    last_error,
+    updated_at_unix_ms
+) VALUES (?, 'session-finalize-delete', ?, ?, 'cleaned', '', ?)`, binding.ProjectID, filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-finalize-delete")), filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-finalize-delete")), now)
+
+	if err := store.FinalizeProjectDelete(t.Context(), ProjectDeleteFinalizeRequest{ProjectID: binding.ProjectID, ImpactToken: "token-1"}); err != nil {
+		t.Fatalf("FinalizeProjectDelete: %v", err)
+	}
+	assertRowCount(t, store.db, "projects", "id = ?", 0, binding.ProjectID)
+	assertRowCount(t, store.db, "tasks", "id = 'task-finalize-delete'", 0)
+	assertRowCount(t, store.db, "sessions", "id = 'session-finalize-delete'", 0)
+	assertRowCount(t, store.db, "workspaces", "project_id = ?", 0, binding.ProjectID)
+	assertRowCount(t, store.db, "project_workflow_links", "project_id = ?", 0, binding.ProjectID)
+	assertRowCount(t, store.db, "project_delete_jobs", "project_id = ?", 0, binding.ProjectID)
+	assertRowCount(t, store.db, "project_delete_session_artifacts", "project_id = ?", 0, binding.ProjectID)
+	assertRowCount(t, store.db, "project_delete_finalizer_bypass", "project_id = ?", 0, binding.ProjectID)
+	assertRowCount(t, store.db, "workflows", "id = 'workflow-1'", 1)
+}
+
+func TestFinalizeProjectDeleteRejectsPendingArtifactEntries(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	execSeed(t, store.db, "project session", `INSERT INTO sessions (
+    id,
+    project_id,
+    workspace_id,
+    worktree_id,
+    artifact_relpath,
+    name,
+    first_prompt_preview,
+    input_draft,
+    parent_session_id,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    last_sequence,
+    model_request_count,
+    in_flight_step,
+    agents_injected,
+    launch_visible,
+    cwd_relpath,
+    continuation_json,
+    locked_json,
+    usage_state_json,
+    metadata_json
+) VALUES (
+    'session-pending-delete',
+    ?,
+    ?,
+    NULL,
+    ?,
+    'Pending',
+    '',
+    '',
+    '',
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    0,
+    1,
+    '.',
+    '{}',
+    '{}',
+    '{}',
+    '{}'
+)`, binding.ProjectID, binding.WorkspaceID, filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-pending-delete")), now, now)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+	execSeed(t, store.db, "pending manifest", `INSERT INTO project_delete_session_artifacts (
+    project_id,
+    session_id,
+    artifact_relpath,
+    expected_relpath,
+    state,
+    last_error,
+    updated_at_unix_ms
+) VALUES (?, 'session-pending-delete', ?, ?, 'pending', '', ?)`, binding.ProjectID, filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-pending-delete")), filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-pending-delete")), now)
+
+	err := store.FinalizeProjectDelete(t.Context(), ProjectDeleteFinalizeRequest{ProjectID: binding.ProjectID, ImpactToken: "token-1"})
+	if err == nil || !strings.Contains(err.Error(), "non-terminal artifact entries") {
+		t.Fatalf("FinalizeProjectDelete error = %v, want non-terminal artifact blocker", err)
+	}
+	assertRowCount(t, store.db, "projects", "id = ?", 1, binding.ProjectID)
+	assertRowCount(t, store.db, "project_delete_jobs", "project_id = ?", 1, binding.ProjectID)
+}
+
+func TestFinalizeProjectDeleteRejectsUnmanifestedSession(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	now := int64(1234)
+	execSeed(t, store.db, "unmanifested session", `INSERT INTO sessions (
+    id,
+    project_id,
+    workspace_id,
+    worktree_id,
+    artifact_relpath,
+    name,
+    first_prompt_preview,
+    input_draft,
+    parent_session_id,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    last_sequence,
+    model_request_count,
+    in_flight_step,
+    agents_injected,
+    launch_visible,
+    cwd_relpath,
+    continuation_json,
+    locked_json,
+    usage_state_json,
+    metadata_json
+) VALUES (
+    'session-unmanifested-delete',
+    ?,
+    ?,
+    NULL,
+    ?,
+    'Unmanifested',
+    '',
+    '',
+    '',
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    0,
+    1,
+    '.',
+    '{}',
+    '{}',
+    '{}',
+    '{}'
+)`, binding.ProjectID, binding.WorkspaceID, filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", "session-unmanifested-delete")), now, now)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, now)
+
+	err := store.FinalizeProjectDelete(t.Context(), ProjectDeleteFinalizeRequest{ProjectID: binding.ProjectID, ImpactToken: "token-1"})
+	if err == nil || !strings.Contains(err.Error(), "missing project sessions") {
+		t.Fatalf("FinalizeProjectDelete error = %v, want missing manifest blocker", err)
+	}
+	assertRowCount(t, store.db, "projects", "id = ?", 1, binding.ProjectID)
+	assertRowCount(t, store.db, "sessions", "id = 'session-unmanifested-delete'", 1)
+}
+
+func TestUpdateProjectDisplayNameRejectsActiveDeleteJob(t *testing.T) {
+	store, _, binding := newMetadataTestStore(t)
+	insertActiveProjectDeleteJobForTest(t, store, binding.ProjectID, int64(1234))
+
+	err := store.UpdateProjectDisplayName(t.Context(), binding.ProjectID, "Blocked")
+	if err == nil || !errors.Is(err, ErrProjectDeleteInProgress) {
+		t.Fatalf("UpdateProjectDisplayName error = %v, want ErrProjectDeleteInProgress", err)
+	}
+}
+
+func assertRowCount(t *testing.T, db *sql.DB, table string, where string, want int, args ...any) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table+` WHERE `+where, args...).Scan(&count); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	if count != want {
+		t.Fatalf("%s rows matching %q = %d, want %d", table, where, count, want)
+	}
+}
+
+func insertActiveProjectDeleteJobForTest(t *testing.T, store *Store, projectID string, now int64) {
+	t.Helper()
+	if _, err := store.db.ExecContext(t.Context(), `
+INSERT INTO project_delete_jobs (
+    project_id,
+    impact_token,
+    state,
+    expected_workspace_count,
+    expected_workflow_link_count,
+    expected_task_count,
+    expected_session_count,
+    expected_session_artifact_count,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    completed_at_unix_ms
+) VALUES (?, 'token-1', 'active', 1, 0, 0, 0, 0, ?, ?, 0)`, projectID, now, now); err != nil {
+		t.Fatalf("insert active project delete job: %v", err)
+	}
+}
+
+func insertProjectDeleteSessionForTest(t *testing.T, store *Store, projectID string, workspaceID string, sessionID string, now int64) {
+	t.Helper()
+	execSeed(t, store.db, "project delete session", `INSERT INTO sessions (
+    id,
+    project_id,
+    workspace_id,
+    worktree_id,
+    artifact_relpath,
+    name,
+    first_prompt_preview,
+    input_draft,
+    parent_session_id,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    last_sequence,
+    model_request_count,
+    in_flight_step,
+    agents_injected,
+    launch_visible,
+    cwd_relpath,
+    continuation_json,
+    locked_json,
+    usage_state_json,
+    metadata_json
+) VALUES (
+    ?,
+    ?,
+    ?,
+    NULL,
+    ?,
+    'Delete Session',
+    '',
+    '',
+    '',
+    ?,
+    ?,
+    0,
+    0,
+    0,
+    0,
+    1,
+    '.',
+    '{}',
+    '{}',
+    '{}',
+    '{}'
+)`, sessionID, projectID, workspaceID, filepath.ToSlash(filepath.Join("projects", projectID, "sessions", sessionID)), now, now)
 }
 
 func TestOpenAllowsDatabaseAtRemovedMigrationVersion(t *testing.T) {

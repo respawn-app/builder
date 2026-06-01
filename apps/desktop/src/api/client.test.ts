@@ -165,6 +165,54 @@ describe("BuilderApiClient", () => {
     });
   });
 
+  it("uses project delete preview/delete RPC contracts", async () => {
+    const transport = new FakeRpcTransport([
+      { method: "project.deletePreview", result: { impact: projectDeleteImpactResponse } },
+      {
+        method: "project.delete",
+        result: {
+          deleted: true,
+          impact: projectDeleteImpactResponse,
+          blockers: [],
+          cleanup_warnings: [
+            {
+              code: "skipped_not_builder_owned",
+              message: "Session artifact path was not Builder-owned.",
+              session_id: "session-1",
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new BuilderApiClient(transport);
+
+    const impact = await client.previewProjectDelete("project-1");
+    await expect(client.deleteProject(impact)).resolves.toMatchObject({
+      deleted: true,
+      cleanupWarnings: [{ code: "skipped_not_builder_owned", sessionID: "session-1" }],
+    });
+
+    expect(transport.calls).toContainEqual({
+      method: "project.deletePreview",
+      params: { project_id: "project-1" },
+    });
+    expect(transport.calls).toContainEqual({
+      method: "project.delete",
+      params: {
+        project_id: "project-1",
+        impact_token: "delete-token-1",
+        expected_workspace_count: 2,
+        expected_workflow_link_count: 1,
+        expected_task_count: 3,
+        expected_terminal_task_count: 3,
+        expected_non_terminal_task_count: 0,
+        expected_session_count: 1,
+        expected_session_artifact_count: 1,
+        resume: false,
+      },
+    });
+  });
+
   it("maps workflow definition, execution validation, and active project links for the editor", async () => {
     const transport = new FakeRpcTransport([
       { method: "workflow.get", result: workflowDefinitionResponse },
@@ -642,6 +690,21 @@ const projectSummaryResponse = {
   task_count: 0,
   attention_count: 0,
   workflow_count: 1,
+};
+
+const projectDeleteImpactResponse = {
+  project_id: "project-1",
+  project_key: "PROJ",
+  display_name: "Project",
+  workspace_count: 2,
+  workflow_link_count: 1,
+  task_count: 3,
+  terminal_task_count: 3,
+  non_terminal_task_count: 0,
+  session_count: 1,
+  session_artifact_count: 1,
+  impact_token: "delete-token-1",
+  blockers: [],
 };
 
 const emptyTaskDetailResponse = {

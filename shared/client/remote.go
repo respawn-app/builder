@@ -185,6 +185,14 @@ func (c *Remote) RebindWorkspace(ctx context.Context, req serverapi.ProjectRebin
 	return callUnscopedRPC[serverapi.ProjectRebindWorkspaceRequest, serverapi.ProjectRebindWorkspaceResponse](c, ctx, protocol.MethodProjectRebindWorkspace, req)
 }
 
+func (c *Remote) PreviewProjectDelete(ctx context.Context, req serverapi.ProjectDeletePreviewRequest) (serverapi.ProjectDeletePreviewResponse, error) {
+	return callUnscopedRPC[serverapi.ProjectDeletePreviewRequest, serverapi.ProjectDeletePreviewResponse](c, ctx, protocol.MethodProjectDeletePreview, req)
+}
+
+func (c *Remote) DeleteProject(ctx context.Context, req serverapi.ProjectDeleteRequest) (serverapi.ProjectDeleteResponse, error) {
+	return callUnscopedRPC[serverapi.ProjectDeleteRequest, serverapi.ProjectDeleteResponse](c, ctx, protocol.MethodProjectDelete, req)
+}
+
 func (c *Remote) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	return callUnscopedRPC[serverapi.ProjectGetOverviewRequest, serverapi.ProjectGetOverviewResponse](c, ctx, protocol.MethodProjectGetOverview, req)
 }

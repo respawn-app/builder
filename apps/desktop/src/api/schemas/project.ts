@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import type {
   BindingPlan,
+  ProjectDeleteImpact,
+  ProjectDeleteResponse,
   ProjectEdit,
   ProjectMutationResponse,
   ProjectPage,
@@ -113,6 +115,116 @@ export const workspaceUnlinkResponseSchema: z.ZodType<WorkspaceUnlinkResponse> =
     unlinked: value.unlinked,
     blockers: value.blockers,
     project: value.project ?? null,
+  }));
+
+const projectDeleteBlockerSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    count: z.number().optional().default(0),
+  })
+  .transform((value) => ({
+    code: value.code,
+    count: value.count,
+    message: value.message,
+  }));
+
+const projectDeleteWarningSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    session_id: z.string().optional().default(""),
+  })
+  .transform((value) => ({
+    code: value.code,
+    message: value.message,
+    sessionID: value.session_id,
+  }));
+
+export const projectDeleteImpactSchema: z.ZodType<ProjectDeleteImpact> = z
+  .object({
+    project_id: z.string(),
+    project_key: z.string(),
+    display_name: z.string(),
+    workspace_count: z.number(),
+    workflow_link_count: z.number(),
+    task_count: z.number(),
+    terminal_task_count: z.number(),
+    non_terminal_task_count: z.number(),
+    session_count: z.number(),
+    session_artifact_count: z.number(),
+    active_session_count: z.number().optional().default(0),
+    active_node_placement_count: z.number().optional().default(0),
+    pending_approval_count: z.number().optional().default(0),
+    waiting_question_count: z.number().optional().default(0),
+    active_run_count: z.number().optional().default(0),
+    runnable_run_count: z.number().optional().default(0),
+    cross_project_run_session_count: z.number().optional().default(0),
+    live_runtime_session_count: z.number().optional().default(0),
+    running_background_process_count: z.number().optional().default(0),
+    queued_work_count: z.number().optional().default(0),
+    scheduler_reservation_count: z.number().optional().default(0),
+    impact_token: z.string(),
+    delete_job_state: z.string().optional().default(""),
+    resume_required: z.boolean().optional().default(false),
+    pending_artifact_count: z.number().optional().default(0),
+    cleaned_artifact_count: z.number().optional().default(0),
+    missing_artifact_count: z.number().optional().default(0),
+    failed_artifact_count: z.number().optional().default(0),
+    skipped_not_builder_owned_count: z.number().optional().default(0),
+    blockers: z.array(projectDeleteBlockerSchema).nullish(),
+  })
+  .transform((value) => ({
+    activeNodePlacementCount: value.active_node_placement_count,
+    activeRunCount: value.active_run_count,
+    activeSessionCount: value.active_session_count,
+    blockers: value.blockers ?? [],
+    cleanedArtifactCount: value.cleaned_artifact_count,
+    crossProjectRunSessionCount: value.cross_project_run_session_count,
+    deleteJobState: value.delete_job_state,
+    displayName: value.display_name,
+    failedArtifactCount: value.failed_artifact_count,
+    impactToken: value.impact_token,
+    liveRuntimeSessionCount: value.live_runtime_session_count,
+    missingArtifactCount: value.missing_artifact_count,
+    nonTerminalTaskCount: value.non_terminal_task_count,
+    pendingApprovalCount: value.pending_approval_count,
+    pendingArtifactCount: value.pending_artifact_count,
+    projectID: value.project_id,
+    projectKey: value.project_key,
+    queuedWorkCount: value.queued_work_count,
+    resumeRequired: value.resume_required,
+    runnableRunCount: value.runnable_run_count,
+    runningBackgroundProcessCount: value.running_background_process_count,
+    schedulerReservationCount: value.scheduler_reservation_count,
+    sessionArtifactCount: value.session_artifact_count,
+    sessionCount: value.session_count,
+    skippedNotBuilderOwnedCount: value.skipped_not_builder_owned_count,
+    taskCount: value.task_count,
+    terminalTaskCount: value.terminal_task_count,
+    waitingQuestionCount: value.waiting_question_count,
+    workflowLinkCount: value.workflow_link_count,
+    workspaceCount: value.workspace_count,
+  }));
+
+export const projectDeletePreviewSchema = z
+  .object({
+    impact: projectDeleteImpactSchema,
+  })
+  .transform((value) => value.impact);
+
+export const projectDeleteResponseSchema: z.ZodType<ProjectDeleteResponse> = z
+  .object({
+    deleted: z.boolean(),
+    impact: projectDeleteImpactSchema,
+    blockers: z.array(projectDeleteBlockerSchema).nullish(),
+    cleanup_warnings: z.array(projectDeleteWarningSchema).nullish(),
+  })
+  .transform((value) => ({
+    blockers: value.blockers ?? [],
+    cleanupWarnings: value.cleanup_warnings ?? [],
+    deleted: value.deleted,
+    impact: value.impact,
   }));
 
 export const bindingPlanSchema: z.ZodType<BindingPlan> = z

@@ -64,6 +64,14 @@ func (c *loopbackProjectViewClient) RebindWorkspace(ctx context.Context, req ser
 	return callLoopbackClient(c, "project view service is required", ctx, req, servicecontract.ProjectViewService.RebindWorkspace)
 }
 
+func (c *loopbackProjectViewClient) PreviewProjectDelete(ctx context.Context, req serverapi.ProjectDeletePreviewRequest) (serverapi.ProjectDeletePreviewResponse, error) {
+	return callLoopbackClient(c, "project view service is required", ctx, req, servicecontract.ProjectViewService.PreviewProjectDelete)
+}
+
+func (c *loopbackProjectViewClient) DeleteProject(ctx context.Context, req serverapi.ProjectDeleteRequest) (serverapi.ProjectDeleteResponse, error) {
+	return callLoopbackClient(c, "project view service is required", ctx, req, servicecontract.ProjectViewService.DeleteProject)
+}
+
 func (c *loopbackProjectViewClient) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	return callLoopbackClient(c, "project view service is required", ctx, req, servicecontract.ProjectViewService.GetProjectOverview)
 }

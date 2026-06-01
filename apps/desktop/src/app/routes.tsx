@@ -7,13 +7,18 @@ import { z } from "zod";
 import { BoardRoute } from "../features/board/BoardRoute";
 import { HomeRoute } from "../features/home/HomeRoute";
 import { ProjectCreateWindowRoute } from "../features/home/ProjectCreateForm";
-import { ProjectEditRoute } from "../features/project-edit/ProjectEditRoute";
+import {
+  ProjectDeleteConfirmationWindowRoute,
+  projectDeleteConfirmationWindowTargetFromSearch,
+  projectDeleteNativeDialogPath,
+} from "../features/project-edit/ProjectDeleteConfirmation";
 import { WorkspaceUnlinkWindowRoute } from "../features/project-edit/ProjectEditParts";
 import { StandaloneTaskRoute, TaskDetailWindowRoute } from "../features/task-detail/StandaloneTaskRoute";
 import { StartupGate } from "../features/startup/StartupGate";
 import { NewTaskWindowRoute } from "../features/tasks/NewTaskDialog";
 import { LoadingState } from "../ui";
 import { AppChrome } from "./AppChrome";
+import { readLastProjectRoute, writeLastProjectRoute, type StoredProjectRoute } from "./lastProjectRoute";
 import { RouteTransitionFrame } from "./RouteTransitionFrame";
 import {
   createWorkflowDeleteConfirmWindowRoute,
@@ -68,12 +73,39 @@ const workspaceUnlinkSearchSchema = z.object({
   rootPath: optionalSearchString,
 });
 
-const storedProjectRouteSchema = z.object({
-  projectId: z.string(),
-  workflowId: z.string(),
+const projectDeleteSearchSchema = z.object({
+  activeNodePlacementCount: optionalSearchString,
+  activeRunCount: optionalSearchString,
+  activeSessionCount: optionalSearchString,
+  cleanedArtifactCount: optionalSearchString,
+  crossProjectRunSessionCount: optionalSearchString,
+  deleteJobState: optionalSearchString,
+  displayName: optionalSearchString,
+  failedArtifactCount: optionalSearchString,
+  impactToken: optionalSearchString,
+  liveRuntimeSessionCount: optionalSearchString,
+  missingArtifactCount: optionalSearchString,
+  nonTerminalTaskCount: optionalSearchString,
+  pendingApprovalCount: optionalSearchString,
+  pendingArtifactCount: optionalSearchString,
+  projectID: optionalSearchString,
+  projectKey: optionalSearchString,
+  queuedWorkCount: optionalSearchString,
+  requestID: optionalSearchString,
+  resumeRequired: optionalSearchString,
+  runnableRunCount: optionalSearchString,
+  runningBackgroundProcessCount: optionalSearchString,
+  schedulerReservationCount: optionalSearchString,
+  sessionArtifactCount: optionalSearchString,
+  sessionCount: optionalSearchString,
+  skippedNotBuilderOwnedCount: optionalSearchString,
+  taskCount: optionalSearchString,
+  terminalTaskCount: optionalSearchString,
+  waitingQuestionCount: optionalSearchString,
+  workflowLinkCount: optionalSearchString,
+  workspaceCount: optionalSearchString,
 });
 
-const lastProjectRouteStorageKey = "builder.desktop.lastProjectRoute";
 const routeRestoreSessionKey = "builder.desktop.routeRestoreChecked";
 let routeRestoreCheckedFallback = false;
 
@@ -90,12 +122,6 @@ const projectRoute = createRoute({
   path: "/projects/$projectId",
   validateSearch: (search: Record<string, unknown>) => projectSearchSchema.parse(search),
   component: ProjectRoute,
-});
-
-const projectEditRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/projects/$projectId/edit",
-  component: ProjectEditShellRoute,
 });
 
 const workflowLibraryRoute = createRoute({
@@ -152,6 +178,13 @@ const workspaceUnlinkWindowRoute = createRoute({
   component: WorkspaceUnlinkNativeRoute,
 });
 
+const projectDeleteWindowRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: projectDeleteNativeDialogPath,
+  validateSearch: (search: Record<string, unknown>) => projectDeleteSearchSchema.parse(search),
+  component: ProjectDeleteNativeRoute,
+});
+
 const workflowDeleteConfirmWindowRoute = createWorkflowDeleteConfirmWindowRoute(rootRoute);
 
 const routeTree = rootRoute.addChildren([
@@ -160,12 +193,12 @@ const routeTree = rootRoute.addChildren([
   workflowLibraryRoute,
   workflowEditorRoute,
   legacyWorkflowEditorRoute,
-  projectEditRoute,
   taskRoute,
   projectCreateRoute,
   taskDetailWindowRoute,
   newTaskWindowRoute,
   workspaceUnlinkWindowRoute,
+  projectDeleteWindowRoute,
   workflowDeleteConfirmWindowRoute,
 ]);
 
@@ -200,7 +233,11 @@ function RootRoute() {
 }
 
 export function shouldSkipNativeDialogStartupGate(pathname: string): boolean {
-  return pathname === "/native-dialog/workspace-unlink" || pathname === workflowDeleteConfirmNativeDialogPath;
+  return (
+    pathname === "/native-dialog/workspace-unlink" ||
+    pathname === projectDeleteNativeDialogPath ||
+    pathname === workflowDeleteConfirmNativeDialogPath
+  );
 }
 
 function RoutePersistence() {
@@ -233,7 +270,7 @@ function RoutePersistence() {
 function projectRouteState(
   pathname: string,
   searchStr: string,
-): Readonly<{ projectId: string; workflowId: string }> | null {
+): StoredProjectRoute | null {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length !== 2 || segments[0] !== "projects") {
     return null;
@@ -243,28 +280,6 @@ function projectRouteState(
     projectId: decodeURIComponent(segments[1] ?? ""),
     workflowId: params.get("workflowId") ?? "",
   };
-}
-
-function readLastProjectRoute(): Readonly<{ projectId: string; workflowId: string }> | null {
-  const storage = safeStorage("local");
-  const raw = storage?.getItem(lastProjectRouteStorageKey) ?? null;
-  if (raw === null) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    const result = storedProjectRouteSchema.safeParse(parsed);
-    if (!result.success) {
-      return null;
-    }
-    return result.data;
-  } catch {
-    return null;
-  }
-}
-
-function writeLastProjectRoute(route: Readonly<{ projectId: string; workflowId: string }>): void {
-  safeStorage("local")?.setItem(lastProjectRouteStorageKey, JSON.stringify(route));
 }
 
 function claimRouteRestoreCheck(): boolean {
@@ -310,12 +325,6 @@ function HomeShellRoute() {
   const { t } = useTranslation();
   useWindowChromeTitle(t("home.projectsPane"));
   return <HomeRoute />;
-}
-
-function ProjectEditShellRoute() {
-  const params = projectEditRoute.useParams();
-  useWindowChromeTitle(null);
-  return <ProjectEditRoute projectId={params.projectId} />;
 }
 
 function WorkflowEditorShellRoute() {
@@ -398,6 +407,11 @@ function WorkspaceUnlinkNativeRoute() {
       workspaceID={search.workspaceID}
     />
   );
+}
+
+function ProjectDeleteNativeRoute() {
+  const search = projectDeleteWindowRoute.useSearch();
+  return <ProjectDeleteConfirmationWindowRoute {...projectDeleteConfirmationWindowTargetFromSearch(search)} />;
 }
 
 declare module "@tanstack/react-router" {

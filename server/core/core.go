@@ -263,7 +263,13 @@ func (s *Core) sessionLaunchServiceForProjectContextLocked(projectCtx projectCon
 		ReloadConfig: func() (config.App, error) {
 			return s.configForWorkspace(projectCtx.projectRoot)
 		},
-	}, s.safeBundles().Persistence.sessionStores).WithAuthStateReader(s.safeBundles().Auth.support.AuthManager)
+	}, s.safeBundles().Persistence.sessionStores).
+		WithAuthStateReader(s.safeBundles().Auth.support.AuthManager).
+		WithProjectDeleteGuard(
+			projectCtx.projectID,
+			s.safeBundles().Persistence.metadataStore,
+			s.safeBundles().Projects.projectGate,
+		)
 	s.safeBundles().Sessions.sessionServices[scopeKey] = service
 	return service
 }
@@ -282,6 +288,9 @@ func (s *Core) runPromptClientForProjectContext(projectCtx projectContext) clien
 		SessionLaunch:    s.sessionLaunchServiceForProjectContext(projectCtx),
 		AuthManager:      s.safeBundles().Auth.support.AuthManager,
 		FastModeState:    s.safeBundles().Runtime.fastModeState,
+		ProjectID:        projectCtx.projectID,
+		ProjectGuard:     s.safeBundles().Persistence.metadataStore,
+		ProjectGate:      s.safeBundles().Projects.projectGate,
 		Background:       s.safeBundles().Runtime.background,
 		RuntimeRegistry:  s.safeBundles().Runtime.runtimeRegistry,
 		BackgroundRouter: s.safeBundles().Runtime.backgroundRouter,

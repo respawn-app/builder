@@ -168,6 +168,9 @@ export function HomeRoute() {
             onCreateWorkflow={() => {
               void openSidebar({ kind: "workflowCreate", mode: "overlay" });
             }}
+            onProjectEdit={(projectID) => {
+              void openSidebar({ kind: "projectEdit", mode: "overlay", projectID });
+            }}
             onTabChange={setPrimaryTab}
             projectItems={projectItems}
             projectsQuery={projects}

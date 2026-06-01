@@ -8,15 +8,20 @@ import { errorMessage } from "../../api/errors";
 import { formatHomeRelativePath } from "../../app/formatters";
 import { useAppServices } from "../../app/useAppServices";
 import { useStatusController } from "../../app/useStatusController";
-import { Button, Dialog, fieldLabelClassName, NativeDialogWindow } from "../../ui";
+import { Button, Dialog, fieldControlHeightCssValue, fieldLabelClassName, NativeDialogWindow } from "../../ui";
 import { cx } from "../../ui/classes";
 
 export const workspaceUnlinkDialogWidth = 400;
 
 type WorkspaceUnlinkDialogStyle = CSSProperties & Readonly<Record<"--workspace-unlink-dialog-width", string>>;
+type ProjectNameFieldStyle = CSSProperties &
+  Readonly<Record<"--project-name-control-height", string>>;
 
 const workspaceUnlinkDialogStyle: WorkspaceUnlinkDialogStyle = {
   "--workspace-unlink-dialog-width": `${workspaceUnlinkDialogWidth.toString()}px`,
+};
+const projectNameFieldStyle: ProjectNameFieldStyle = {
+  "--project-name-control-height": fieldControlHeightCssValue,
 };
 
 export type WorkspaceUnlinkTarget = Readonly<{
@@ -42,7 +47,7 @@ export function ProjectNameField({
 }>) {
   const { t } = useTranslation();
   return (
-    <div className="grid gap-[var(--space-3)]">
+    <div className="grid gap-[var(--space-3)]" style={projectNameFieldStyle}>
       <label className={fieldLabelClassName} htmlFor="project-edit-name">
         {t("home.projectName")}
       </label>
@@ -50,7 +55,7 @@ export function ProjectNameField({
         <input
           aria-describedby="project-edit-name-error"
           aria-invalid={nameErrors.length > 0 ? true : undefined}
-          className="app-region-no-drag w-full rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[14px] py-3 text-[var(--color-on-island)]"
+          className="app-region-no-drag h-[var(--project-name-control-height)] w-full rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[14px] py-3 text-[var(--color-on-island)]"
           id="project-edit-name"
           onChange={(event) => {
             onNameChange(event.target.value);
@@ -59,7 +64,7 @@ export function ProjectNameField({
         />
         <button
           aria-label={t("projectEdit.saveName")}
-          className="grid aspect-square self-stretch place-items-center rounded-full border border-transparent bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:cursor-not-allowed disabled:opacity-55"
+          className="grid h-[var(--project-name-control-height)] w-[var(--project-name-control-height)] place-items-center justify-self-end rounded-full border border-transparent bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:cursor-not-allowed disabled:opacity-55 sm:justify-self-auto"
           disabled={disabled || !nameChanged || nameErrors.length > 0}
           onClick={onNameSave}
           type="button"

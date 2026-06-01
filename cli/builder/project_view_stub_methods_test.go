@@ -22,3 +22,11 @@ func (bindingCommandTimeoutProjectViewStub) SetDefaultWorkspace(context.Context,
 func (bindingCommandTimeoutProjectViewStub) UnlinkWorkspaceFromProject(context.Context, serverapi.ProjectWorkspaceUnlinkRequest) (serverapi.ProjectWorkspaceUnlinkResponse, error) {
 	return serverapi.ProjectWorkspaceUnlinkResponse{}, errors.New("unexpected UnlinkWorkspaceFromProject call")
 }
+
+func (bindingCommandTimeoutProjectViewStub) PreviewProjectDelete(context.Context, serverapi.ProjectDeletePreviewRequest) (serverapi.ProjectDeletePreviewResponse, error) {
+	return serverapi.ProjectDeletePreviewResponse{}, errors.New("unexpected PreviewProjectDelete call")
+}
+
+func (bindingCommandTimeoutProjectViewStub) DeleteProject(context.Context, serverapi.ProjectDeleteRequest) (serverapi.ProjectDeleteResponse, error) {
+	return serverapi.ProjectDeleteResponse{}, errors.New("unexpected DeleteProject call")
+}

@@ -99,6 +99,10 @@ export type NativeBridge = Readonly<{
       handler: (confirmation: NativeWorkflowGraphDeleteConfirmation) => void,
     ): Promise<NativeUnlisten>;
   }>;
+  projectDelete: Readonly<{
+    confirmDelete(confirmation: NativeProjectDeleteConfirmation): Promise<void>;
+    onDeleteConfirmed(handler: (confirmation: NativeProjectDeleteConfirmation) => void): Promise<NativeUnlisten>;
+  }>;
 }>;
 
 export type NativeWindowGlassTint = Readonly<{
@@ -173,6 +177,11 @@ export type NativeWorkflowGraphDeleteConfirmation = Readonly<{
   requestID: string;
 }>;
 
+export type NativeProjectDeleteConfirmation = Readonly<{
+  requestID: string;
+  projectID: string;
+}>;
+
 export type NativeUnlisten = () => void;
 
 const unavailableCapabilities: NativeCapabilityState = {
@@ -216,6 +225,7 @@ export const taskDetailNativeWindowInitialWidthPx = 840;
 const workspaceUnlinkRequestEvent = "builder://workspace-unlink-request";
 const projectWorkspaceChangedEvent = "builder://project-workspace-changed";
 const workflowGraphDeleteConfirmEvent = "builder://workflow-graph-delete-confirm";
+const projectDeleteConfirmEvent = "builder://project-delete-confirm";
 
 export function taskDetailNativeDialogWindowOptions(
   target: NativeTaskDetailTarget,
@@ -354,6 +364,14 @@ export function createBrowserNativeBridge(options: BrowserNativeBridgeOptions = 
         return Promise.resolve();
       },
       async onGraphDeleteConfirmed(): Promise<NativeUnlisten> {
+        return () => undefined;
+      },
+    },
+    projectDelete: {
+      async confirmDelete(): Promise<void> {
+        return Promise.resolve();
+      },
+      async onDeleteConfirmed(): Promise<NativeUnlisten> {
         return () => undefined;
       },
     },
@@ -508,6 +526,18 @@ export function createTauriNativeBridge(platform: NativePlatform = "unknown"): N
         handler: (confirmation: NativeWorkflowGraphDeleteConfirmation) => void,
       ): Promise<NativeUnlisten> {
         return listen<NativeWorkflowGraphDeleteConfirmation>(workflowGraphDeleteConfirmEvent, (event) => {
+          handler(event.payload);
+        });
+      },
+    },
+    projectDelete: {
+      async confirmDelete(confirmation: NativeProjectDeleteConfirmation): Promise<void> {
+        await emitTo("main", projectDeleteConfirmEvent, confirmation);
+      },
+      async onDeleteConfirmed(
+        handler: (confirmation: NativeProjectDeleteConfirmation) => void,
+      ): Promise<NativeUnlisten> {
+        return listen<NativeProjectDeleteConfirmation>(projectDeleteConfirmEvent, (event) => {
           handler(event.payload);
         });
       },

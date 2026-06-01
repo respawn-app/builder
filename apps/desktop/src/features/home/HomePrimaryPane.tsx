@@ -20,6 +20,7 @@ export type HomePrimaryPaneProps = Readonly<{
   disabled: boolean;
   onChooseWorkspace: () => void;
   onCreateWorkflow: () => void;
+  onProjectEdit: (projectID: string) => void;
   onTabChange: (tab: HomePrimaryTab) => void;
   projectItems: readonly ProjectSummary[];
   projectsQuery: ReturnType<typeof useProjectPages>;
@@ -30,6 +31,7 @@ export function HomePrimaryPane({
   disabled,
   onChooseWorkspace,
   onCreateWorkflow,
+  onProjectEdit,
   onTabChange,
   projectItems,
   projectsQuery,
@@ -50,7 +52,7 @@ export function HomePrimaryPane({
         </h2>
         <div className="route-transition-frame h-full min-h-0">
           {activeTab === "projects" ? (
-            <ProjectList items={projectItems} query={projectsQuery} />
+            <ProjectList items={projectItems} onProjectEdit={onProjectEdit} query={projectsQuery} />
           ) : (
             <HomeWorkflowList />
           )}
@@ -146,8 +148,13 @@ function HomePrimaryTabButton({
 
 function ProjectList({
   items,
+  onProjectEdit,
   query,
-}: Readonly<{ items: readonly ProjectSummary[]; query: ReturnType<typeof useProjectPages> }>) {
+}: Readonly<{
+  items: readonly ProjectSummary[];
+  onProjectEdit: (projectID: string) => void;
+  query: ReturnType<typeof useProjectPages>;
+}>) {
   const { t } = useTranslation();
   if (query.isPending) {
     return <LoadingState appearanceDelayMs={0} fullPage={false} reveal={false} title={t("states.loading")} />;
@@ -168,7 +175,7 @@ function ProjectList({
       onLoadMore={() => void query.fetchNextPage()}
       paddingEnd={16}
       paddingStart={16}
-      renderItem={(project) => <ProjectRow project={project} />}
+      renderItem={(project) => <ProjectRow onEdit={onProjectEdit} project={project} />}
     />
   );
 }

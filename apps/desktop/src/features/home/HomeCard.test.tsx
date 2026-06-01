@@ -51,7 +51,7 @@ function CardRegressionFixture() {
   return (
     <div>
       <div data-testid="home-card-regression">
-        <ProjectRow project={projectSummary} />
+        <ProjectRow onEdit={vi.fn()} project={projectSummary} />
       </div>
       <div data-testid="home-card-regression">
         <WorkflowCard
