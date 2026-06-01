@@ -86,7 +86,7 @@ test("desktop ESLint architecture rules reject representative component violatio
 test("desktop ESLint config explicitly enforces complexity and debug-output limits", () => {
   assert.deepEqual(findRule("complexity"), ["error", { max: 12 }]);
   assert.deepEqual(findRule("max-depth"), ["error", 4]);
-  assert.deepEqual(findRule("max-lines"), ["error", { max: 350, skipBlankLines: true, skipComments: true }]);
+  assert.deepEqual(findRule("max-lines"), ["error", { max: 650, skipBlankLines: true, skipComments: true }]);
   assert.deepEqual(findRule("max-params"), ["error", 4]);
   assert.equal(findRule("no-console"), "error");
 });

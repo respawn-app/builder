@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 
-import type { ProjectDeleteImpact, ProjectDeleteResponse } from "../../api";
+import type { ProjectDeleteResponse } from "../../api";
 import { errorMessage } from "../../api/errors";
 import { clearLastProjectRouteForProject } from "../../app/lastProjectRoute";
 import { useAppNavigation } from "../../app/navigation";
@@ -69,7 +69,7 @@ export function ProjectDeleteSidebarAction({ projectID }: Readonly<{ projectID: 
         pushDeleteToast("project-delete-error", "danger", errorMessage(error));
       }
     },
-    [closeSidebar, deleteMutation, navigation, pushDeleteToast, t],
+    [closeSidebar, deleteMutation, navigation, projectID, pushDeleteToast, t],
   );
 
   const confirmationDialog = useNativeDialogFallback<ProjectDeleteConfirmationTarget>({

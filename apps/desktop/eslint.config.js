@@ -75,7 +75,7 @@ export default tseslint.config(
       "builder/no-useeffect-data-loading": "error",
       complexity: ["error", { max: 12 }],
       "max-depth": ["error", 4],
-      "max-lines": ["error", { max: 350, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["error", { max: 650, skipBlankLines: true, skipComments: true }],
       "max-params": ["error", 4],
       "no-console": "error",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],

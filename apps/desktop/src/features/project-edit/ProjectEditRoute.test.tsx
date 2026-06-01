@@ -226,7 +226,10 @@ describe("ProjectEditRoute", () => {
     expect(typeof requestID).toBe("string");
     const confirmHandler = confirmHandlers[0];
     expect(confirmHandler).toBeDefined();
-    confirmHandler?.({ projectID: "project-1", requestID: requestID as string });
+    if (confirmHandler === undefined || typeof requestID !== "string") {
+      throw new Error("project delete confirmation handler was not registered");
+    }
+    confirmHandler({ projectID: "project-1", requestID });
 
     await waitFor(() => {
       expect(services.transport.calls).toContainEqual({
