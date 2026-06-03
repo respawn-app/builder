@@ -582,22 +582,23 @@ describe("WorkflowEditorRoute", () => {
       throw new Error("Expected test document to have a default window");
     }
     const elementFromPoint = vi.fn<typeof document.elementFromPoint>(() => card);
-    Object.defineProperty(document, "elementFromPoint", {
-      configurable: true,
-      value: elementFromPoint,
-    });
-    dispatchMouseEvent(card, eventView, "mousedown", { button: 0, clientX: 12, clientY: 18 });
-    dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 28, clientY: 34 });
-    dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 40, clientY: 48 });
-    await waitFor(() => {
-      expect(screen.getByTestId("workflow-group-drag-preview")).toHaveTextContent("Review");
-    });
-    Object.defineProperty(screen.getByTestId("workflow-graph-group-group-1"), "getBoundingClientRect", {
-      configurable: true,
-      value: () => new eventView.DOMRect(0, 0, 320, 240),
-    });
-    dispatchMouseEvent(document, eventView, "mouseup", { clientX: 40, clientY: 48 });
-    expect(elementFromPoint).toHaveBeenCalledWith(40, 48);
+    const restoreElementFromPoint = mockDocumentElementFromPoint(elementFromPoint);
+    try {
+      dispatchMouseEvent(card, eventView, "mousedown", { button: 0, clientX: 12, clientY: 18 });
+      dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 28, clientY: 34 });
+      dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 40, clientY: 48 });
+      await waitFor(() => {
+        expect(screen.getByTestId("workflow-group-drag-preview")).toHaveTextContent("Review");
+      });
+      Object.defineProperty(screen.getByTestId("workflow-graph-group-group-1"), "getBoundingClientRect", {
+        configurable: true,
+        value: () => new eventView.DOMRect(0, 0, 320, 240),
+      });
+      dispatchMouseEvent(document, eventView, "mouseup", { clientX: 40, clientY: 48 });
+      expect(elementFromPoint).toHaveBeenCalledWith(40, 48);
+    } finally {
+      restoreElementFromPoint();
+    }
 
     await waitFor(() => {
       expect(screen.getByTestId("review-group-probe")).toHaveTextContent("group-1");
@@ -2301,14 +2302,36 @@ function dragWorkflowNodeOut(card: HTMLElement): void {
   if (eventView === null) {
     throw new Error("Expected test document to have a default window");
   }
+  const restoreElementFromPoint = mockDocumentElementFromPoint(
+    vi.fn<typeof document.elementFromPoint>(() => card),
+  );
+  try {
+    dispatchMouseEvent(card, eventView, "mousedown", { button: 0, clientX: 12, clientY: 18 });
+    dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 28, clientY: 34 });
+    dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 500, clientY: 500 });
+    dispatchMouseEvent(document, eventView, "mouseup", { clientX: 500, clientY: 500 });
+  } finally {
+    restoreElementFromPoint();
+  }
+}
+
+function mockDocumentElementFromPoint(elementFromPoint: typeof document.elementFromPoint): () => void {
+  const originalElementFromPoint = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+  const fallbackElementFromPoint: typeof document.elementFromPoint = () => null;
   Object.defineProperty(document, "elementFromPoint", {
     configurable: true,
-    value: vi.fn<typeof document.elementFromPoint>(() => card),
+    value: elementFromPoint,
   });
-  dispatchMouseEvent(card, eventView, "mousedown", { button: 0, clientX: 12, clientY: 18 });
-  dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 28, clientY: 34 });
-  dispatchMouseEvent(document, eventView, "mousemove", { buttons: 1, clientX: 500, clientY: 500 });
-  dispatchMouseEvent(document, eventView, "mouseup", { clientX: 500, clientY: 500 });
+  return () => {
+    if (originalElementFromPoint === undefined) {
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: fallbackElementFromPoint,
+      });
+      return;
+    }
+    Object.defineProperty(document, "elementFromPoint", originalElementFromPoint);
+  };
 }
 
 function expectIdentifierInputCorrectionsDisabled(input: HTMLElement): void {

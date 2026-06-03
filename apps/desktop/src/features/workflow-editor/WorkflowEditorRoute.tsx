@@ -72,7 +72,7 @@ export type WorkflowEditorRouteProps = Readonly<{
 export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }: WorkflowEditorRouteProps) {
   const { t } = useTranslation();
   const { api, nativeBridge } = useAppServices();
-  const { closeSidebar, openSidebar } = useSidebar();
+  const { activeDestination, closeSidebar, openSidebar } = useSidebar();
   const { push: pushStatus } = useStatusController();
   const queryClient = useQueryClient();
   const data = useWorkflowEditorData(projectID, workflowID);
@@ -150,11 +150,17 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
       ) {
         setEmbeddedInspectorSelection(null);
       }
-      if (surface === "route") {
+      if (
+        surface === "route" &&
+        activeDestination?.kind === "workflowInspect" &&
+        activeDestination.workflowID === workflowID &&
+        activeDestination.selection.kind === "node" &&
+        activeDestination.selection.nodeID === selection.nodeID
+      ) {
         closeSidebar("closed");
       }
     },
-    [closeSidebar, embeddedInspectorSelection, surface, workflowID],
+    [activeDestination, closeSidebar, embeddedInspectorSelection, surface, workflowID],
   );
 
   useEffect(() => {

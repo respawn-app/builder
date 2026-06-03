@@ -107,4 +107,17 @@ describe("native bridge capabilities", () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(handler).toHaveBeenCalledWith({ workflowID: "workflow-1" });
   });
+
+  it("dispatches browser project deletion events for fallback dialogs", async () => {
+    const bridge = createBrowserNativeBridge();
+    const handler = vi.fn();
+
+    const unlisten = await bridge.projectDeletion.onDeleted(handler);
+    await bridge.projectDeletion.notifyDeleted({ projectID: "project-1" });
+    unlisten();
+    await bridge.projectDeletion.notifyDeleted({ projectID: "project-2" });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith({ projectID: "project-1" });
+  });
 });

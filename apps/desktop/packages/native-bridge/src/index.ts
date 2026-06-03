@@ -264,6 +264,7 @@ export type BrowserNativeBridgeOptions = Readonly<{
 
 export function createBrowserNativeBridge(options: BrowserNativeBridgeOptions = {}): NativeBridge {
   const capabilities = { ...unavailableCapabilities, platform: options.platform ?? "browser" };
+  const projectDeletionHandlers = new Set<(event: NativeProjectDeleted) => void>();
   const workflowDeletionHandlers = new Set<(event: NativeWorkflowDeleted) => void>();
   return {
     capabilities,
@@ -340,11 +341,18 @@ export function createBrowserNativeBridge(options: BrowserNativeBridgeOptions = 
       },
     },
     projectDeletion: {
-      async notifyDeleted(): Promise<void> {
-        return Promise.resolve();
+      async notifyDeleted(event: NativeProjectDeleted): Promise<void> {
+        await Promise.all(
+          Array.from(projectDeletionHandlers, async (handler) => {
+            handler(event);
+          }),
+        );
       },
-      async onDeleted(): Promise<NativeUnlisten> {
-        return () => undefined;
+      async onDeleted(handler: (event: NativeProjectDeleted) => void): Promise<NativeUnlisten> {
+        projectDeletionHandlers.add(handler);
+        return () => {
+          projectDeletionHandlers.delete(handler);
+        };
       },
     },
     projectWorkspace: {
