@@ -245,7 +245,14 @@ export function SidebarHost() {
         </h2>
         <SidebarHeaderAccessory destination={activeDestination} />
       </header>
-      <div className="min-h-0 overflow-y-auto px-[var(--space-4)] py-[var(--space-4)]">
+      <div
+        className={cx(
+          "min-h-0",
+          activeDestination.kind === "workflowEditor"
+            ? "overflow-hidden p-[var(--space-2)]"
+            : "overflow-y-auto px-[var(--space-4)] py-[var(--space-4)]",
+        )}
+      >
         <SidebarDestinationView destination={activeDestination} resolveSidebar={resolveSidebar} />
       </div>
     </aside>

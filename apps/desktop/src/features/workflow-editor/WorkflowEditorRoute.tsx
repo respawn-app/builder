@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { CircleQuestionMark } from "lucide-react";
+import { CircleQuestionMark, X } from "lucide-react";
 
 import {
   emptyWorkflowDerivedWiring,
@@ -15,16 +15,18 @@ import {
 } from "../../api";
 import { errorMessage } from "../../api/errors";
 import { useSidebar } from "../../app/sidebarContext";
+import type { WorkflowInspectorSelection } from "../../app/sidebarContext";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useStatusController } from "../../app/useStatusController";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
-import { Button, ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
+import { Button, ErrorState, FloatingNoticeIsland, IslandSurface, LoadingState } from "../../ui";
 import { cx } from "../../ui/classes";
 import { WorkflowValidationIssues } from "../workflow/WorkflowValidationIssues";
 import { normalizeWorkflowValidationErrors } from "../workflow/workflowValidationIssueNormalization";
 import { WorkflowGraphCanvas } from "./WorkflowGraphCanvas";
+import { WorkflowInspectorSidebar } from "./WorkflowInspectorSidebar";
 import { WorkflowDeleteConfirmationFallbackDialog } from "./WorkflowDeleteConfirmationWindow";
 import {
   workflowDeleteConfirmationCountsFromSummary,
@@ -63,10 +65,11 @@ import type { WorkflowGraphSelection } from "./workflowGraphSelection";
 
 export type WorkflowEditorRouteProps = Readonly<{
   projectID: string;
+  surface?: "route" | "sidebar" | undefined;
   workflowID: string;
 }>;
 
-export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRouteProps) {
+export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }: WorkflowEditorRouteProps) {
   const { t } = useTranslation();
   const { api, nativeBridge } = useAppServices();
   const { openSidebar } = useSidebar();
@@ -95,6 +98,8 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     );
   }
   const [pendingGraphMutation, setPendingGraphMutation] = useState<PendingGraphMutation | null>(null);
+  const [embeddedInspectorSelection, setEmbeddedInspectorSelection] =
+    useState<WorkflowEditorEmbeddedInspectorSelection | null>(null);
   const pendingGraphMutationRef = useRef<PendingGraphMutation | null>(null);
   const deleteRequestIndexRef = useRef(0);
   const draftDefinition =
@@ -113,7 +118,23 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     draftState?.graphVersion ?? 0,
     graphValidation,
   );
-  useWindowChromeTitle(workflow === undefined ? t("workflowEditor.title") : workflow.name);
+  useWindowChromeTitle(workflow === undefined ? t("workflowEditor.title") : workflow.name, surface === "route");
+
+  const inspectWorkflowGraphItem = useCallback(
+    (selection: WorkflowInspectorSelection) => {
+      if (surface === "sidebar") {
+        setEmbeddedInspectorSelection({ selection, workflowID });
+        return;
+      }
+      void openSidebar({
+        kind: "workflowInspect",
+        mode: "overlay",
+        selection,
+        workflowID,
+      });
+    },
+    [openSidebar, surface, workflowID],
+  );
 
   useEffect(() => {
     const source = data.workflowQuery.data;
@@ -260,6 +281,10 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
   });
 
   const viewState = workflowEditorViewState(data, layoutQuery);
+  const activeEmbeddedInspectorSelection =
+    surface === "sidebar" && embeddedInspectorSelection?.workflowID === workflowID
+      ? embeddedInspectorSelection.selection
+      : null;
   if (viewState.kind === "loading") {
     return (
       <LoadingState
@@ -313,12 +338,19 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
 
   const editorRoute = (
     <section
-      className="app-region-no-drag fixed inset-0 z-0 h-screen min-h-0 w-screen overflow-hidden"
+      className={cx(
+        "app-region-no-drag min-h-0 overflow-hidden",
+        surface === "route"
+          ? "fixed inset-0 z-0 h-screen w-screen"
+          : "relative h-full w-full rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)]",
+      )}
       data-testid="workflow-editor-route"
     >
-      <WorkflowEditorTopChromeBlur />
+      {surface === "route" ? <WorkflowEditorTopChromeBlur /> : null}
       <WorkflowGraphCanvas
         graph={viewState.graph}
+        keyboardScope={surface === "route" ? "global" : "focused"}
+        toolbarPositionStrategy={surface === "route" ? "fixed" : "absolute"}
         onAddNode={(kind) => {
           dispatch({
             input: {
@@ -408,20 +440,10 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
           dispatchGraphDeletion(selection, dispatch);
         }}
         onEdgeInspect={(edgeID) => {
-          void openSidebar({
-            kind: "workflowInspect",
-            mode: "overlay",
-            selection: { kind: "edge", edgeID },
-            workflowID,
-          });
+          inspectWorkflowGraphItem({ kind: "edge", edgeID });
         }}
         onGroupInspect={(groupID) => {
-          void openSidebar({
-            kind: "workflowInspect",
-            mode: "overlay",
-            selection: { kind: "group", groupID },
-            workflowID,
-          });
+          inspectWorkflowGraphItem({ kind: "group", groupID });
         }}
         onExtractNodeFromGroup={(nodeID) => {
           if (draftState === null) {
@@ -457,21 +479,18 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
           dispatch({ nodeID, type: "removeNodeFromGroup" });
         }}
         onNodeInspect={(nodeID) => {
-          void openSidebar({
-            kind: "workflowInspect",
-            mode: "overlay",
-            selection: { kind: "node", nodeID },
-            workflowID,
-          });
+          inspectWorkflowGraphItem({ kind: "node", nodeID });
         }}
         onWorkflowInspect={() => {
-          void openSidebar({
-            kind: "workflowInspect",
-            mode: "overlay",
-            selection: { kind: "workflow" },
-            workflowID,
-          });
+          inspectWorkflowGraphItem({ kind: "workflow" });
         }}
+      />
+      <WorkflowEditorEmbeddedInspector
+        onClose={() => {
+          setEmbeddedInspectorSelection(null);
+        }}
+        selection={activeEmbeddedInspectorSelection}
+        workflowID={workflowID}
       />
       <WorkflowEditorStatusIsland
         confirmationPreview={saveConfirmationPreview}
@@ -488,13 +507,14 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
         onDiscard={() => {
           dispatch({ source: controller.state.source, type: "reset" });
         }}
+        positionStrategy={surface === "route" ? "fixed" : "absolute"}
       />
       {deleteConfirmation.fallback}
-      <WorkflowEditorLegendIsland />
+      <WorkflowEditorLegendIsland positionStrategy={surface === "route" ? "fixed" : "absolute"} />
     </section>
   );
 
-  return createPortal(editorRoute, document.body);
+  return surface === "route" ? createPortal(editorRoute, document.body) : editorRoute;
 
   async function saveWorkflowDraft(confirmedPreview?: WorkflowGraphSavePreview): Promise<void> {
     if (draftState === null) {
@@ -597,6 +617,11 @@ type PendingGraphMutation = Readonly<{
   action: PendingGraphMutationAction;
   requestID: string;
   summary: WorkflowEditorCascadeSummary;
+}>;
+
+type WorkflowEditorEmbeddedInspectorSelection = Readonly<{
+  selection: WorkflowInspectorSelection;
+  workflowID: string;
 }>;
 
 type PendingGraphMutationAction =
@@ -758,7 +783,64 @@ async function copyWorkflowNodeText(
   await navigator.clipboard.writeText(value);
 }
 
-function WorkflowEditorLegendIsland() {
+function WorkflowEditorEmbeddedInspector({
+  onClose,
+  selection,
+  workflowID,
+}: Readonly<{
+  onClose: () => void;
+  selection: WorkflowInspectorSelection | null;
+  workflowID: string;
+}>) {
+  const { t } = useTranslation();
+  if (selection === null) {
+    return null;
+  }
+  const title = workflowInspectorTitle(selection, t);
+  return (
+    <IslandSurface
+      aria-label={title}
+      as="aside"
+      className="absolute top-[var(--space-2)] right-[var(--space-2)] bottom-[var(--space-2)] z-40 grid w-[min(420px,calc(100%-var(--space-4)))] grid-rows-[auto_1fr] overflow-hidden rounded-[var(--radius-l)] p-0"
+      level={3}
+    >
+      <header className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[var(--space-2)] border-b border-[var(--color-outline)] px-[var(--space-3)] py-[var(--space-2)]">
+        <Button
+          aria-label={t("app.close")}
+          onClick={onClose}
+          size="icon"
+          variant="ghost"
+        >
+          <X aria-hidden="true" size={18} strokeWidth={1.5} />
+        </Button>
+        <h2 className="m-0 truncate text-[1rem] font-bold">{title}</h2>
+      </header>
+      <div className="min-h-0 overflow-y-auto p-[var(--space-3)]">
+        <WorkflowInspectorSidebar selection={selection} workflowID={workflowID} />
+      </div>
+    </IslandSurface>
+  );
+}
+
+function workflowInspectorTitle(
+  selection: WorkflowInspectorSelection,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (selection.kind === "workflow") {
+    return t("workflowEditor.inspectWorkflow");
+  }
+  if (selection.kind === "node") {
+    return t("workflowEditor.inspectNode");
+  }
+  if (selection.kind === "group") {
+    return t("workflowEditor.inspectGroup");
+  }
+  return t("workflowEditor.inspectEdge");
+}
+
+function WorkflowEditorLegendIsland({
+  positionStrategy,
+}: Readonly<{ positionStrategy: "absolute" | "fixed" }>) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(true);
   return (
@@ -778,6 +860,7 @@ function WorkflowEditorLegendIsland() {
       level={3}
       onCollapsedChange={setCollapsed}
       positionClassName="left-[var(--space-2)] bottom-[var(--space-2)]"
+      positionStrategy={positionStrategy}
       title={t("workflowEditor.legend")}
       tone="neutral"
     >
@@ -961,12 +1044,14 @@ function WorkflowEditorStatusIsland({
   onCancelConfirmation,
   onConfirmSave,
   onDiscard,
+  positionStrategy,
 }: Readonly<{
   confirmationPreview: WorkflowGraphSavePreview | null;
   controller: WorkflowEditorDraftController;
   onCancelConfirmation: () => void;
   onConfirmSave: () => void;
   onDiscard: () => void;
+  positionStrategy: "absolute" | "fixed";
 }>) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
@@ -989,6 +1074,7 @@ function WorkflowEditorStatusIsland({
       level={3}
       onCollapsedChange={setCollapsed}
       positionClassName="right-[var(--space-4)] bottom-[var(--space-4)]"
+      positionStrategy={positionStrategy}
       title={controller.dirty.dirty ? t("workflowEditor.unsavedChanges") : t("board.workflowIssues")}
       tone={
         controller.draftValidation?.valid === false || controller.saveError.length > 0 ? "danger" : "neutral"

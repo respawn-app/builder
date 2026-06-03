@@ -130,7 +130,7 @@ export function SidebarProvider({ children }: Readonly<{ children: ReactNode }>)
 }
 
 function sidebarWidthProfile(destination: SidebarDestination): SidebarWidthProfile {
-  if (destination.kind === "workflowInspect") {
+  if (destination.kind === "workflowInspect" || destination.kind === "workflowEditor") {
     return "workflowEditor";
   }
   return defaultSidebarWidthProfile;

@@ -171,6 +171,8 @@ export const englishResources = {
       defaultLinked: "Default workflow",
       selected: "Selected workflow",
       reusableDefinition: "Reusable workflow definition",
+      edit: "Edit",
+      delete: "Delete",
     },
     task: {
       title: "Task",

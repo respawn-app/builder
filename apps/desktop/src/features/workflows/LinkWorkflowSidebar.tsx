@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { ProjectWorkflowLink, WorkflowRecord } from "../../api";
 import { errorMessage } from "../../api/errors";
 import { queryKeys } from "../../app/queryKeys";
+import { useSidebar } from "../../app/sidebarContext";
 import { useAppServices } from "../../app/useAppServices";
 import {
   Button,
@@ -16,6 +17,7 @@ import {
   LoadingState,
   VirtualizedInfiniteList,
 } from "../../ui";
+import { WorkflowActionsContextMenu } from "./WorkflowActionsContextMenu";
 import { useWorkflowPages } from "./WorkflowData";
 import { WorkflowCreateForm } from "./WorkflowCreateForm";
 
@@ -158,6 +160,7 @@ function LinkWorkflowPicker({
             linked={linkedByWorkflowID.get(workflow.id)}
             linking={linkMutation.isPending}
             onLink={() => void linkMutation.mutateAsync(workflow.id)}
+            projectID={projectID}
             selected={workflow.id === selectedWorkflowID}
             workflow={workflow}
           />
@@ -171,17 +174,20 @@ function WorkflowLinkRow({
   linked,
   linking,
   onLink,
+  projectID,
   selected,
   workflow,
 }: Readonly<{
   linked: ProjectWorkflowLink | undefined;
   linking: boolean;
   onLink: () => void;
+  projectID: string;
   selected: boolean;
   workflow: WorkflowRecord;
 }>) {
   const { t } = useTranslation();
-  return (
+  const { openSidebar } = useSidebar();
+  const row = (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[var(--space-2)] rounded-md border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[var(--space-3)] py-[var(--space-3)]">
       <ItemContent>
         <ItemTitle>{workflow.name}</ItemTitle>
@@ -199,6 +205,16 @@ function WorkflowLinkRow({
         {linked === undefined ? t("workflowLibrary.link") : t("workflowLibrary.select")}
       </Button>
     </div>
+  );
+  return (
+    <WorkflowActionsContextMenu
+      onEdit={() => {
+        void openSidebar({ kind: "workflowEditor", mode: "overlay", projectID, workflowID: workflow.id });
+      }}
+      workflowID={workflow.id}
+    >
+      {row}
+    </WorkflowActionsContextMenu>
   );
 }
 

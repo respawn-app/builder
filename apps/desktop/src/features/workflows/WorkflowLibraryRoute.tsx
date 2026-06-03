@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
+import type { WorkflowRecord } from "../../api";
 import { errorMessage } from "../../api/errors";
 import { useAppNavigation } from "../../app/navigation";
 import { useSidebar } from "../../app/sidebarContext";
@@ -14,7 +15,6 @@ const workflowLibraryItemMaxWidthClassName = "[&>*]:max-w-[1280px]";
 
 export function WorkflowLibraryRoute() {
   const { t } = useTranslation();
-  const navigation = useAppNavigation();
   const { openSidebar } = useSidebar();
   const connection = useConnectionSnapshot();
   const workflowsQuery = useWorkflowPages();
@@ -79,17 +79,29 @@ export function WorkflowLibraryRoute() {
           onLoadMore={() => void workflowsQuery.fetchNextPage()}
           paddingEnd={16}
           paddingStart={16}
-          renderItem={(workflow) => (
-            <WorkflowCard
-              onOpen={() => {
-                void navigation.openWorkflowEditor({ workflowID: workflow.id });
-              }}
-              workflow={workflow}
-            />
-          )}
+          renderItem={(workflow) => <WorkflowLibraryCard workflow={workflow} />}
         />
       </div>
     </section>
+  );
+}
+
+function WorkflowLibraryCard({ workflow }: Readonly<{ workflow: WorkflowRecord }>) {
+  const navigation = useAppNavigation();
+  const { openSidebar } = useSidebar();
+
+  return (
+    <WorkflowCard
+      contextActions={{
+        onEdit: () => {
+          void openSidebar({ kind: "workflowEditor", mode: "overlay", workflowID: workflow.id });
+        },
+      }}
+      onOpen={() => {
+        void navigation.openWorkflowEditor({ workflowID: workflow.id });
+      }}
+      workflow={workflow}
+    />
   );
 }
 

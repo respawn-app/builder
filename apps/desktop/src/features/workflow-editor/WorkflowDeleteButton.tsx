@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+/* eslint-disable react-refresh/only-export-components -- The reusable delete launcher hook intentionally shares the editor's delete flow with picker menu actions. */
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 
@@ -18,6 +19,35 @@ type WorkflowDeleteTarget = Readonly<{
 }>;
 
 export function WorkflowDeleteButton({ workflowID }: Readonly<{ workflowID: string }>) {
+  const { t } = useTranslation();
+  const deleteLauncher = useWorkflowDeleteLauncher(workflowID);
+
+  return (
+    <>
+      {deleteLauncher.fallback}
+      <Button
+        aria-label={t("workflowEditor.workflowDelete")}
+        className="justify-self-end"
+        disabled={deleteLauncher.disabled}
+        onClick={() => {
+          void deleteLauncher.openWorkflowDelete();
+        }}
+        size="icon"
+        title={t("workflowEditor.workflowDelete")}
+        variant="danger"
+      >
+        <Trash2 aria-hidden="true" className="block" size={18} strokeWidth={1.5} />
+      </Button>
+    </>
+  );
+}
+
+export function useWorkflowDeleteLauncher(workflowID: string): Readonly<{
+  disabled: boolean;
+  fallback: ReactNode;
+  openWorkflowDelete: () => Promise<void>;
+  opening: boolean;
+}> {
   const { t } = useTranslation();
   const { api, nativeBridge } = useAppServices();
   const connection = useConnectionSnapshot();
@@ -90,37 +120,31 @@ export function WorkflowDeleteButton({ workflowID }: Readonly<{ workflowID: stri
     ),
   });
 
-  return (
-    <>
-      {deleteDialog.fallback}
-      <Button
-        aria-label={t("workflowEditor.workflowDelete")}
-        className="justify-self-end"
-        disabled={disabled}
-        onClick={() => {
-          void openWorkflowDeleteConfirmation({
-            open: deleteDialog.open,
-            preview: async (id) => api.previewWorkflowDelete(id),
-            setOpening,
-            pushError: (message) => {
-              push({
-                id: "workflow-delete-preview-error",
-                tone: "danger",
-                title: t("workflowEditor.workflowDeleteTitle"),
-                body: message,
-              });
-            },
-            workflowID,
+  const openWorkflowDelete = useCallback(
+    async () =>
+      openWorkflowDeleteConfirmation({
+        open: deleteDialog.open,
+        preview: async (id) => api.previewWorkflowDelete(id),
+        setOpening,
+        pushError: (message) => {
+          push({
+            id: "workflow-delete-preview-error",
+            tone: "danger",
+            title: t("workflowEditor.workflowDeleteTitle"),
+            body: message,
           });
-        }}
-        size="icon"
-        title={t("workflowEditor.workflowDelete")}
-        variant="danger"
-      >
-        <Trash2 aria-hidden="true" className="block" size={18} strokeWidth={1.5} />
-      </Button>
-    </>
+        },
+        workflowID,
+      }),
+    [api, deleteDialog.open, push, t, workflowID],
   );
+
+  return {
+    disabled,
+    fallback: deleteDialog.fallback,
+    openWorkflowDelete,
+    opening,
+  };
 }
 
 export function WorkflowDeleteWindowRoute({ impact }: WorkflowDeleteTarget) {

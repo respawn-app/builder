@@ -48,6 +48,8 @@ export { WorkflowNodeInfoTooltipContent } from "./WorkflowGraphNodeMetadata";
 
 export type WorkflowGraphCanvasProps = Readonly<{
   graph: WorkflowGraphLayout;
+  keyboardScope?: "focused" | "global" | undefined;
+  toolbarPositionStrategy?: "absolute" | "fixed" | undefined;
   onCopyText?: ((value: string) => Promise<void> | void) | undefined;
   onAddNode?: ((kind: "agent" | "terminal") => void) | undefined;
   onAddNodeToGroup?: ((nodeID: string, groupID: string) => void) | undefined;
@@ -69,6 +71,8 @@ type RenderNodesState = Readonly<{
 
 export function WorkflowGraphCanvas({
   graph,
+  keyboardScope = "global",
+  toolbarPositionStrategy = "fixed",
   onCopyText = copyTextWithNavigator,
   onAddNode,
   onAddNodeToGroup,
@@ -96,10 +100,12 @@ export function WorkflowGraphCanvas({
           onRemoveNodeFromGroup={onRemoveNodeFromGroup}
           onEdgeInspect={onEdgeInspect}
           onGroupInspect={onGroupInspect}
+          keyboardScope={keyboardScope}
           onNodeInspect={onNodeInspect}
           onWorkflowInspect={onWorkflowInspect}
           onCopyText={onCopyText}
           nodes={graph.nodes}
+          toolbarPositionStrategy={toolbarPositionStrategy}
         />
       </ReactFlowProvider>
     </TooltipProvider>
@@ -108,6 +114,7 @@ export function WorkflowGraphCanvas({
 
 function WorkflowGraphCanvasInner({
   edges,
+  keyboardScope,
   onAddNode,
   onAddNodeToGroup,
   onConnectNodes,
@@ -121,8 +128,10 @@ function WorkflowGraphCanvasInner({
   onRemoveNodeFromGroup,
   onWorkflowInspect,
   nodes,
+  toolbarPositionStrategy,
 }: Readonly<{
   edges: readonly WorkflowGraphEdge[];
+  keyboardScope: "focused" | "global";
   onAddNode: ((kind: "agent" | "terminal") => void) | undefined;
   onAddNodeToGroup: ((nodeID: string, groupID: string) => void) | undefined;
   onConnectNodes: ((sourceNodeID: string, targetNodeID: string) => void) | undefined;
@@ -136,8 +145,10 @@ function WorkflowGraphCanvasInner({
   onRemoveNodeFromGroup: ((nodeID: string) => void) | undefined;
   onWorkflowInspect: () => void;
   nodes: readonly WorkflowGraphNode[];
+  toolbarPositionStrategy: "absolute" | "fixed";
 }>) {
   const instance = useReactFlow();
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState<WorkflowGraphSelection | null>(null);
   // React Flow owns the drag gesture, but workflow layout stays ELK/server-authored.
   // This transient snapshot lets cards move during drag without persisting canvas positions.
@@ -223,7 +234,11 @@ function WorkflowGraphCanvasInner({
     function onKeyDown(event: KeyboardEvent): void {
       const activeSelection =
         selection === null || !workflowGraphSelectionExists(selection, nodes, edges) ? null : selection;
-      if (event.defaultPrevented || isFormTarget(event.target)) {
+      if (
+        event.defaultPrevented ||
+        isFormTarget(event.target) ||
+        !shouldHandleWorkflowGraphShortcut(keyboardScope, rootRef.current)
+      ) {
         return;
       }
       if (applyViewportShortcut(event.key, instance)) {
@@ -239,9 +254,19 @@ function WorkflowGraphCanvasInner({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [edges, instance, nodes, onDeleteSelection, selection]);
+  }, [edges, instance, keyboardScope, nodes, onDeleteSelection, selection]);
   return (
-    <div className="workflow-editor-canvas h-full min-h-0 w-full" data-testid="workflow-editor-canvas">
+    <div
+      className="workflow-editor-canvas h-full min-h-0 w-full"
+      data-testid="workflow-editor-canvas"
+      onPointerDown={(event) => {
+        if (!isFormTarget(event.target)) {
+          event.currentTarget.focus({ preventScroll: true });
+        }
+      }}
+      ref={rootRef}
+      tabIndex={-1}
+    >
       <ReactFlow
         colorMode="system"
         edges={renderEdges}
@@ -323,7 +348,11 @@ function WorkflowGraphCanvasInner({
           size={1}
           variant={BackgroundVariant.Dots}
         />
-        <WorkflowGraphToolbar onAddNode={onAddNode} onWorkflowInspect={onWorkflowInspect} />
+        <WorkflowGraphToolbar
+          onAddNode={onAddNode}
+          onWorkflowInspect={onWorkflowInspect}
+          positionStrategy={toolbarPositionStrategy}
+        />
         {groupDrag === null ? null : <WorkflowGroupDragPreview drag={groupDrag} />}
       </ReactFlow>
     </div>
@@ -354,6 +383,16 @@ function applyViewportShortcut(key: string, instance: ReturnType<typeof useReact
   return false;
 }
 
+function shouldHandleWorkflowGraphShortcut(
+  keyboardScope: "focused" | "global",
+  root: HTMLElement | null,
+): boolean {
+  if (keyboardScope === "global") {
+    return true;
+  }
+  return root?.contains(document.activeElement) === true;
+}
+
 function isWorkflowAgentGraphNode(node: Node): node is WorkflowGraphWorkflowNode {
   return node.data.entityKind === "node" && node.data.kind === "agent";
 }
@@ -366,7 +405,7 @@ function relaxActiveGroupedNodeClamp(nodes: Node[], activeNodeID: string | null)
     if (node.id !== activeNodeID || !isWorkflowAgentGraphNode(node) || node.parentId === undefined) {
       return node;
     }
-    const { extent: _extent, ...unclamped } = node;
-    return unclamped;
+    const { extent, ...unclamped } = node;
+    return extent === undefined ? node : unclamped;
   });
 }
