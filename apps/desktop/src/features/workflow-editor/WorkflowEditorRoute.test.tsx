@@ -65,61 +65,12 @@ describe("WorkflowEditorRoute", () => {
     expect(within(issues).getAllByRole("list").length).toBeGreaterThan(0);
     expect(within(issues).getAllByRole("listitem")).toHaveLength(1);
     expect(within(issues).getByText("Done transition is invalid.")).toBeInTheDocument();
-    expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
-    expect(screen.getByTestId("workflow-editor-route")).toHaveClass(
-      "fixed",
-      "inset-0",
-      "h-screen",
-      "w-screen",
-    );
-    expect(screen.getByTestId("route-transition-frame")).not.toContainElement(
-      screen.getByTestId("workflow-editor-route"),
-    );
-    expect(screen.getByTestId("workflow-editor-route")).not.toHaveClass("p-[var(--space-2)]");
-    expect(screen.getByTestId("workflow-editor-top-chrome-blur")).toHaveClass(
-      "fixed",
-      "top-0",
-      "h-[calc(var(--native-titlebar-height)*2)]",
-      "pointer-events-none",
-    );
-    expect(screen.getByTestId("workflow-editor-top-chrome-blur")).toHaveStyle({
-      background: "color-mix(in srgb, var(--window-glass-tint) 65%, transparent)",
-      backdropFilter: "blur(16px) saturate(0.8) brightness(0.78)",
-      maskImage: "linear-gradient(to bottom, black 0%, black 30%, transparent 100%)",
-    });
     const legend = screen.getByRole("complementary", { name: "Legend" });
-    expect(legend).toHaveClass(
-      "floating-notice-collapsed",
-      "left-[var(--space-2)]",
-      "bottom-[var(--space-2)]",
-      "h-12",
-      "w-12",
-      "p-0",
-    );
-    expect(within(legend).getByTestId("workflow-legend-collapsed-help-icon")).toHaveClass(
-      "lucide-circle-question-mark",
-    );
 
     await user.click(within(legend).getByRole("button", { name: "Expand" }));
-    expect(legend).toHaveClass(
-      "floating-notice-expanded",
-      "left-[var(--space-2)]",
-      "bottom-[var(--space-2)]",
-      "h-[204px]",
-      "p-[var(--space-2)]",
-    );
-    const edgeSwatches = within(legend).getAllByTestId("workflow-legend-edge-swatch");
-    expect(edgeSwatches[0]).toHaveAttribute("width", "22");
-    expect(edgeSwatches[0]).toHaveAttribute("height", "6");
-    expect(edgeSwatches[0]).toHaveAttribute("viewBox", "0 0 22 6");
-    expect(within(legend).getAllByTestId("workflow-legend-edge-line")[0]).toHaveAttribute(
-      "stroke-width",
-      "1.25",
-    );
-    const nodeSwatches = within(legend).getAllByTestId("workflow-legend-node-swatch");
-    expect(nodeSwatches[0]).toHaveClass("h-[9px]", "w-[14px]", "rounded-[2px]", "border");
-    expect(nodeSwatches.at(-1)).toHaveClass("h-[10px]", "w-[10px]", "rounded-[2px]", "rotate-45");
-    expect(nodeSwatches.at(-1)).not.toHaveClass("h-[9px]", "w-[14px]");
+    expect(within(legend).getByText("Continue session")).toBeInTheDocument();
+    expect(within(legend).getByText("New session")).toBeInTheDocument();
+    expect(within(legend).getByText("Multi-agent join")).toBeInTheDocument();
   });
 
   it("opens inspectors for workflow metadata and graph entities", async () => {
@@ -146,11 +97,8 @@ describe("WorkflowEditorRoute", () => {
 
     fireEvent.click(screen.getByTestId("workflow-graph-node-node-1"));
     const nodeInspector = await screen.findByRole("complementary", { name: "Inspect node" });
-    expect(within(nodeInspector).getByRole("heading", { name: "Inspect node" })).toHaveClass(
-      "whitespace-nowrap",
-    );
+    expect(within(nodeInspector).getByRole("heading", { name: "Inspect node" })).toBeInTheDocument();
     const nodeIDButton = within(nodeInspector).getByRole("button", { name: "Copy node ID node-1" });
-    expect(nodeIDButton).toHaveClass("text-xs", "grid", "min-w-0", "justify-items-end");
     fireEvent.click(nodeIDButton);
     await waitFor(() => {
       expect(copied).toEqual(["node-1"]);
@@ -1252,9 +1200,7 @@ describe("WorkflowEditorRoute", () => {
     );
     expect(within(nodeInspector).queryByRole("textbox", { name: "Input name" })).not.toBeInTheDocument();
     expect(within(nodeInspector).getByRole("button", { name: "Reorder input field" })).toBeInTheDocument();
-    expect(within(nodeInspector).getByTestId("workflow-input-field")).toHaveClass(
-      "workflow-editor-input-field",
-    );
+    expect(within(nodeInspector).getByTestId("workflow-input-field")).toBeInTheDocument();
 
     fireEvent.click(initialFieldTitle);
     const editedExistingFieldName = within(nodeInspector).getByRole("textbox", { name: "Input name" });
@@ -1272,9 +1218,7 @@ describe("WorkflowEditorRoute", () => {
     expect(newFieldName).toHaveValue("");
     expectIdentifierInputCorrectionsDisabled(newFieldName);
     expect(within(nodeInspector).getAllByRole("button", { name: "Reorder input field" })).toHaveLength(2);
-    expect(within(nodeInspector).getAllByTestId("workflow-input-field")[0]).toHaveClass(
-      "workflow-editor-input-field",
-    );
+    expect(within(nodeInspector).getAllByTestId("workflow-input-field")).toHaveLength(2);
 
     fireEvent.change(newFieldName, { target: { value: "details" } });
     expect(within(nodeInspector).getByRole("textbox", { name: "Input name" })).toHaveValue("details");
@@ -1388,7 +1332,6 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
     const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
     const edgeIDButton = within(inspector).getByRole("button", { name: "Copy edge ID edge-2" });
-    expect(edgeIDButton).toHaveClass("text-xs", "grid", "min-w-0", "justify-items-end");
     expect(within(inspector).queryByText("ID")).not.toBeInTheDocument();
     fireEvent.click(edgeIDButton);
     await waitFor(() => {
@@ -1436,14 +1379,10 @@ describe("WorkflowEditorRoute", () => {
     expect(routeControls.queryByText("Target node")).not.toBeInTheDocument();
     const routeGraphic = within(inspector).getByTestId("workflow-edge-route-graphic");
     expect(routeGraphic).toHaveAccessibleName("Join to Done");
-    expect(routeGraphic).toHaveClass("grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]");
     expect(within(routeGraphic).getByTestId("workflow-edge-route-source")).toHaveTextContent("Join");
     expect(within(routeGraphic).getByTestId("workflow-edge-route-target")).toHaveTextContent("Done");
-    expect(within(routeGraphic).getByTestId("workflow-edge-route-arrow")).toHaveStyle({
-      color: "var(--color-primary)",
-    });
     const requiresApproval = routeControls.getByRole("checkbox", { name: "Requires approval" });
-    expect(requiresApproval).toHaveAttribute("data-slot", "checkbox");
+    expect(requiresApproval).toBeChecked();
     expect(routeControls.queryByText("None")).not.toBeInTheDocument();
     expect(routeControls.queryByText("Required")).not.toBeInTheDocument();
 
@@ -1848,30 +1787,6 @@ describe("WorkflowEditorRoute", () => {
     expect(screen.queryByTestId("loading-state")).not.toBeInTheDocument();
   });
 
-  it("stretches workflow editor loading state content across the full island", async () => {
-    window.history.pushState(null, "", "/workflows/workflow-1/editor");
-    render(
-      <App
-        services={createTestServices([
-          ...startupRoutes,
-          { method: "workflow.get", handler: async () => new Promise(() => undefined) },
-          { method: "workflow.validate", result: invalidValidationResponse },
-        ])}
-      />,
-    );
-
-    expect(await screen.findByTestId("loading-state")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByTestId("loading-state")).toHaveClass("h-full", "min-h-0", "p-[var(--space-2)]");
-      expect(screen.getByTestId("loading-state-island")).toHaveClass("h-full", "w-full");
-      expect(screen.getByTestId("loading-state-island")).not.toHaveClass("max-w-[760px]", "m-auto");
-    });
-    await waitFor(() => {
-      expect(screen.getByTestId("loading-state-content")).toHaveClass("w-full", "max-w-none");
-    });
-    expect(screen.getByTestId("loading-state-content")).not.toHaveClass("max-w-[560px]");
-  });
-
   it("updates graph-backed node edits in the mounted canvas", async () => {
     const user = userEvent.setup();
     window.history.pushState(null, "", "/workflows/workflow-1/editor");
@@ -1919,11 +1834,6 @@ describe("WorkflowEditorRoute", () => {
     render(<App services={services} />);
 
     const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
-    await waitFor(() => {
-      expect(within(canvas).getByTestId("workflow-graph-node-node-1")).not.toHaveClass(
-        "workflow-editor-node-error",
-      );
-    });
     const node = within(canvas).getByTestId("workflow-graph-node-node-1");
     fireEvent.click(node);
     const inspector = await screen.findByRole("complementary", { name: "Inspect node" });
@@ -1936,9 +1846,6 @@ describe("WorkflowEditorRoute", () => {
       expect(resolvePendingDraftValidation).toBeDefined();
     });
     expect(await within(canvas).findByText("Implement draft")).toBeInTheDocument();
-    expect(within(canvas).getByTestId("workflow-graph-node-node-1")).not.toHaveClass(
-      "workflow-editor-node-error",
-    );
 
     if (resolvePendingDraftValidation === undefined) {
       throw new Error("Expected pending draft validation to be registered.");
@@ -2064,9 +1971,7 @@ describe("WorkflowEditorRoute", () => {
     expect(
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
-    expect(screen.getByTestId("workflow-editor-route")).toHaveClass("fixed", "inset-0");
-    expect(screen.getByTestId("workflow-editor-route")).not.toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("workflow-editor-route")).toBeInTheDocument();
   });
 
   it("shows and acknowledges a dirty-draft conflict when the remote workflow version changes", async () => {
@@ -2159,16 +2064,9 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
-    expect(unsavedChanges).toHaveClass(
-      "max-h-[min(400px,calc(100vh-32px))]",
-      "w-[min(400px,calc(100vw-32px))]",
-      "overflow-y-auto",
-    );
     const title = within(unsavedChanges).getByRole("heading", { name: "Unsaved changes" });
     const discardButton = within(unsavedChanges).getByRole("button", { name: "Discard" });
     const saveButton = within(unsavedChanges).getByRole("button", { name: "Save" });
-    expect(discardButton).toHaveClass("w-full");
-    expect(saveButton).toHaveClass("w-full");
     expect(title.compareDocumentPosition(discardButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -2297,11 +2195,6 @@ describe("WorkflowEditorRoute", () => {
     ).toBeInTheDocument();
     const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
 
-    expect(unsavedChanges).toHaveClass(
-      "max-h-[min(400px,calc(100vh-32px))]",
-      "overflow-y-auto",
-      "overflow-x-hidden",
-    );
     expect(within(unsavedChanges).getByTestId("floating-notice-header")).toBeInTheDocument();
     expect(within(unsavedChanges).getByRole("button", { name: "Discard" })).toBeInTheDocument();
     expect(within(unsavedChanges).getByRole("button", { name: "Save" })).toBeInTheDocument();

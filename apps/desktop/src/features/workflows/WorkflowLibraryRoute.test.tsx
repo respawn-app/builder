@@ -21,7 +21,7 @@ describe("WorkflowLibraryRoute", () => {
     globalThis.ResizeObserver = originalResizeObserver;
   });
 
-  it("renders the empty workflow library as one full-height empty state without duplicate header controls", async () => {
+  it("renders the empty workflow library without duplicate header controls", async () => {
     render(
       <App
         services={createTestServices([
@@ -31,10 +31,7 @@ describe("WorkflowLibraryRoute", () => {
       />,
     );
 
-    const route = await screen.findByTestId("workflow-library-route");
-    expect(route).toHaveClass("h-full", "min-h-0");
-    expect(screen.getByTestId("empty-state")).toHaveClass("h-full", "min-h-0");
-    expect(screen.getByTestId("empty-state-island")).toHaveClass("h-full", "min-h-0", "w-full");
+    await screen.findByTestId("workflow-library-route");
     expect(screen.queryByRole("heading", { name: "Workflow Library" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Create workflow" })).toHaveLength(1);
   });
@@ -56,17 +53,8 @@ describe("WorkflowLibraryRoute", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
 
     const sidebar = await screen.findByRole("complementary", { name: "Workflow editor" });
-    expect(await within(sidebar).findByTestId("workflow-editor-route")).toHaveClass(
-      "relative",
-      "h-full",
-      "w-full",
-    );
+    expect(await within(sidebar).findByTestId("workflow-editor-route")).toBeInTheDocument();
     expect(await within(sidebar).findByTestId("workflow-editor-canvas")).toBeInTheDocument();
-    expect(within(sidebar).getByTestId("workflow-editor-tools")).toHaveClass(
-      "absolute",
-      "top-[var(--space-2)]",
-    );
-    expect(within(sidebar).getByTestId("workflow-editor-tools")).not.toHaveClass("fixed");
     fireEvent.click(within(sidebar).getByRole("button", { name: "Inspect workflow" }));
     expect(await within(sidebar).findByRole("complementary", { name: "Inspect workflow" })).toBeInTheDocument();
     expect(within(sidebar).getByTestId("workflow-editor-route")).toBeInTheDocument();

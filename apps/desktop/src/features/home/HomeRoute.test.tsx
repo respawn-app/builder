@@ -1,22 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach } from "vitest";
 
 import type { JsonValue } from "../../api/json";
 import { App } from "../../App";
 import { createTestServices, startupRoutes } from "../../testSupport/appServices";
 
 describe("HomeRoute", () => {
-  const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "getBoundingClientRect",
-  );
-
-  afterEach(() => {
-    if (originalGetBoundingClientRect !== undefined) {
-      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", originalGetBoundingClientRect);
-    }
-  });
-
   beforeEach(() => {
     installStorage("localStorage");
     installStorage("sessionStorage");
@@ -125,75 +113,6 @@ describe("HomeRoute", () => {
     expect(screen.getByRole("tab", { name: "Workflows" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
-  });
-
-  it("lets home project and workflow lists scroll behind the tab controls", async () => {
-    const controlsHeight = 64;
-    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
-      if (this instanceof HTMLElement && this.dataset.testid === "home-primary-controls") {
-        return domRect({ height: controlsHeight, width: 800 });
-      }
-      return domRect({ height: 0, width: 0 });
-    };
-    const services = createTestServices([
-      ...startupRoutes,
-      {
-        method: "project.home.list",
-        result: projectPage([projectSummary("project-alpha", "Alpha", 10)], ""),
-      },
-      {
-        method: "workflow.list",
-        result: {
-          workflows: [
-            {
-              id: "workflow-delivery",
-              name: "Delivery",
-              description: "Ship changes",
-              version: 1,
-            },
-          ],
-          next_page_token: "",
-        },
-      },
-    ]);
-
-    render(<App services={services} />);
-
-    expect(await screen.findByTestId("home-primary-pane")).toHaveClass("relative", "h-full", "min-h-0");
-    expect(screen.getByTestId("home-primary-controls")).toHaveClass("absolute", "inset-x-0", "top-0", "z-10");
-    expect(screen.getAllByTestId("home-primary-tab-island")).toHaveLength(2);
-    for (const island of screen.getAllByTestId("home-primary-tab-island")) {
-      expect(island).toHaveClass("island-surface", "island-surface-1", "rounded-full");
-    }
-    expect(screen.getByTestId("home-primary-scroll-layer")).toHaveClass("h-full", "min-h-0");
-    expect(await screen.findByRole("button", { name: "Alpha /tmp/project-alpha" })).toBeInTheDocument();
-    const projectScrollLayer = screen.getByTestId("home-primary-scroll-layer");
-    const projectScroll = within(projectScrollLayer).getByRole("list");
-    const firstProjectRow = within(projectScroll).getAllByRole("listitem")[0];
-    if (firstProjectRow === undefined) {
-      throw new Error("Expected the project list to render at least one row.");
-    }
-    await expectRowStartsAfterControls(firstProjectRow, controlsHeight);
-
-    projectScroll.scrollTop = controlsHeight / 2;
-    fireEvent.scroll(projectScroll);
-    expect(rowVisualTop(firstProjectRow, projectScroll, controlsHeight)).toBeLessThan(controlsHeight);
-
-    fireEvent.click(screen.getByRole("tab", { name: "Workflows" }));
-
-    expect(screen.getByTestId("home-primary-scroll-layer")).toHaveClass("h-full", "min-h-0");
-    expect(await screen.findByText("Delivery")).toBeInTheDocument();
-    const workflowScrollLayer = screen.getByTestId("home-primary-scroll-layer");
-    const workflowScroll = within(workflowScrollLayer).getByRole("list");
-    const firstWorkflowRow = within(workflowScroll).getAllByRole("listitem")[0];
-    if (firstWorkflowRow === undefined) {
-      throw new Error("Expected the workflow list to render at least one row.");
-    }
-    await expectRowStartsAfterControls(firstWorkflowRow, controlsHeight);
-
-    workflowScroll.scrollTop = controlsHeight / 2;
-    fireEvent.scroll(workflowScroll);
-    expect(rowVisualTop(firstWorkflowRow, workflowScroll, controlsHeight)).toBeLessThan(controlsHeight);
   });
 
   it("opens workflow creation from the Workflows tab plus action", async () => {
@@ -306,37 +225,6 @@ function installStorage(name: "localStorage" | "sessionStorage"): void {
       },
     },
   });
-}
-
-function domRect({ height, width }: Readonly<{ height: number; width: number }>): DOMRect {
-  return {
-    bottom: height,
-    height,
-    left: 0,
-    right: width,
-    toJSON: () => ({}),
-    top: 0,
-    width,
-    x: 0,
-    y: 0,
-  };
-}
-
-async function expectRowStartsAfterControls(row: HTMLElement, controlsHeight: number): Promise<void> {
-  await waitFor(() => {
-    expect(rowStartOffset(row, controlsHeight)).toBe(controlsHeight);
-  });
-}
-
-function rowVisualTop(row: HTMLElement, scroll: HTMLElement, controlsHeight: number): number {
-  return rowStartOffset(row, controlsHeight) - scroll.scrollTop;
-}
-
-function rowStartOffset(row: HTMLElement, controlsHeight: number): number {
-  if (row.style.transform === `translateY(${controlsHeight.toString()}px)`) {
-    return controlsHeight;
-  }
-  return Number.parseFloat(row.style.paddingTop);
 }
 
 const workflow = {

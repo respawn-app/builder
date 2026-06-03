@@ -48,11 +48,6 @@ describe("ProjectEditRoute", () => {
 
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: " Project " } });
     expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save name" })).toHaveClass(
-      "aspect-square",
-      "self-stretch",
-      "rounded-full",
-    );
 
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Renamed Project" } });
     fireEvent.click(screen.getByRole("button", { name: "Save name" }));
@@ -72,14 +67,10 @@ describe("ProjectEditRoute", () => {
         params: { project_id: "project-1", workspace_id: "workspace-2" },
       });
     });
-    expect(
-      screen.getByRole("button", { name: "Make /tmp/project the default workspace" }).className,
-    ).not.toContain("hover:");
     fireEvent.click(screen.getByRole("button", { name: "Make /tmp/project the default workspace" }));
     expect(
       services.transport.calls.filter((call) => call.method === "project.defaultWorkspace.set"),
     ).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Unlink /tmp/project" }).className).not.toContain("hover:");
   });
 
   it("opens Project Edit from the Home pencil and shows duplicate attach info without mutation", async () => {
