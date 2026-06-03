@@ -275,6 +275,50 @@ describe("WorkflowEditorRoute", () => {
     expect(closeCount).toBe(1);
   });
 
+  it("submits workflow delete only once from the native workflow delete dialog route", async () => {
+    let closeCount = 0;
+    let resolveDelete: ((value: typeof workflowDeleteResponse) => void) | undefined;
+    window.history.pushState(
+      null,
+      "",
+      "/native-dialog/workflow-delete?workflow_id=workflow-1&version=1&project_count=1&link_count=1&task_count=2&default_replacement_project_count=0&active_run_count=0&runnable_run_count=0&blocked_task_count=0",
+    );
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        {
+          method: "workflow.delete",
+          async handler() {
+            const response = await new Promise((resolve) => {
+              resolveDelete = resolve;
+            });
+            return response;
+          },
+        },
+      ],
+      nativeWorkflowDeleteWindowBridge(
+        () => {
+          closeCount += 1;
+        },
+        () => undefined,
+      ),
+    );
+
+    render(<App services={services} />);
+
+    const confirm = await screen.findByRole("button", { name: "Delete workflow" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(services.transport.calls.filter((call) => call.method === "workflow.delete")).toHaveLength(1);
+    await act(async () => {
+      resolveDelete?.(workflowDeleteResponse);
+    });
+    await waitFor(() => {
+      expect(closeCount).toBe(1);
+    });
+  });
+
   it("does not offer workflow delete retry when native notification fails after commit", async () => {
     let closeCount = 0;
     window.history.pushState(
@@ -708,6 +752,23 @@ describe("WorkflowEditorRoute", () => {
       },
     });
     expect(screen.queryByRole("dialog", { name: "Remove node from group?" })).not.toBeInTheDocument();
+  });
+
+  it("preserves extraction copy when opening the native graph confirmation route", async () => {
+    window.history.pushState(
+      null,
+      "",
+      "/native-dialog/workflow-delete-confirm?requestID=workflow-1-delete-1&nodeCount=1&edgeCount=2&transitionGroupCount=2&operation=extract",
+    );
+    render(<App services={createTestServices(startupRoutes)} />);
+
+    const confirmation = await screen.findByRole("dialog", { name: "Remove node from group?" });
+    expect(
+      within(confirmation).getByText(
+        "This will remove the node from the group and remove group join wiring that no longer applies.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(confirmation).getByRole("button", { name: "Remove from group" })).toBeInTheDocument();
   });
 
   it("rejects stale drag-out extraction confirmations after draft graph changes", async () => {

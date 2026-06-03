@@ -535,6 +535,23 @@ describe("workflowEditorGraphMutations", () => {
     });
   });
 
+  it("blocks extraction when a fan-out duplicates one branch and omits another branch", () => {
+    const draft = withDuplicateMissingBranchFanout(inferredThreeBranchGroupDraft());
+
+    const extracted = extractWorkflowNodeFromGroup(draft, {
+      rehomedIncomingTransitionGroupID: "group-review-extracted",
+      nodeID: "node-review",
+    });
+
+    expect(extracted.draft).toBe(draft);
+    expect(extracted.warnings).toEqual(["node group extraction topology could not be inferred safely"]);
+    expect(extracted.summary).toEqual({
+      removedEdgeIDs: [],
+      removedNodeIDs: [],
+      removedTransitionGroupIDs: [],
+    });
+  });
+
   it("infers v1 node group topology when adding another branch to an existing valid group", () => {
     const withReview = addWorkflowNode(draftDefinitionFromSource(groupableWorkflowDefinition), {
       id: "node-review",
@@ -831,6 +848,15 @@ function withDuplicateExactBranchFanout(draft: ReturnType<typeof draftDefinition
         workflowID: "workflow-1",
       },
     ],
+  };
+}
+
+function withDuplicateMissingBranchFanout(draft: ReturnType<typeof draftDefinitionFromSource>) {
+  return {
+    ...draft,
+    edges: draft.edges.map((edge) =>
+      edge.id === "edge-start-audit" ? { ...edge, targetNodeID: "node-review" } : edge,
+    ),
   };
 }
 

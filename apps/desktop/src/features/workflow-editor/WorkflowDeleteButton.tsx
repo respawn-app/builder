@@ -154,10 +154,12 @@ export function WorkflowDeleteWindowRoute({ impact }: WorkflowDeleteTarget) {
   const [actionError, setActionError] = useState("");
   const [committed, setCommitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const confirmDelete = useCallback(async (): Promise<void> => {
-    if (submitting || committed) {
+    if (submittingRef.current || committed) {
       return;
     }
+    submittingRef.current = true;
     setActionError("");
     setSubmitting(true);
     try {
@@ -166,6 +168,7 @@ export function WorkflowDeleteWindowRoute({ impact }: WorkflowDeleteTarget) {
         setActionError(
           workflowDeleteBlockersMessage(response.blockers, t("workflowEditor.workflowDeleteBlocked")),
         );
+        submittingRef.current = false;
         setSubmitting(false);
         return;
       }
@@ -183,6 +186,7 @@ export function WorkflowDeleteWindowRoute({ impact }: WorkflowDeleteTarget) {
           title: t("workflowEditor.workflowDeleteWindowError"),
           body: message,
         });
+        submittingRef.current = false;
         setSubmitting(false);
         return;
       }
@@ -199,6 +203,7 @@ export function WorkflowDeleteWindowRoute({ impact }: WorkflowDeleteTarget) {
           title: t("workflowEditor.workflowDeleteWindowError"),
           body: message,
         });
+        submittingRef.current = false;
         setSubmitting(false);
       }
     } catch (error) {
@@ -209,9 +214,10 @@ export function WorkflowDeleteWindowRoute({ impact }: WorkflowDeleteTarget) {
         title: t("workflowEditor.workflowDeleteWindowError"),
         body: errorMessage(error),
       });
+      submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [api, committed, impact, nativeBridge.workflowDeletion, nativeBridge.window, push, submitting, t]);
+  }, [api, committed, impact, nativeBridge.workflowDeletion, nativeBridge.window, push, t]);
 
   return (
     <NativeDialogWindow

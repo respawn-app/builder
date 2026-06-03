@@ -409,8 +409,12 @@ function transitionGroupTargetsExactly(
   const edges = draft.edges.filter((edge) => edge.transitionGroupID === transitionGroupID);
   return (
     edges.length === targetNodeIDs.size &&
-    edges.every((edge) => targetNodeIDs.has(edge.targetNodeID))
+    setsEqual(new Set(edges.map((edge) => edge.targetNodeID)), targetNodeIDs)
   );
+}
+
+function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  return left.size === right.size && Array.from(left).every((item) => right.has(item));
 }
 
 function nodeGroupFanoutEdgeIDsToRemove(
