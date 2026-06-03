@@ -75,6 +75,7 @@ export const workflowEditorEnglish = {
   members: "Members",
   sortOrder: "Sort order",
   transitionID: "Transition ID",
+  transitionText: "Transition text",
   transitionGroup: "Transition group",
   route: "Route",
   sourceNode: "Source node",

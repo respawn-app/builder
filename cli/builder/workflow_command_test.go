@@ -23,9 +23,10 @@ import (
 
 type workflowCommandLoopbackRemote struct {
 	client.WorkflowClient
-	cfg     config.App
-	binding metadata.Binding
-	store   *workflowstore.Store
+	cfg                   config.App
+	binding               metadata.Binding
+	projectBindingsByRoot map[string]serverapi.ProjectBinding
+	store                 *workflowstore.Store
 }
 
 func (r *workflowCommandLoopbackRemote) Close() error { return nil }
@@ -43,6 +44,9 @@ func (r *failingWorkflowEdgeUpdateRemote) UpdateWorkflowEdge(ctx context.Context
 }
 
 func (r *workflowCommandLoopbackRemote) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	if binding, ok := r.projectBindingsByRoot[req.Path]; ok {
+		return serverapi.ProjectResolvePathResponse{CanonicalRoot: req.Path, Binding: &binding}, nil
+	}
 	if req.Path != r.cfg.WorkspaceRoot {
 		return serverapi.ProjectResolvePathResponse{}, nil
 	}
@@ -544,6 +548,43 @@ func TestTaskShowFindsSameProjectTaskOutsideSelectedWorkflow(t *testing.T) {
 	}
 	if strings.Contains(showOut, "[Note:") {
 		t.Fatalf("task show output = %q, did not expect cross-project note", showOut)
+	}
+}
+
+func TestTaskShowUsesRegisteredTaskWorktreeRootAsCurrentProject(t *testing.T) {
+	cfg, binding, remote := newWorkflowCommandLoopback(t)
+	worktreeRoot := t.TempDir()
+	worktreeCfg := cfg
+	worktreeCfg.WorkspaceRoot = worktreeRoot
+	remote.projectBindingsByRoot = map[string]serverapi.ProjectBinding{
+		worktreeRoot: {
+			ProjectID:     binding.ProjectID,
+			ProjectKey:    binding.ProjectKey,
+			ProjectName:   binding.ProjectName,
+			WorkspaceID:   binding.WorkspaceID,
+			CanonicalRoot: worktreeRoot,
+		},
+	}
+	restore := replaceWorkflowCommandRemoteOpener(t, worktreeCfg, remote)
+	defer restore()
+
+	workflowID := createRunnableWorkflowForCommandTest(t, "Task Worktree Workflow")
+	if _, linkErr, code := runWorkflowRootCommand("workflow", "link", binding.ProjectID, workflowID, "--default"); code != 0 {
+		t.Fatalf("workflow link exit=%d stderr=%q", code, linkErr)
+	}
+	taskOut, taskErr, code := runWorkflowRootCommand("task", "create", "--title", "Worktree Task", "--body", "Body", "--workflow", workflowID, "--project", binding.ProjectID)
+	if code != 0 {
+		t.Fatalf("task create exit=%d stderr=%q", code, taskErr)
+	}
+	taskID := labeledOutputValue(t, taskOut, "task_id")
+	shortID := labeledOutputValue(t, taskOut, "short_id")
+
+	showOut, showErr, code := runWorkflowRootCommand("task", "show", shortID)
+	if code != 0 {
+		t.Fatalf("task show from worktree root exit=%d stderr=%q", code, showErr)
+	}
+	if !strings.Contains(showOut, "task_id\t"+taskID) {
+		t.Fatalf("task show output = %q, want task id %s", showOut, taskID)
 	}
 }
 
