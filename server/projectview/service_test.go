@@ -602,6 +602,37 @@ func TestMetadataServiceResolveProjectPathLeavesNestedDirectoryUnbound(t *testin
 	}
 }
 
+func TestMetadataServiceResolveProjectPathMapsRegisteredWorktreeRootToProject(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	worktreeRoot := filepath.Join(t.TempDir(), "task-worktree")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktree root: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot worktree: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(context.Background(), metadata.WorktreeRecord{
+		ID:            "worktree-task",
+		WorkspaceID:   binding.WorkspaceID,
+		CanonicalRoot: canonicalWorktreeRoot,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	svc := newProjectViewMetadataService(t, store, "")
+
+	resolved, err := svc.ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: worktreeRoot})
+	if err != nil {
+		t.Fatalf("ResolveProjectPath worktree root: %v", err)
+	}
+	if resolved.CanonicalRoot != canonicalWorktreeRoot {
+		t.Fatalf("canonical root = %q, want worktree root %q", resolved.CanonicalRoot, canonicalWorktreeRoot)
+	}
+	if resolved.Binding == nil || resolved.Binding.ProjectID != binding.ProjectID || resolved.Binding.WorkspaceID != binding.WorkspaceID {
+		t.Fatalf("resolved binding = %+v, want owning project/workspace %+v", resolved.Binding, binding)
+	}
+}
+
 func TestMetadataServicePlansInteractiveLocalUnboundWorkspace(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
 	workspace := t.TempDir()

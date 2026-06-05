@@ -80,9 +80,17 @@ A derived runtime mapping from a target required input to the same-named transit
 
 A stable identifier for a transition group leaving a node. Agent nodes choose a transition ID when more than one transition group is available.
 
+### Transition Text
+
+The human-facing label for a transition group. In the workflow editor edge inspector, the `Transition text` field edits the transition group display name. Transition text is distinct from `transition_id`, which agents emit as the selected transition value.
+
 ### Transition Group
 
 One or more outgoing edges selected together by a transition ID. One edge is a normal transition. Multiple edges fan out into parallel target nodes.
+
+### Edge Key
+
+A stable identifier for one edge inside a transition group. Edge keys distinguish fan-out branch edges and join-provider references; they are not the agent-selected transition ID.
 
 ### Context-Preservation Mode
 

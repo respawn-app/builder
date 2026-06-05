@@ -247,7 +247,7 @@ function EdgeDraftDetails({
         title={t("workflowEditor.route")}
       >
         <TextInput
-          label={t("workflowEditor.transitionGroup")}
+          label={t("workflowEditor.transitionText")}
           onChange={(event) => {
             controller.dispatch({
               input: { edgeID: edge.id, transitionName: event.target.value },

@@ -3503,7 +3503,7 @@ func TestWorkflowPerEntityMutationsUseGraphEditPolicy(t *testing.T) {
 	})
 }
 
-func TestWorkflowGraphSaveBlocksRemovedTaskReferences(t *testing.T) {
+func TestWorkflowGraphSaveAllowsRemovedCompletedEdgeReferences(t *testing.T) {
 	ctx, store, binding := newTestStoreContext(t)
 	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 	task := createDefaultTask(t, ctx, store, binding.ProjectID)
@@ -3514,17 +3514,68 @@ func TestWorkflowGraphSaveBlocksRemovedTaskReferences(t *testing.T) {
 		t.Fatalf("GetDefinition: %v", err)
 	}
 
-	edgeRemoval := workflowGraphSaveRequestFromDefinition(workflowID, record.Version, true, def)
+	edgeRemoval := workflowGraphSaveRequestFromDefinition(workflowID, record.Version, false, def)
 	edgeRemoval.Edges = removeWorkflowGraphSaveEdge(edgeRemoval.Edges, workflow.EdgeID("edge-done-"+string(workflowID)))
 	edgeRemoval.TransitionGroups = removeWorkflowGraphSaveTransitionGroupByID(edgeRemoval.TransitionGroups, workflow.TransitionGroupID("group-done-"+string(workflowID)))
-	edgeBlocked, err := store.SaveWorkflowGraph(ctx, edgeRemoval)
+	preview, err := store.PreviewWorkflowGraphSave(ctx, edgeRemoval)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowGraphSave edge removal: %v", err)
+	}
+	if workflowGraphSaveBlockerCount(preview.Blockers, "edge_task_references") != 0 {
+		t.Fatalf("edge removal preview = %+v, want no edge task-reference blocker", preview)
+	}
+	edgeSaved, err := store.SaveWorkflowGraph(ctx, confirmWorkflowGraphSaveRequest(edgeRemoval, preview.Impact))
 	if err != nil {
 		t.Fatalf("SaveWorkflowGraph edge removal: %v", err)
 	}
-	if edgeBlocked.Saved || workflowGraphSaveBlockerCount(edgeBlocked.Blockers, "edge_task_references") == 0 {
-		t.Fatalf("edge removal graph save = %+v, want edge task-reference blocker", edgeBlocked)
+	if !edgeSaved.Saved || workflowGraphSaveBlockerCount(edgeSaved.Blockers, "edge_task_references") != 0 {
+		t.Fatalf("edge removal graph save = %+v, want saved without edge task-reference blocker", edgeSaved)
+	}
+}
+
+func TestWorkflowGraphSaveBlocksRemovedPendingEdgeReferences(t *testing.T) {
+	ctx, store, binding := newTestStoreContext(t)
+	workflowID := createApprovalWorkflow(t, ctx, store)
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
+	completeRun(t, ctx, store, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
+	def, record, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
 	}
 
+	req := workflowGraphSaveRequestFromDefinition(workflowID, record.Version, false, def)
+	req.Edges = removeWorkflowGraphSaveEdge(req.Edges, workflow.EdgeID("edge-done-approval-"+string(workflowID)))
+	req.TransitionGroups = removeWorkflowGraphSaveTransitionGroupByID(req.TransitionGroups, workflow.TransitionGroupID("group-done-"+string(workflowID)))
+	preview, err := store.PreviewWorkflowGraphSave(ctx, req)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowGraphSave pending edge removal: %v", err)
+	}
+	blocked, err := store.SaveWorkflowGraph(ctx, confirmWorkflowGraphSaveRequest(req, preview.Impact))
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph pending edge removal: %v", err)
+	}
+	if blocked.Saved || workflowGraphSaveBlockerCount(blocked.Blockers, "edge_task_references") == 0 {
+		t.Fatalf("pending edge removal graph save = %+v, want edge task-reference blocker", blocked)
+	}
+	if _, unchanged, err := store.GetDefinition(ctx, workflowID); err != nil {
+		t.Fatalf("GetDefinition after blocked pending edge save: %v", err)
+	} else if unchanged.Version != record.Version {
+		t.Fatalf("workflow version after blocked pending edge save = %d, want %d", unchanged.Version, record.Version)
+	}
+}
+
+func TestWorkflowGraphSaveBlocksRemovedNodeTaskReferences(t *testing.T) {
+	ctx, store, binding := newTestStoreContext(t)
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
+	completeRun(t, ctx, store, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
+	def, record, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
 	nodeRemoval := workflowGraphSaveRequestFromDefinition(workflowID, record.Version, true, def)
 	agentID := workflow.NodeID("node-agent-" + string(workflowID))
 	nodeRemoval.Nodes = removeWorkflowGraphSaveNode(nodeRemoval.Nodes, agentID)
@@ -3538,9 +3589,9 @@ func TestWorkflowGraphSaveBlocksRemovedTaskReferences(t *testing.T) {
 		t.Fatalf("node removal graph save = %+v, want node task-reference blocker", nodeBlocked)
 	}
 	if _, unchanged, err := store.GetDefinition(ctx, workflowID); err != nil {
-		t.Fatalf("GetDefinition after blocked graph saves: %v", err)
+		t.Fatalf("GetDefinition after blocked graph save: %v", err)
 	} else if unchanged.Version != record.Version {
-		t.Fatalf("workflow version after blocked graph saves = %d, want %d", unchanged.Version, record.Version)
+		t.Fatalf("workflow version after blocked graph save = %d, want %d", unchanged.Version, record.Version)
 	}
 }
 
@@ -3793,8 +3844,8 @@ func TestGuardedGraphDeletesRespectTaskHistory(t *testing.T) {
 	if err := store.DeleteNode(ctx, agentID); err == nil || !strings.Contains(err.Error(), "task history") {
 		t.Fatalf("expected node history delete guard, got %v", err)
 	}
-	if err := store.DeleteEdge(ctx, workflow.EdgeID("edge-done-"+string(workflowID))); err == nil || !strings.Contains(err.Error(), "task history") {
-		t.Fatalf("expected edge history delete guard, got %v", err)
+	if err := store.DeleteEdge(ctx, workflow.EdgeID("edge-done-"+string(workflowID))); err != nil {
+		t.Fatalf("DeleteEdge completed history edge: %v", err)
 	}
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {

@@ -217,6 +217,20 @@ func (s *Store) ResolveWorkspacePath(ctx context.Context, workspaceRoot string) 
 		return canonicalRoot, &binding, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
+		// Managed task worktrees are tracked as worktrees rather than standalone
+		// workspace bindings, but project-scoped commands run from the worktree
+		// root still need to resolve to the owning project.
+		worktree, worktreeErr := s.GetWorktreeRecordByCanonicalRoot(ctx, canonicalRoot)
+		if worktreeErr == nil {
+			binding, bindingErr := s.LookupWorkspaceBindingByID(ctx, worktree.WorkspaceID)
+			if bindingErr != nil {
+				return "", nil, bindingErr
+			}
+			return canonicalRoot, &binding, nil
+		}
+		if !errors.Is(worktreeErr, sql.ErrNoRows) {
+			return "", nil, worktreeErr
+		}
 		return canonicalRoot, nil, nil
 	}
 	return "", nil, err

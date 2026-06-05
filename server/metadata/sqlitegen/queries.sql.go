@@ -376,9 +376,25 @@ func (q *Queries) CountProjectWorkspaces(ctx context.Context, projectID string) 
 const countTaskEdgeReferences = `-- name: CountTaskEdgeReferences :one
 SELECT CAST(COUNT(*) AS INTEGER) AS ref_count
 FROM (
-    SELECT te.id FROM task_transition_edges te WHERE te.workflow_edge_id = ?1
+    -- Only live unresolved references block edge deletion. Completed historical
+    -- transition edges intentionally rely on ON DELETE SET NULL.
+    SELECT te.id
+    FROM task_transition_edges te
+    JOIN task_transition_records tt ON tt.id = te.task_transition_id
+    JOIN task_records t ON t.id = tt.task_id
+    WHERE te.workflow_edge_id = ?1
+      AND t.canceled_at_unix_ms = 0
+      AND tt.state = 'pending_approval'
+      AND te.state = 'pending'
     UNION ALL
-    SELECT p.id FROM task_node_placements p WHERE p.parallel_branch_edge_id = ?1
+    SELECT p.id
+    FROM task_node_placements p
+    JOIN task_records t ON t.id = p.task_id
+    JOIN workflow_nodes n ON n.id = p.node_id
+    WHERE p.parallel_branch_edge_id = ?1
+      AND p.state IN ('active', 'waiting_approval')
+      AND t.canceled_at_unix_ms = 0
+      AND n.kind != 'terminal'
 )
 `
 
@@ -701,6 +717,7 @@ SELECT
             JOIN workflow_nodes n ON n.id = p.node_id
             WHERE t.project_id = ?1
               AND t.canceled_at_unix_ms = 0
+              -- Backlog/start-node tasks are drafts, not active project work.
               AND n.kind NOT IN ('start', 'terminal')
             UNION
             SELECT t.id

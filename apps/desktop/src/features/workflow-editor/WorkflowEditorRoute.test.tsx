@@ -1400,7 +1400,7 @@ describe("WorkflowEditorRoute", () => {
       expect(copied).toEqual(["edge-2"]);
     });
 
-    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition group" }), {
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition text" }), {
       target: { value: "Review" },
     });
     fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition ID" }), {
@@ -1426,7 +1426,7 @@ describe("WorkflowEditorRoute", () => {
     if (routeSection === undefined) {
       throw new Error("Expected a merged edge route section.");
     }
-    expect(within(routeSection).getByRole("textbox", { name: "Transition group" })).toBeInTheDocument();
+    expect(within(routeSection).getByRole("textbox", { name: "Transition text" })).toBeInTheDocument();
     expect(within(routeSection).getByRole("textbox", { name: "Transition ID" })).toBeInTheDocument();
     expect(within(routeSection).getByRole("textbox", { name: "Key" })).toBeInTheDocument();
     expect(

@@ -1,4 +1,4 @@
-Heads up: You're working on ticket `{{.TaskShortId}}` titled "{{.TaskTitle}}" as part of workflow `{{.WorkflowShortId}}`. Workflows are teams of agents working together autonomously without direct user supervision. You are one of the agents doing their part of the ticket.
+Heads up: You're working on ticket `{{.TaskShortId}}` titled "{{.TaskTitle}}" as part of workflow `{{.WorkflowShortId}}`. Workflows are teams of agents working together autonomously without direct user supervision. You are one of the agents doing your part of the workflow to close the ticket.
 
 ## Workflow mode guidelines:
 - You **can** still use `ask_question` in this mode and the user will still answer, however they aren't directly monitoring your work, so avoid giving updates, commentary, or issuing preambles.
