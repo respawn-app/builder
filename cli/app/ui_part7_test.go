@@ -305,6 +305,38 @@ func TestAutoDrainResumesAfterQueuedPSInlineActionError(t *testing.T) {
 	}
 }
 
+func TestAutoDrainResumesAfterDiscardedPSInlinePaste(t *testing.T) {
+	client := &countingProcessActionClient{}
+	m := newProjectedStaticUIModel(WithUIProcessClient(client))
+	m.queued = queuedInputsForTest("summarize this")
+	cmd := m.processActionCmd("inline", "proc-1", "", m.mainInputDraftToken)
+	if cmd == nil {
+		t.Fatal("expected inline action command")
+	}
+	if !m.processList.actionInFlight {
+		t.Fatal("expected inline action in flight")
+	}
+	m.replaceMainInput("edited draft", -1)
+
+	var done processActionDoneMsg
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if typed, ok := msg.(processActionDoneMsg); ok {
+			done = typed
+		}
+	}
+	next, _ := m.Update(done)
+	updated := next.(*uiModel)
+	if !updated.isBusy() {
+		t.Fatal("expected queued prompt to start after stale inline paste is discarded")
+	}
+	if updated.activeSubmit.text != "summarize this" {
+		t.Fatalf("expected queued prompt active, got %q", updated.activeSubmit.text)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queue drained after stale inline paste, got %+v", updated.queued)
+	}
+}
+
 type countingProcessActionClient struct {
 	killCalls int
 }

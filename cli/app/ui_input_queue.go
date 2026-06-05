@@ -96,6 +96,9 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.isInputLocked() {
 		return m, nil
 	}
+	if blocked, blockCmd := c.blockInjectedQueueSubmission(); blocked {
+		return m, blockCmd
+	}
 	if blocked, disconnectCmd := c.blockDisconnectedSubmission(false, ""); blocked {
 		return m, disconnectCmd
 	}
@@ -121,6 +124,17 @@ func (c uiInputController) preservePromptHistoryDraftForQueuedText(text string) 
 		return true
 	}
 	return command.PreservePromptHistoryDraft
+}
+
+func (c uiInputController) blockInjectedQueueSubmission() (bool, tea.Cmd) {
+	m := c.model
+	if m == nil || !m.injectedQueueBlocksDrain() {
+		return false, nil
+	}
+	detailErr := "queued runtime message is still pending; retry or discard it before submitting"
+	m.activity = uiActivityError
+	m.syncViewport()
+	return true, m.inputController().showErrorStatus(detailErr)
 }
 
 func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submittedText string) (bool, tea.Cmd) {
@@ -451,6 +465,9 @@ func (c uiInputController) handleInjectedQueueCreateDone(msg injectedQueueCreate
 			m.logf("queue_create.error err=%q", detailErr)
 			m.removeInjectedQueueItemAt(index)
 			m.syncViewport()
+			if msg.approvalCommentaryAnswer != nil {
+				return m, sequenceCmds(appendCmd, m.answerQueuedApprovalCommentary(*msg.approvalCommentaryAnswer))
+			}
 			return m, appendCmd
 		}
 		m.removeInjectedQueueItemAt(index)

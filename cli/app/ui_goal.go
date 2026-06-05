@@ -164,6 +164,7 @@ func (m *uiModel) beginGoalRuntimeMutation(operation goalRuntimeOperation, sessi
 	if !goalRuntimeOperationMutates(operation) {
 		return m.nextGoalRuntimeToken(), true
 	}
+	m.goalRuntimeMutationSerial = nextNonZeroToken(m.goalRuntimeMutationSerial)
 	if m.goalRuntimePending.inFlight && m.goalRuntimePending.sessionID == sessionID {
 		m.goalRuntimePending.desiredOperation = operation
 		m.goalRuntimePending.desiredObjective = objective
@@ -189,17 +190,18 @@ func (m *uiModel) goalRuntimeCommand(operation goalRuntimeOperation, objective s
 	client := m.runtimeClient()
 	objective = strings.TrimSpace(objective)
 	sessionID := strings.TrimSpace(m.sessionID)
+	mutationSerial := m.goalRuntimeMutationSerial
 	token, shouldStart := m.beginGoalRuntimeMutation(operation, sessionID, objective)
 	if !shouldStart {
 		return nil
 	}
 	if client == nil {
 		return func() tea.Msg {
-			return goalRuntimeDoneMsg{token: token, operation: operation, objective: objective}
+			return goalRuntimeDoneMsg{token: token, mutationSerial: mutationSerial, operation: operation, objective: objective}
 		}
 	}
 	return func() tea.Msg {
-		msg := goalRuntimeDoneMsg{token: token, sessionID: sessionID, operation: operation, objective: objective}
+		msg := goalRuntimeDoneMsg{token: token, sessionID: sessionID, mutationSerial: mutationSerial, operation: operation, objective: objective}
 		switch operation {
 		case goalRuntimeShow, goalRuntimeCheckSet, goalRuntimeCheckClear:
 			msg.goal, msg.err = client.ShowGoal()
@@ -258,12 +260,18 @@ func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
 		m.goal.error = ""
 		return followUpCmd
 	case goalRuntimeCheckSet:
+		if msg.mutationSerial != m.goalRuntimeMutationSerial {
+			return followUpCmd
+		}
 		if goalIsActive(msg.goal) {
 			m.openGoalConfirmOverlay("replace", msg.goal, msg.objective, nil)
 			return sequenceCmds(m.pushGoalOverlayIfNeeded(), followUpCmd)
 		}
 		return sequenceCmds(m.goalRuntimeCommand(goalRuntimeSet, msg.objective), followUpCmd)
 	case goalRuntimeCheckClear:
+		if msg.mutationSerial != m.goalRuntimeMutationSerial {
+			return followUpCmd
+		}
 		if goalRequiresClearConfirmation(msg.goal) {
 			m.openGoalConfirmOverlay("clear", msg.goal, "", nil)
 			return sequenceCmds(m.pushGoalOverlayIfNeeded(), followUpCmd)

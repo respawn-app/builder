@@ -56,12 +56,13 @@ const (
 )
 
 type goalRuntimeDoneMsg struct {
-	token     uint64
-	sessionID string
-	operation goalRuntimeOperation
-	objective string
-	goal      *clientui.RuntimeGoal
-	err       error
+	token          uint64
+	sessionID      string
+	mutationSerial uint64
+	operation      goalRuntimeOperation
+	objective      string
+	goal           *clientui.RuntimeGoal
+	err            error
 }
 
 type runtimeControlOperation string

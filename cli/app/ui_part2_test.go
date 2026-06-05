@@ -731,6 +731,53 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	}
 }
 
+func TestApprovalAskAnswersWhenCommentaryQueueFails(t *testing.T) {
+	client := &runtimeControlFakeClient{queueUserMessageErr: errors.New("queue create failed")}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.setBusy(true)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: clientui.PendingPromptEvent{Question: "Approve?", Approval: true, ApprovalOptions: []clientui.ApprovalOption{{Decision: clientui.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: clientui.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("please be careful")})
+	updated = next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected approval commentary queue command")
+	}
+	select {
+	case <-reply:
+		t.Fatal("did not expect approval answer before failed queue completion")
+	default:
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, cmd = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
+
+	resp := <-reply
+	if resp.response.Approval == nil {
+		t.Fatal("expected approval answer after failed commentary queue")
+	}
+	if resp.response.Approval.Decision != clientui.ApprovalDecisionAllowOnce || resp.response.Approval.Commentary != "please be careful" {
+		t.Fatalf("unexpected approval response after failed queue: %+v", resp.response.Approval)
+	}
+	if updated.input != "please be careful" {
+		t.Fatalf("expected failed commentary restored into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 || len(updated.injectedQueue) != 0 {
+		t.Fatalf("expected failed commentary queue removed, pending=%+v queue=%+v", updated.pendingInjected, updated.injectedQueue)
+	}
+	if testActiveAsk(updated) != nil {
+		t.Fatal("expected ask to resolve after failed approval commentary queue")
+	}
+}
+
 func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	reply1 := make(chan askReply, 1)

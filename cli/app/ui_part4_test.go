@@ -312,6 +312,18 @@ func TestDiscardFailedInjectedQueueBlocksRuntimeQueuedDrain(t *testing.T) {
 	if client.hasQueuedUserWorkCalls != 0 || client.submitQueuedCalls != 0 {
 		t.Fatalf("expected no runtime queued-work calls while blocked, check=%d submit=%d", client.hasQueuedUserWorkCalls, client.submitQueuedCalls)
 	}
+	next, submitCmd := updated.inputController().queueOrStartSubmission(updated.input)
+	updated = next.(*uiModel)
+	if submitCmd == nil {
+		t.Fatal("expected blocked normal submit to surface an error")
+	}
+	_ = collectCmdMessages(t, submitCmd)
+	if updated.isBusy() {
+		t.Fatal("did not expect normal submit while queued runtime message is still server-side")
+	}
+	if client.submitText != "" {
+		t.Fatalf("did not expect duplicate normal submit while discard failed, got %q", client.submitText)
+	}
 }
 
 func TestPendingInjectedCreateFailureRestoresInputAndSurfacesError(t *testing.T) {

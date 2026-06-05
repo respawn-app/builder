@@ -113,6 +113,50 @@ func TestGoalMutationsCoalesceAfterApplyingInFlightCompletion(t *testing.T) {
 	}
 }
 
+func TestGoalPreflightDoesNotStartMutationAfterLaterMutation(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedClosedUIModel(client)
+
+	checkCmd := m.goalRuntimeCommand(goalRuntimeCheckSet, "older objective")
+	if checkCmd == nil {
+		t.Fatal("expected goal check command")
+	}
+	pauseCmd := m.goalRuntimeCommand(goalRuntimePause, "")
+	if pauseCmd == nil {
+		t.Fatal("expected later goal pause command")
+	}
+
+	var pauseDone goalRuntimeDoneMsg
+	for _, msg := range collectCmdMessages(t, pauseCmd) {
+		if typed, ok := msg.(goalRuntimeDoneMsg); ok {
+			pauseDone = typed
+		}
+	}
+	next, _ := m.Update(pauseDone)
+	updated := next.(*uiModel)
+	if updated.goal.goal == nil || updated.goal.goal.Status != clientui.RuntimeGoalStatusPaused {
+		t.Fatalf("expected later pause mutation to apply, got %+v", updated.goal.goal)
+	}
+
+	var checkDone goalRuntimeDoneMsg
+	for _, msg := range collectCmdMessages(t, checkCmd) {
+		if typed, ok := msg.(goalRuntimeDoneMsg); ok {
+			checkDone = typed
+		}
+	}
+	next, followCmd := updated.Update(checkDone)
+	updated = next.(*uiModel)
+	if followCmd != nil {
+		t.Fatal("did not expect stale preflight to schedule older set-goal mutation")
+	}
+	if client.setGoalArg != "" {
+		t.Fatalf("stale preflight started set-goal mutation for %q", client.setGoalArg)
+	}
+	if updated.goal.goal == nil || updated.goal.goal.Status != clientui.RuntimeGoalStatusPaused {
+		t.Fatalf("expected stale preflight not to overwrite later pause, got %+v", updated.goal.goal)
+	}
+}
+
 func TestGoalSetRendersCommittedGoalFeedbackBeforeLaterRuntimeEvents(t *testing.T) {
 	runtimeEvents := make(chan clientui.Event, 2)
 	runtimeEvents <- clientui.Event{

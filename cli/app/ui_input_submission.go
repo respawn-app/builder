@@ -25,6 +25,9 @@ func (c uiInputController) startSubmissionWithPreSubmitQueuePosition(text string
 	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
 		return disconnectCmd
 	}
+	if blocked, blockCmd := c.blockInjectedQueueSubmission(); blocked {
+		return blockCmd
+	}
 	c.startBusyActivity(false)
 	command, isUserShell := parseUserShellCommand(text)
 	if isUserShell {

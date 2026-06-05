@@ -327,7 +327,7 @@ func (m *uiModel) applyProcessActionDone(msg processActionDoneMsg) tea.Cmd {
 		return tea.Batch(m.setTransientStatus(status), refreshCmd, c.resumeQueuedInputsAfterIdleRuntime())
 	case "inline":
 		if msg.inputDraftToken != 0 && msg.inputDraftToken != m.mainInputDraftToken {
-			return nil
+			return c.resumeQueuedInputsAfterIdleRuntime()
 		}
 		preview := strings.TrimSpace(msg.output)
 		if preview == "" {

@@ -152,6 +152,7 @@ type uiStatusFeatureState struct {
 	status                      uiStatusOverlayState
 	goal                        uiGoalOverlayState
 	goalRuntimeToken            uint64
+	goalRuntimeMutationSerial   uint64
 	goalRuntimePending          goalRuntimePendingState
 	statusGitBackgroundInFlight bool
 	clipboardImagePaster        uiClipboardImagePaster
