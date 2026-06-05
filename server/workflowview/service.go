@@ -1616,6 +1616,15 @@ func boardGroups(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardGrou
 func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardColumn {
 	columns := make([]serverapi.WorkflowBoardColumn, 0, len(def.Nodes))
 	derivedNodes := workflowDerivedNodeWiringByID(def.DerivedWiring)
+	derivedEdges := workflowDerivedEdgeWiringByID(def.DerivedWiring)
+	nodeKinds := map[string]workflow.NodeKind{}
+	for _, node := range def.Nodes {
+		nodeKinds[node.ID] = workflow.NodeKind(node.Kind)
+	}
+	sourceNodeIDsByTransitionGroup := map[string]string{}
+	for _, group := range def.TransitionGroups {
+		sourceNodeIDsByTransitionGroup[group.ID] = group.SourceNodeID
+	}
 	for index, node := range def.Nodes {
 		if !boardVisibleNodeKind(node.Kind) {
 			continue
@@ -1629,7 +1638,7 @@ func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardCol
 				AssigneeRole:           node.SubagentRole,
 				SortOrder:              index,
 				OutputFields:           derivedNodes[node.ID].PossibleProvisionFields,
-				TransitionOutputFields: boardTransitionOutputFields(node),
+				TransitionOutputFields: boardTransitionOutputFields(node.ID, def.Edges, sourceNodeIDsByTransitionGroup, nodeKinds, derivedNodes, derivedEdges),
 			},
 			GroupID:   node.GroupID,
 			SortOrder: index,
@@ -1652,16 +1661,33 @@ func workflowDerivedNodeWiringByID(derived serverapi.WorkflowDerivedWiring) map[
 	return byID
 }
 
-func boardTransitionOutputFields(node serverapi.WorkflowNode) []serverapi.WorkflowOutputField {
-	fields := make([]serverapi.WorkflowOutputField, 0, len(node.InputFields))
+func boardTransitionOutputFields(
+	nodeID string,
+	edges []serverapi.WorkflowEdge,
+	sourceNodeIDsByTransitionGroup map[string]string,
+	nodeKinds map[string]workflow.NodeKind,
+	derivedNodes map[string]serverapi.WorkflowDerivedNodeWiring,
+	derivedEdges map[string]serverapi.WorkflowDerivedEdgeWiring,
+) []serverapi.WorkflowOutputField {
+	fields := []serverapi.WorkflowOutputField{}
 	seen := map[string]bool{}
-	for _, input := range node.InputFields {
-		name := strings.TrimSpace(input.Name)
-		if name == "" || seen[name] {
+	for _, edge := range edges {
+		if edge.TargetNodeID != nodeID {
 			continue
 		}
-		seen[name] = true
-		fields = append(fields, serverapi.WorkflowOutputField{Name: name, Description: strings.TrimSpace(input.Description)})
+		sourceNodeID := sourceNodeIDsByTransitionGroup[edge.TransitionGroupID]
+		incomingFields := derivedEdges[edge.ID].RequiredProvisionFields
+		if nodeKinds[sourceNodeID] == workflow.NodeKindJoin {
+			incomingFields = derivedNodes[sourceNodeID].JoinOutputFields
+		}
+		for _, field := range incomingFields {
+			name := strings.TrimSpace(field.Name)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			fields = append(fields, serverapi.WorkflowOutputField{Name: name, Description: strings.TrimSpace(field.Description)})
+		}
 	}
 	return fields
 }
