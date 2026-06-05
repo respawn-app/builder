@@ -29,7 +29,7 @@ describe("layoutWorkflowGraph node group bounds", () => {
     expect(rectsOverlap(group, join)).toBe(false);
   });
 
-  it("routes group branch Edges into the centered Join instead of stale in-group coordinates", async () => {
+  it("routes group branch endpoints through deterministic Join ports instead of stale in-group coordinates", async () => {
     const graph = await layoutWorkflowGraph(threeBranchGroupJoinWorkflow, emptyValidation);
     const group = requiredNodeByID(graph.nodes, "workflow-group-group-1");
     const branch = requiredNodeByID(graph.nodes, "node-a");
@@ -41,9 +41,9 @@ describe("layoutWorkflowGraph node group bounds", () => {
     const points = requiredRoutePoints(edge);
     const outgoingPoints = requiredRoutePoints(outgoingEdge);
 
-    expectPointCloseTo(points[0], { x: branchRect.x + branchRect.width, y: rectCenterY(branchRect) });
-    expectPointCloseTo(points[points.length - 1], { x: joinRect.x, y: rectCenterY(joinRect) });
-    expectPointCloseTo(outgoingPoints[0], { x: joinRect.x + joinRect.width, y: rectCenterY(joinRect) });
+    expectPointCloseTo(points[0], endpointPoint(branch, edge.sourceHandle, "source", graph.nodes));
+    expectPointCloseTo(points[points.length - 1], endpointPoint(join, edge.targetHandle, "target", graph.nodes));
+    expectPointCloseTo(outgoingPoints[0], endpointPoint(join, outgoingEdge.sourceHandle, "source", graph.nodes));
     expect(points.some((point) => point.x > rectRight(group) && point.x < joinRect.x)).toBe(true);
     expect(points.every((point) => point.x >= branchRect.x + branchRect.width)).toBe(true);
   });
@@ -97,6 +97,54 @@ function absoluteNodeRect(
     x: (parent?.position.x ?? 0) + node.position.x,
     y: (parent?.position.y ?? 0) + node.position.y,
   };
+}
+
+function endpointPoint(
+  node: WorkflowGraphNode,
+  handleID: string | null | undefined,
+  side: "source" | "target",
+  nodes: readonly WorkflowGraphNode[],
+): WorkflowGraphPoint {
+  const port = endpointPort(node, handleID, side);
+  const rect = absoluteNodeRect(node, nodes);
+  return {
+    x: side === "source" ? rect.x + rect.width : rect.x,
+    y: rect.y + port.y,
+  };
+}
+
+function endpointPort(
+  node: WorkflowGraphNode,
+  handleID: string | null | undefined,
+  side: "source" | "target",
+): Readonly<{ id: string; side: "source" | "target"; y: number }> {
+  if (typeof handleID !== "string" || node.data.entityKind !== "node") {
+    throw new Error(`Endpoint port ${handleID ?? ""} not found for ${node.id}`);
+  }
+  const ports: unknown = node.data.endpointPorts;
+  if (!Array.isArray(ports)) {
+    throw new Error(`Endpoint port ${handleID} not found for ${node.id}`);
+  }
+  const port = ports.filter(isEndpointPort).find((item) => item.id === handleID && item.side === side);
+  if (port === undefined) {
+    throw new Error(`Endpoint port ${handleID} not found for ${node.id}`);
+  }
+  return port;
+}
+
+function isEndpointPort(value: unknown): value is Readonly<{ id: string; side: "source" | "target"; y: number }> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    (value.side === "source" || value.side === "target") &&
+    typeof value.y === "number"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function rectRight(rect: Readonly<{ position: Readonly<{ x: number }>; style?: WorkflowGraphNode["style"] }>): number {
