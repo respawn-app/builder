@@ -395,15 +395,14 @@ function editDraftEdge(
   edgeID: string,
   edit: (edge: WorkflowEdge, edges: readonly WorkflowEdge[]) => WorkflowEdge,
 ): WorkflowEditorDraftState {
-  let changed = false;
-  const edges = state.draft.edges.map((edge) => {
-    if (edge.id !== edgeID) {
-      return edge;
-    }
-    changed = true;
-    return edit(edge, state.draft.edges);
-  });
-  return changed ? nextDraftState(state, { ...state.draft, edges }) : state;
+  const edgeIndex = state.draft.edges.findIndex((edge) => edge.id === edgeID);
+  if (edgeIndex < 0) {
+    return state;
+  }
+  const edges = state.draft.edges.map((edge, index) =>
+    index === edgeIndex ? edit(edge, state.draft.edges) : edge,
+  );
+  return nextDraftState(state, { ...state.draft, edges });
 }
 
 type SelectedNodeCascadeRequest = Readonly<{
@@ -417,7 +416,8 @@ type SelectedNodeCascadeRequest = Readonly<{
 function selectedNodeCascadeEdges(req: SelectedNodeCascadeRequest): readonly WorkflowEdge[] {
   const { edges, nodeID, oldKey, newKey, nodes } = req;
   const oldKeyOwners = nodes.filter((item) => item.key === oldKey);
-  if (oldKeyOwners.length !== 1 || oldKeyOwners[0]?.id !== nodeID) {
+  const oldKeyOwner = oldKeyOwners.at(0);
+  if (oldKeyOwners.length !== 1 || oldKeyOwner?.id !== nodeID) {
     return edges;
   }
   return edges.map((edge) =>

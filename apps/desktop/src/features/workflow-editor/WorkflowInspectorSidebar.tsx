@@ -27,6 +27,7 @@ import type {
   WorkflowNode,
   WorkflowNodeGroup,
   WorkflowParameter,
+  WorkflowTransitionGroup,
   WorkflowValidation,
 } from "../../api";
 import { queryKeys } from "../../app/queryKeys";
@@ -231,7 +232,6 @@ function EdgeDraftDetails({
   const contextModeDisabled = startEdge;
   const contextSourceDisabled = startEdge || edge.contextMode === "new_session" || !continuationAvailable;
   const requiresApprovalDisabled = startEdge;
-  const promptParameters = edgePromptPlaceholderParameters(definition, edge);
   return (
     <InspectorStack>
       <DetailSection
@@ -326,7 +326,38 @@ function EdgeDraftDetails({
           </DisabledInteractionGuard>
         </TooltipProvider>
       </DetailSection>
-      {details.targetKind === "agent" ? (
+      <EdgeInvocationSections
+        controller={controller}
+        definition={definition}
+        edge={edge}
+        sourceKind={details.sourceKind}
+        targetKind={details.targetKind}
+      />
+      <DerivedEdgeSections derivedEdge={derivedEdge} />
+      <ValidationDetails errors={details.directErrors} title={t("workflowEditor.edgeErrors")} />
+      <ValidationDetails errors={details.groupErrors} title={t("workflowEditor.transitionGroupErrors")} />
+    </InspectorStack>
+  );
+}
+
+function EdgeInvocationSections({
+  controller,
+  definition,
+  edge,
+  sourceKind,
+  targetKind,
+}: Readonly<{
+  controller: WorkflowEditorDraftController;
+  definition: WorkflowDefinition;
+  edge: WorkflowEdge;
+  sourceKind: string;
+  targetKind: string;
+}>) {
+  const { t } = useTranslation();
+  const promptParameters = edgePromptPlaceholderParameters(definition, edge);
+  return (
+    <>
+      {targetKind === "agent" ? (
         <PromptTemplateEditor
           onPromptChange={(promptTemplate) => {
             controller.dispatch({ edgeID: edge.id, promptTemplate, type: "editEdgePrompt" });
@@ -335,15 +366,21 @@ function EdgeDraftDetails({
           promptTemplate={edge.promptTemplate}
         />
       ) : null}
-      {details.sourceKind === "agent" ? (
-        <EditableEdgeParameters controller={controller} edge={edge} />
-      ) : null}
-      {details.sourceKind === "join" && details.targetKind === "agent" ? (
+      {sourceKind === "agent" ? <EditableEdgeParameters controller={controller} edge={edge} /> : null}
+      {sourceKind === "join" && targetKind === "agent" ? (
         <FieldSummary
           fields={parameterSummaryFields(promptParameters)}
           title={t("workflowEditor.joinAggregateParameters")}
         />
       ) : null}
+    </>
+  );
+}
+
+function DerivedEdgeSections({ derivedEdge }: Readonly<{ derivedEdge: ReturnType<typeof derivedEdgeWiring> }>) {
+  const { t } = useTranslation();
+  return (
+    <>
       {derivedEdge.inputBindings.length === 0 ? null : <Bindings bindings={derivedEdge.inputBindings} />}
       {derivedEdge.requiredProvisionFields.length === 0 ? null : (
         <FieldSummary
@@ -357,9 +394,7 @@ function EdgeDraftDetails({
           title={t("workflowEditor.providerRequirements")}
         />
       )}
-      <ValidationDetails errors={details.directErrors} title={t("workflowEditor.edgeErrors")} />
-      <ValidationDetails errors={details.groupErrors} title={t("workflowEditor.transitionGroupErrors")} />
-    </InspectorStack>
+    </>
   );
 }
 
@@ -1372,22 +1407,46 @@ function PromptPreview({ prompt }: Readonly<{ prompt: string }>) {
 
 function edgeDetails(definition: WorkflowDefinition, edge: WorkflowEdge, validation: WorkflowValidation) {
   const group = transitionGroupByID(definition, edge.transitionGroupID);
-  const source = group === undefined ? undefined : nodeByID(definition, group.sourceNodeID);
+  const source = sourceNodeForTransition(definition, group);
   const target = nodeByID(definition, edge.targetNodeID);
-  const directErrors = validation.errors.filter((error) => error.edgeID === edge.id);
-  const groupErrors = validation.errors.filter(
-    (error) => error.edgeID !== edge.id && error.transitionGroupID === edge.transitionGroupID,
-  );
+  const errors = edgeValidationGroups(validation, edge);
   return {
-    directErrors,
-    groupErrors,
-    hasErrors: directErrors.length + groupErrors.length > 0,
+    ...edgeEndpointDetails(source, target),
+    ...edgeTransitionDetails(group),
+    ...errors,
+    hasErrors: errors.directErrors.length + errors.groupErrors.length > 0,
+  };
+}
+
+function sourceNodeForTransition(
+  definition: WorkflowDefinition,
+  group: WorkflowTransitionGroup | undefined,
+): WorkflowNode | undefined {
+  return group === undefined ? undefined : nodeByID(definition, group.sourceNodeID);
+}
+
+function edgeEndpointDetails(source: WorkflowNode | undefined, target: WorkflowNode | undefined) {
+  return {
     sourceKind: source?.kind ?? "",
     sourceLabel: fallbackLabel("", source?.name, source?.key),
     targetKind: target?.kind ?? "",
     targetLabel: fallbackLabel("", target?.name, target?.key),
+  };
+}
+
+function edgeTransitionDetails(group: WorkflowTransitionGroup | undefined) {
+  return {
     transitionGroupLabel: fallbackLabel("", group?.name, group?.id),
     transitionID: group?.transitionID ?? "",
+  };
+}
+
+function edgeValidationGroups(validation: WorkflowValidation, edge: WorkflowEdge) {
+  return {
+    directErrors: validation.errors.filter((error) => error.edgeID === edge.id),
+    groupErrors: validation.errors.filter(
+      (error) => error.edgeID !== edge.id && error.transitionGroupID === edge.transitionGroupID,
+    ),
   };
 }
 

@@ -62,9 +62,9 @@ export function workflowGraphEdgeRoutePoints(
   const sourceAligned = options.alignedJoinNodeIDs.has(model.sourceNodeID);
   const targetAligned = options.alignedJoinNodeIDs.has(model.targetNodeID);
   if (isBranchToAlignedJoin(source, target, targetAligned)) {
-    return branchJoinEdgeRoutePoints(model, source, target, options.groupNodeByGroupID);
+    return branchJoinEdgeRoutePoints(source, target, options.groupNodeByGroupID);
   }
-  return adjustAlignedJoinEndpointRoutePoints(model, routedPoints, source, target, { sourceAligned, targetAligned });
+  return adjustAlignedJoinEndpointRoutePoints(routedPoints, source, target, { sourceAligned, targetAligned });
 }
 
 function edgeRoutePoints(
@@ -95,7 +95,6 @@ function isBranchToAlignedJoin(
 }
 
 function branchJoinEdgeRoutePoints(
-  model: Readonly<{ sourcePort: WorkflowGraphEndpointPort; targetPort: WorkflowGraphEndpointPort }>,
   source: WorkflowGraphNodeRect,
   target: WorkflowGraphNodeRect,
   groupNodeByGroupID: ReadonlyMap<string, WorkflowGraphNode>,
@@ -109,7 +108,6 @@ function branchJoinEdgeRoutePoints(
 }
 
 function adjustAlignedJoinEndpointRoutePoints(
-  model: Readonly<{ sourcePort: WorkflowGraphEndpointPort; targetPort: WorkflowGraphEndpointPort }>,
   points: readonly WorkflowGraphPoint[],
   source: WorkflowGraphNodeRect,
   target: WorkflowGraphNodeRect,
@@ -126,14 +124,6 @@ function adjustAlignedJoinEndpointRoutePoints(
     adjusted[adjusted.length - 1] = joinCenterTargetPoint(target);
   }
   return compactRoutePoints(adjusted);
-}
-
-function sourceHandlePoint(rect: WorkflowGraphNodeRect, port: WorkflowGraphEndpointPort): WorkflowGraphPoint {
-  return { x: rect.x + rect.width, y: rect.y + port.y };
-}
-
-function targetHandlePoint(rect: WorkflowGraphNodeRect, port: WorkflowGraphEndpointPort): WorkflowGraphPoint {
-  return { x: rect.x, y: rect.y + port.y };
 }
 
 function centeredSourcePoint(rect: WorkflowGraphNodeRect): WorkflowGraphPoint {

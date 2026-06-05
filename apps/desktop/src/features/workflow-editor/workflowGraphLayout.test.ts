@@ -152,16 +152,14 @@ describe("layoutWorkflowGraph", () => {
 
   it("exposes matching React Flow handles for routed transition endpoint slots", async () => {
     const graph = await layoutWorkflowGraph(singleTransitionWorkflow, emptyValidation);
-    const edge = edgeByID(graph.edges, "edge-source-target");
-    const source = nodeByID(graph.nodes, "node-source");
-    const target = nodeByID(graph.nodes, "node-target");
+    const edge = requireEdge(graph.edges, "edge-source-target");
+    const source = requireNode(graph.nodes, "node-source");
+    const target = requireNode(graph.nodes, "node-target");
     const sourcePort = endpointPort(source, "source");
     const targetPort = endpointPort(target, "target");
 
-    expect(edge?.sourceHandle).toBe(sourcePort?.id);
-    expect(edge?.targetHandle).toBe(targetPort?.id);
-    expect(edge?.data?.routePoints.at(0)?.y).toBe(source === undefined ? undefined : source.position.y + sourcePort!.y);
-    expect(edge?.data?.routePoints.at(-1)?.y).toBe(target === undefined ? undefined : target.position.y + targetPort!.y);
+    assertEndpointHandle(edge, source, sourcePort, "source");
+    assertEndpointHandle(edge, target, targetPort, "target");
   });
 });
 
@@ -171,6 +169,22 @@ function nodeByID(nodes: readonly WorkflowGraphNode[], id: string): WorkflowGrap
 
 function edgeByID(edges: readonly WorkflowGraphEdge[], id: string): WorkflowGraphEdge | undefined {
   return edges.find((edge) => edge.id === id);
+}
+
+function requireNode(nodes: readonly WorkflowGraphNode[], id: string): WorkflowGraphNode {
+  const node = nodeByID(nodes, id);
+  if (node === undefined) {
+    throw new Error(`Expected graph node ${id}.`);
+  }
+  return node;
+}
+
+function requireEdge(edges: readonly WorkflowGraphEdge[], id: string): WorkflowGraphEdge {
+  const edge = edgeByID(edges, id);
+  if (edge === undefined) {
+    throw new Error(`Expected graph edge ${id}.`);
+  }
+  return edge;
 }
 
 function nodeCenterY(node: WorkflowGraphNode | undefined): number | undefined {
@@ -188,21 +202,43 @@ function endpointPort(
   if (node?.data.entityKind !== "node") {
     return undefined;
   }
-  const ports = node.data.endpointPorts;
+  const ports: unknown = node.data.endpointPorts;
   if (!Array.isArray(ports)) {
     return undefined;
   }
-  return ports.find(
-    (port): port is Readonly<{ id: string; side: "source" | "target"; y: number }> =>
-      typeof port === "object" &&
-      port !== null &&
-      "id" in port &&
-      typeof port.id === "string" &&
-      "side" in port &&
-      port.side === side &&
-      "y" in port &&
-      typeof port.y === "number",
+  return ports.filter(isEndpointPort).find((port) => port.side === side);
+}
+
+function assertEndpointHandle(
+  edge: WorkflowGraphEdge,
+  node: WorkflowGraphNode,
+  port: EndpointPort | undefined,
+  side: "source" | "target",
+): void {
+  if (port === undefined) {
+    throw new Error(`Expected ${side} endpoint port for ${node.id}.`);
+  }
+  const point = edge.data?.routePoints.at(side === "source" ? 0 : -1);
+  const handle = side === "source" ? edge.sourceHandle : edge.targetHandle;
+  expect(handle).toBe(port.id);
+  expect(point?.y).toBe(node.position.y + port.y);
+}
+
+type EndpointPort = Readonly<{ id: string; side: "source" | "target"; y: number }>;
+
+function isEndpointPort(value: unknown): value is EndpointPort {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    (value.side === "source" || value.side === "target") &&
+    typeof value.y === "number"
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 const emptyValidation: WorkflowValidation = { valid: true, errors: [] };

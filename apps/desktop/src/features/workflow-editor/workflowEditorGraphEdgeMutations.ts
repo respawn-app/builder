@@ -414,7 +414,7 @@ function reconnectWorkflowEdgeSource(
 function unchangedEdge(
   draft: DraftWorkflowDefinition,
   edgeID: string,
-  warning?: string | undefined,
+  warning?: string,
 ): WorkflowEditorGraphMutationResult {
   return {
     draft,
