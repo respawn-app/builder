@@ -3559,6 +3559,11 @@ func TestWorkflowGraphSaveBlocksRemovedPendingEdgeReferences(t *testing.T) {
 	if blocked.Saved || workflowGraphSaveBlockerCount(blocked.Blockers, "edge_task_references") == 0 {
 		t.Fatalf("pending edge removal graph save = %+v, want edge task-reference blocker", blocked)
 	}
+	if _, unchanged, err := store.GetDefinition(ctx, workflowID); err != nil {
+		t.Fatalf("GetDefinition after blocked pending edge save: %v", err)
+	} else if unchanged.Version != record.Version {
+		t.Fatalf("workflow version after blocked pending edge save = %d, want %d", unchanged.Version, record.Version)
+	}
 }
 
 func TestWorkflowGraphSaveBlocksRemovedNodeTaskReferences(t *testing.T) {
