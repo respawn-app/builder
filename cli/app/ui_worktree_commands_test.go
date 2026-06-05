@@ -930,6 +930,39 @@ func TestWorktreeSwitchCommandPrefersDisplayNameMatchBeforeBranchMatch(t *testin
 	}
 }
 
+func TestWorktreeSwitchCommandsCoalesceWhileInFlight(t *testing.T) {
+	client := &worktreeCommandTestClient{
+		listResp:   testLinkedWorktreeListResponse(),
+		switchResp: serverapi.WorktreeSwitchResponse{Worktree: serverapi.WorktreeView{WorktreeID: "wt-main", DisplayName: "main"}},
+	}
+	m := newWorktreeTestModel(t, client)
+
+	next, firstCmd := m.inputController().handleWorktreeSwitchCommand("feature-a")
+	updated := next.(*uiModel)
+	if firstCmd == nil {
+		t.Fatal("expected first switch command")
+	}
+	next, secondCmd := updated.inputController().handleWorktreeSwitchCommand("main")
+	updated = next.(*uiModel)
+	if secondCmd != nil {
+		t.Fatal("did not expect second switch command while first is in flight")
+	}
+	if len(client.switchRequests) != 0 {
+		t.Fatalf("switch RPC started before command execution: %+v", client.switchRequests)
+	}
+
+	updated = applyWorktreeCmdMessages(t, updated, firstCmd)
+	if len(client.switchRequests) != 2 {
+		t.Fatalf("expected serialized first and follow-up switch RPCs, got %+v", client.switchRequests)
+	}
+	if client.switchRequests[0].WorktreeID != "wt-feature" || client.switchRequests[1].WorktreeID != "wt-main" {
+		t.Fatalf("unexpected switch request order: %+v", client.switchRequests)
+	}
+	if updated.worktrees.switchPending {
+		t.Fatal("expected switch pending cleared after serialized follow-up completion")
+	}
+}
+
 func TestWorktreeDeleteTargetResolutionPrefersDisplayNameMatchBeforeBranchMatch(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees,

@@ -67,6 +67,10 @@ func (r uiWorktreeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			return handledUIFeatureUpdate(m, nil)
 		}
 		m.worktrees.switchPending = false
+		if followUp := m.takeQueuedWorktreeSwitchCmd(); followUp != nil {
+			m.syncViewport()
+			return handledUIFeatureUpdate(m, tea.Batch(followUp, m.ensureSpinnerTicking()))
+		}
 		if msg.err != nil {
 			if !m.worktrees.isOpen() {
 				status := formatSubmissionError(msg.err)

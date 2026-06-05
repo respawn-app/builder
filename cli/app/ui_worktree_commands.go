@@ -54,17 +54,34 @@ func (c uiInputController) handleWorktreeCommand(args string) (tea.Model, tea.Cm
 
 func (c uiInputController) handleWorktreeSwitchCommand(token string) (tea.Model, tea.Cmd) {
 	m := c.model
+	target := strings.TrimSpace(token)
+	if m.worktrees.switchPending {
+		m.worktrees.queuedSwitch = uiWorktreeQueuedSwitch{TargetToken: target}
+		return m, nil
+	}
+	return m, m.worktreeSwitchCommandForTarget(target, "")
+}
+
+func (m *uiModel) worktreeSwitchCommandForTarget(targetToken, worktreeID string) tea.Cmd {
+	if m == nil {
+		return nil
+	}
 	service := m.worktreeMutationService()
 	m.worktrees.mutationToken++
 	switchToken := m.worktrees.mutationToken
 	m.worktrees.switchPending = true
-	target := strings.TrimSpace(token)
-	return m, func() tea.Msg {
-		resolved, err := service.ResolveToken(target)
-		if err != nil {
-			return worktreeSwitchDoneMsg{token: switchToken, err: err}
+	targetToken = strings.TrimSpace(targetToken)
+	worktreeID = strings.TrimSpace(worktreeID)
+	return func() tea.Msg {
+		resolvedID := worktreeID
+		if resolvedID == "" {
+			resolved, err := service.ResolveToken(targetToken)
+			if err != nil {
+				return worktreeSwitchDoneMsg{token: switchToken, err: err}
+			}
+			resolvedID = resolved.WorktreeID
 		}
-		resp, err := service.Switch(resolved.WorktreeID)
+		resp, err := service.Switch(resolvedID)
 		return worktreeSwitchDoneMsg{token: switchToken, resp: resp, err: err}
 	}
 }

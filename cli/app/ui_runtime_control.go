@@ -221,7 +221,9 @@ func (m *uiModel) recordRuntimePromptHistory(text string) error {
 type runtimeControlPendingState struct {
 	sessionID       string
 	inFlight        bool
+	inFlightText    string
 	inFlightEnabled bool
+	desiredText     string
 	desiredEnabled  bool
 	compactionMode  string
 }
@@ -245,20 +247,25 @@ func (m *uiModel) runtimeControlTokenFor(operation runtimeControlOperation) uint
 	return m.runtimeControlTokens[operation]
 }
 
-func (m *uiModel) beginRuntimeControlMutation(operation runtimeControlOperation, sessionID string, enabled bool, compactionMode string) (uint64, bool) {
+func (m *uiModel) beginRuntimeControlMutation(operation runtimeControlOperation, sessionID, text string, enabled bool, compactionMode string) (uint64, bool) {
 	if m == nil {
 		return 0, false
 	}
-	if !runtimeControlOperationUsesEnabledTarget(operation) {
+	sessionID = strings.TrimSpace(sessionID)
+	text = strings.TrimSpace(text)
+	if !runtimeControlOperationUsesEnabledTarget(operation) && !runtimeControlOperationUsesTextTarget(operation) {
 		return m.nextRuntimeControlToken(operation), true
 	}
 	if m.runtimeControlPending == nil {
 		m.runtimeControlPending = make(map[runtimeControlOperation]runtimeControlPendingState)
 	}
-	sessionID = strings.TrimSpace(sessionID)
 	if pending, ok := m.runtimeControlPending[operation]; ok && pending.inFlight && pending.sessionID == sessionID {
-		pending.desiredEnabled = enabled
-		pending.compactionMode = strings.TrimSpace(compactionMode)
+		if runtimeControlOperationUsesTextTarget(operation) {
+			pending.desiredText = text
+		} else {
+			pending.desiredEnabled = enabled
+			pending.compactionMode = strings.TrimSpace(compactionMode)
+		}
 		m.runtimeControlPending[operation] = pending
 		return 0, false
 	}
@@ -266,7 +273,9 @@ func (m *uiModel) beginRuntimeControlMutation(operation runtimeControlOperation,
 	m.runtimeControlPending[operation] = runtimeControlPendingState{
 		sessionID:       sessionID,
 		inFlight:        true,
+		inFlightText:    text,
 		inFlightEnabled: enabled,
+		desiredText:     text,
 		desiredEnabled:  enabled,
 		compactionMode:  strings.TrimSpace(compactionMode),
 	}
@@ -303,6 +312,15 @@ func runtimeControlOperationUsesEnabledTarget(operation runtimeControlOperation)
 	}
 }
 
+func runtimeControlOperationUsesTextTarget(operation runtimeControlOperation) bool {
+	switch operation {
+	case runtimeControlSetSessionName, runtimeControlSetThinkingLevel:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *uiModel) runtimeControlCommand(operation runtimeControlOperation, text string, enabled bool, compactionMode string) tea.Cmd {
 	if m == nil {
 		return nil
@@ -312,11 +330,11 @@ func (m *uiModel) runtimeControlCommand(operation runtimeControlOperation, text 
 		return nil
 	}
 	sessionID := strings.TrimSpace(m.sessionID)
-	token, shouldStart := m.beginRuntimeControlMutation(operation, sessionID, enabled, compactionMode)
+	text = strings.TrimSpace(text)
+	token, shouldStart := m.beginRuntimeControlMutation(operation, sessionID, text, enabled, compactionMode)
 	if !shouldStart {
 		return nil
 	}
-	text = strings.TrimSpace(text)
 	return func() tea.Msg {
 		msg := runtimeControlDoneMsg{token: token, sessionID: sessionID, operation: operation, text: text, enabled: enabled, compactionMode: compactionMode}
 		switch operation {
@@ -357,6 +375,15 @@ func (m *uiModel) applyRuntimeControlDone(msg runtimeControlDoneMsg) tea.Cmd {
 			pending.inFlight = false
 			m.runtimeControlPending[msg.operation] = pending
 			return m.runtimeControlCommand(msg.operation, "", pending.desiredEnabled, pending.compactionMode)
+		}
+		m.clearRuntimeControlPending(msg.operation)
+	}
+	if runtimeControlOperationUsesTextTarget(msg.operation) {
+		pending := m.runtimeControlPending[msg.operation]
+		if pending.inFlight && pending.desiredText != pending.inFlightText {
+			pending.inFlight = false
+			m.runtimeControlPending[msg.operation] = pending
+			return m.runtimeControlCommand(msg.operation, pending.desiredText, false, "")
 		}
 		m.clearRuntimeControlPending(msg.operation)
 	}

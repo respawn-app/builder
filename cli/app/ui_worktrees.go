@@ -93,11 +93,17 @@ type uiWorktreeOverlayState struct {
 	refreshToken  uint64
 	mutationToken uint64
 	switchPending bool
+	queuedSwitch  uiWorktreeQueuedSwitch
 	selectedID    string
 	intent        uiWorktreeOpenIntent
 	create        uiWorktreeCreateDialogState
 	deleteConfirm uiWorktreeDeleteDialogState
 	inputCursor   uiInputFieldCursor
+}
+
+type uiWorktreeQueuedSwitch struct {
+	TargetToken string
+	WorktreeID  string
 }
 
 type worktreeListDoneMsg struct {
@@ -330,15 +336,26 @@ func (m *uiModel) worktreeSwitchCmd(target serverapi.WorktreeView) tea.Cmd {
 	if m == nil {
 		return nil
 	}
-	m.worktrees.mutationToken++
-	m.worktrees.switchPending = true
-	token := m.worktrees.mutationToken
-	m.worktrees.errorText = ""
-	service := m.worktreeMutationService()
-	return func() tea.Msg {
-		resp, err := service.Switch(target.WorktreeID)
-		return worktreeSwitchDoneMsg{token: token, resp: resp, err: err}
+	worktreeID := strings.TrimSpace(target.WorktreeID)
+	if m.worktrees.switchPending {
+		m.worktrees.queuedSwitch = uiWorktreeQueuedSwitch{WorktreeID: worktreeID}
+		return nil
 	}
+	m.worktrees.errorText = ""
+	return m.worktreeSwitchCommandForTarget("", worktreeID)
+}
+
+func (m *uiModel) takeQueuedWorktreeSwitchCmd() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	queued := m.worktrees.queuedSwitch
+	m.worktrees.queuedSwitch = uiWorktreeQueuedSwitch{}
+	if strings.TrimSpace(queued.WorktreeID) == "" && strings.TrimSpace(queued.TargetToken) == "" {
+		return nil
+	}
+	m.worktrees.switchPending = false
+	return m.worktreeSwitchCommandForTarget(queued.TargetToken, queued.WorktreeID)
 }
 
 func (m *uiModel) worktreeDeleteCmd(target serverapi.WorktreeView, deleteBranch bool) tea.Cmd {

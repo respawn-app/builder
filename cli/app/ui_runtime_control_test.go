@@ -393,6 +393,56 @@ func TestRuntimeControlCompletionsAreScopedPerOperation(t *testing.T) {
 	}
 }
 
+func TestRuntimeControlTextMutationsCoalesceUntilInFlightCompletion(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+
+	firstCmd := m.runtimeControlCommand(runtimeControlSetThinkingLevel, "high", false, "")
+	if firstCmd == nil {
+		t.Fatal("expected first thinking-level command")
+	}
+	secondCmd := m.runtimeControlCommand(runtimeControlSetThinkingLevel, "low", false, "")
+	if secondCmd != nil {
+		t.Fatal("did not expect second thinking-level command while first is in flight")
+	}
+	firstMsgs := collectCmdMessages(t, firstCmd)
+	if client.setThinkingLevelArg != "high" {
+		t.Fatalf("first thinking-level RPC = %q, want high", client.setThinkingLevelArg)
+	}
+
+	var firstDone runtimeControlDoneMsg
+	for _, msg := range firstMsgs {
+		if typed, ok := msg.(runtimeControlDoneMsg); ok {
+			firstDone = typed
+		}
+	}
+	next, followUpCmd := m.Update(firstDone)
+	updated := next.(*uiModel)
+	if updated.thinkingLevel == "high" {
+		t.Fatal("expected coalesced older thinking-level completion not to update UI")
+	}
+	if followUpCmd == nil {
+		t.Fatal("expected follow-up command for coalesced thinking-level target")
+	}
+	followUpMsgs := collectCmdMessages(t, followUpCmd)
+	if client.setThinkingLevelArg != "low" {
+		t.Fatalf("follow-up thinking-level RPC = %q, want low", client.setThinkingLevelArg)
+	}
+
+	var followUpDone runtimeControlDoneMsg
+	for _, msg := range followUpMsgs {
+		if typed, ok := msg.(runtimeControlDoneMsg); ok {
+			followUpDone = typed
+		}
+	}
+	next, _ = updated.Update(followUpDone)
+	updated = next.(*uiModel)
+	if updated.thinkingLevel != "low" {
+		t.Fatalf("thinking level = %q, want low", updated.thinkingLevel)
+	}
+}
+
 func TestRuntimeControlRapidFastToggleUsesPendingTargetAndIgnoresOlderCompletion(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

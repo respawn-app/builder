@@ -158,6 +158,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 		Settings:              m.statusConfig.Settings,
 		Source:                m.statusConfig.Source,
 		AuthCacheIdentity:     m.cachedStatusAuthCacheIdentity(),
+		AuthCacheUnseedable:   m.statusAuthCacheUnseedable(),
 		AuthStatus:            m.statusConfig.AuthStatus,
 		AuthStatePath:         strings.TrimSpace(m.statusConfig.AuthStatePath),
 		SessionName:           strings.TrimSpace(m.sessionName),
@@ -196,6 +197,13 @@ func (m *uiModel) cachedStatusAuthCacheIdentity() string {
 		return "auth:configured"
 	}
 	return "auth:none"
+}
+
+func (m *uiModel) statusAuthCacheUnseedable() bool {
+	if m == nil {
+		return false
+	}
+	return strings.TrimSpace(m.statusConfig.AuthStatePath) != ""
 }
 
 func populateStatusRequestCacheKeys(req uiStatusRequest) uiStatusRequest {

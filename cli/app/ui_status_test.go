@@ -645,6 +645,42 @@ func TestStatusRepositorySeparatesOpaqueOAuthCacheByTokenFingerprint(t *testing.
 	}
 }
 
+func TestStatusRepositoryDoesNotSeedPathBackedAuthCache(t *testing.T) {
+	repo := newMemoryUIStatusRepository()
+	req := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"))
+	req.AuthCacheIdentity = "auth:path:/tmp/builder-auth.json"
+	req.AuthCacheUnseedable = true
+	req.CacheKeys.Auth = statusAuthCacheKey(req)
+	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
+
+	repo.StoreAuth(req.CacheKeys.Auth, uiStatusAuthStageResult{
+		Auth:         uiStatusAuthInfo{Summary: "previous@example.com"},
+		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Previous subscription"},
+	}, time.Now())
+
+	seed := repo.SeedSnapshot(req, base, time.Now())
+	if got := seed.Snapshot.Auth.Summary; got != "" {
+		t.Fatalf("expected path-backed auth cache not to seed stale auth, got %q", got)
+	}
+	if got := seed.Snapshot.Subscription.Summary; got != "" {
+		t.Fatalf("expected path-backed auth cache not to seed stale subscription, got %q", got)
+	}
+	if len(seed.PendingSections) == 0 || seed.PendingSections[0] != uiStatusSectionAuth {
+		t.Fatalf("expected auth refresh pending for unseedable auth cache, got %+v", seed.PendingSections)
+	}
+}
+
+func TestStatusRequestMarksAuthStatePathCacheUnseedable(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir", AuthStatePath: "/tmp/builder-auth.json"}),
+	)
+
+	req := m.newStatusRequest(time.Now())
+	if !req.AuthCacheUnseedable {
+		t.Fatal("expected auth-state-path status request to disable auth cache seeding")
+	}
+}
+
 func TestStatusRepositoryStoresAuthUnderCapturedIdentityKey(t *testing.T) {
 	store := auth.NewMemoryStore(auth.State{
 		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a", AccountID: "acct-a", Email: "a@example.com"}},
