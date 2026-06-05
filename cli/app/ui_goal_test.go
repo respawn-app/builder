@@ -76,6 +76,43 @@ func TestGoalCommandOpensGoalOverlayWhileBusy(t *testing.T) {
 	}
 }
 
+func TestGoalMutationsCoalesceWhileInFlight(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: clientui.RuntimeGoalStatusPaused}}
+	m := newProjectedClosedUIModel(client)
+
+	firstCmd := m.goalRuntimeCommand(goalRuntimePause, "")
+	if firstCmd == nil {
+		t.Fatal("expected first goal mutation command")
+	}
+	secondCmd := m.goalRuntimeCommand(goalRuntimeResume, "")
+	if secondCmd != nil {
+		t.Fatal("did not expect second goal mutation command while first is in flight")
+	}
+	firstMsgs := collectCmdMessages(t, firstCmd)
+	if client.pauseGoalCalls != 1 || client.resumeGoalCalls != 0 {
+		t.Fatalf("unexpected pre-completion goal calls: pause=%d resume=%d", client.pauseGoalCalls, client.resumeGoalCalls)
+	}
+
+	var firstDone goalRuntimeDoneMsg
+	for _, msg := range firstMsgs {
+		if typed, ok := msg.(goalRuntimeDoneMsg); ok {
+			firstDone = typed
+		}
+	}
+	next, followUpCmd := m.Update(firstDone)
+	updated := next.(*uiModel)
+	if followUpCmd == nil {
+		t.Fatal("expected follow-up goal mutation command")
+	}
+	if updated.goal.goal != nil && updated.goal.goal.Status == clientui.RuntimeGoalStatusPaused {
+		t.Fatal("expected older pause completion not to update goal UI while resume is queued")
+	}
+	_ = collectCmdMessages(t, followUpCmd)
+	if client.resumeGoalCalls != 1 {
+		t.Fatalf("expected serialized resume call after pause completion, got %d", client.resumeGoalCalls)
+	}
+}
+
 func TestGoalSetRendersCommittedGoalFeedbackBeforeLaterRuntimeEvents(t *testing.T) {
 	runtimeEvents := make(chan clientui.Event, 2)
 	runtimeEvents <- clientui.Event{

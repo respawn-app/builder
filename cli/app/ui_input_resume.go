@@ -60,7 +60,7 @@ func (c uiInputController) handleQueuedRuntimeWorkCheckDone(msg queuedRuntimeWor
 		m.syncViewport()
 		return m, tea.Batch(restoreCmd, appendCmd)
 	}
-	if !msg.hasWork || m.injectedQueueBlocksDrain() {
+	if !msg.hasWork || m.injectedQueueBlocksDrain() || m.isBusy() || m.isInputLocked() {
 		if !msg.hasWork {
 			c.notifyUserCompactionCompleted(compactionOrigin, true)
 		} else {

@@ -88,10 +88,11 @@ type runtimeControlDoneMsg struct {
 }
 
 type injectedQueueCreateDoneMsg struct {
-	token   uint64
-	localID string
-	item    clientui.QueuedUserMessage
-	err     error
+	token                    uint64
+	localID                  string
+	item                     clientui.QueuedUserMessage
+	approvalCommentaryAnswer *clientui.PromptAnswer
+	err                      error
 }
 
 type injectedQueueDiscardDoneMsg struct {

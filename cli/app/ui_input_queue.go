@@ -52,6 +52,10 @@ func newQueuedInputItem(text string) queuedInputItem {
 }
 
 func (m *uiModel) enqueueInjectedInput(text string) tea.Cmd {
+	return m.enqueueInjectedInputWithApprovalAnswer(text, nil)
+}
+
+func (m *uiModel) enqueueInjectedInputWithApprovalAnswer(text string, answer *clientui.PromptAnswer) tea.Cmd {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return nil
@@ -74,7 +78,7 @@ func (m *uiModel) enqueueInjectedInput(text string) tea.Cmd {
 	client := m.runtimeClient()
 	return func() tea.Msg {
 		item, err := client.QueueUserMessage(trimmed)
-		return injectedQueueCreateDoneMsg{token: token, localID: localID, item: item, err: err}
+		return injectedQueueCreateDoneMsg{token: token, localID: localID, item: item, approvalCommentaryAnswer: answer, err: err}
 	}
 }
 
@@ -243,8 +247,16 @@ func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, te
 
 func (c uiInputController) resumeQueuedInputsAfterIdleRuntime() tea.Cmd {
 	m := c.model
-	if m == nil || m.isBusy() || m.ask.hasCurrent() || len(m.queued) == 0 || m.isInputLocked() || m.pendingQueuedDrainAfterHydration || m.processList.actionInFlight {
+	if m == nil || m.isBusy() || m.ask.hasCurrent() || m.isInputLocked() || m.pendingQueuedDrainAfterHydration || m.processList.actionInFlight {
 		return nil
+	}
+	hasQueuedInputs := len(m.queued) > 0
+	hasInjectedWork := m.hasRuntimeClient() && m.hasEnqueuedInjectedRuntimeWork()
+	if !hasQueuedInputs && !hasInjectedWork {
+		return nil
+	}
+	if !hasQueuedInputs {
+		return c.startQueuedInjectionSubmission()
 	}
 	if m.hasRuntimeClient() && c.queuedDrainRequiresHydration() {
 		m.pendingQueuedDrainAfterHydration = true
@@ -405,6 +417,18 @@ func (m *uiModel) injectedQueueBlocksDrain() bool {
 	return false
 }
 
+func (m *uiModel) hasEnqueuedInjectedRuntimeWork() bool {
+	if m == nil {
+		return false
+	}
+	for _, item := range m.injectedQueue {
+		if item.State == injectedRuntimeQueueEnqueued {
+			return true
+		}
+	}
+	return false
+}
+
 func (c uiInputController) handleInjectedQueueCreateDone(msg injectedQueueCreateDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	index := m.injectedQueueIndexByAnyID(msg.localID)
@@ -447,6 +471,9 @@ func (c uiInputController) handleInjectedQueueCreateDone(msg injectedQueueCreate
 		item.State = injectedRuntimeQueueEnqueued
 		m.injectedQueue[index] = item
 		m.replacePendingInjectedID(item.LocalID, clientui.QueuedUserMessage{ID: serverID, Text: serverText})
+		if msg.approvalCommentaryAnswer != nil {
+			return m, m.answerQueuedApprovalCommentary(*msg.approvalCommentaryAnswer)
+		}
 		if !m.isBusy() && !m.isInputLocked() && !m.injectedQueueBlocksDrain() {
 			return m, c.startQueuedInjectionSubmission()
 		}

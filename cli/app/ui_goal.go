@@ -136,19 +136,68 @@ func (m *uiModel) nextGoalRuntimeToken() uint64 {
 	return m.goalRuntimeToken
 }
 
+type goalRuntimePendingState struct {
+	token             uint64
+	sessionID         string
+	inFlight          bool
+	inFlightOperation goalRuntimeOperation
+	inFlightObjective string
+	desiredOperation  goalRuntimeOperation
+	desiredObjective  string
+}
+
+func goalRuntimeOperationMutates(operation goalRuntimeOperation) bool {
+	switch operation {
+	case goalRuntimeSet, goalRuntimePause, goalRuntimeResume, goalRuntimeClear:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *uiModel) beginGoalRuntimeMutation(operation goalRuntimeOperation, sessionID, objective string) (uint64, bool) {
+	if m == nil {
+		return 0, false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	objective = strings.TrimSpace(objective)
+	if !goalRuntimeOperationMutates(operation) {
+		return m.nextGoalRuntimeToken(), true
+	}
+	if m.goalRuntimePending.inFlight && m.goalRuntimePending.sessionID == sessionID {
+		m.goalRuntimePending.desiredOperation = operation
+		m.goalRuntimePending.desiredObjective = objective
+		return 0, false
+	}
+	token := m.nextGoalRuntimeToken()
+	m.goalRuntimePending = goalRuntimePendingState{
+		token:             token,
+		sessionID:         sessionID,
+		inFlight:          true,
+		inFlightOperation: operation,
+		inFlightObjective: objective,
+		desiredOperation:  operation,
+		desiredObjective:  objective,
+	}
+	return token, true
+}
+
 func (m *uiModel) goalRuntimeCommand(operation goalRuntimeOperation, objective string) tea.Cmd {
 	if m == nil {
 		return nil
 	}
 	client := m.runtimeClient()
-	token := m.nextGoalRuntimeToken()
 	objective = strings.TrimSpace(objective)
+	sessionID := strings.TrimSpace(m.sessionID)
+	token, shouldStart := m.beginGoalRuntimeMutation(operation, sessionID, objective)
+	if !shouldStart {
+		return nil
+	}
 	if client == nil {
 		return func() tea.Msg {
 			return goalRuntimeDoneMsg{token: token, operation: operation, objective: objective}
 		}
 	}
-	sessionID := strings.TrimSpace(m.sessionID)
 	return func() tea.Msg {
 		msg := goalRuntimeDoneMsg{token: token, sessionID: sessionID, operation: operation, objective: objective}
 		switch operation {
@@ -168,7 +217,14 @@ func (m *uiModel) goalRuntimeCommand(operation goalRuntimeOperation, objective s
 }
 
 func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
-	if m == nil || msg.token != m.goalRuntimeToken {
+	if m == nil {
+		return nil
+	}
+	if goalRuntimeOperationMutates(msg.operation) {
+		if msg.token != m.goalRuntimePending.token {
+			return nil
+		}
+	} else if msg.token != m.goalRuntimeToken {
 		return nil
 	}
 	if msg.sessionID != "" && strings.TrimSpace(m.sessionID) != "" && msg.sessionID != strings.TrimSpace(m.sessionID) {
@@ -176,12 +232,23 @@ func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
 	}
 	m.observeRuntimeRequestResult(msg.err)
 	if msg.err != nil {
+		if goalRuntimeOperationMutates(msg.operation) {
+			m.goalRuntimePending = goalRuntimePendingState{}
+		}
 		detailErr := formatSubmissionError(msg.err)
 		if m.goal.isOpen() {
 			m.goal.error = detailErr
 			return nil
 		}
 		return m.inputController().appendErrorFeedbackWithStatus(detailErr, m.inputController().showErrorStatus(detailErr))
+	}
+	if goalRuntimeOperationMutates(msg.operation) {
+		pending := m.goalRuntimePending
+		if pending.inFlight && (pending.desiredOperation != pending.inFlightOperation || pending.desiredObjective != pending.inFlightObjective) {
+			m.goalRuntimePending.inFlight = false
+			return m.goalRuntimeCommand(pending.desiredOperation, pending.desiredObjective)
+		}
+		m.goalRuntimePending = goalRuntimePendingState{}
 	}
 	switch msg.operation {
 	case goalRuntimeShow:

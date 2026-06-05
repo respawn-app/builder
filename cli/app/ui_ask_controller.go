@@ -192,15 +192,17 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if !ok {
 						return m, nil
 					}
-					queueCmd := m.enqueueInjectedInput(commentary)
 					resp = clientui.PromptAnswer{Approval: &clientui.ApprovalPromptAnswer{Decision: decision, Commentary: commentary}}
+					if queueCmd := m.enqueueInjectedInputWithApprovalAnswer(commentary, &resp); queueCmd != nil {
+						return m, queueCmd
+					}
 					hasNext := c.answer(resp, nil)
 					if hasNext {
 						m.activity = uiActivityQuestion
 					} else {
 						m.activity = uiActivityRunning
 					}
-					return m, queueCmd
+					return m, nil
 				}
 			}
 			hasNext := c.answer(resp, nil)
@@ -445,6 +447,16 @@ func (c uiAskController) answer(resp clientui.PromptAnswer, err error) bool {
 	c.setActiveAsk(next)
 	m.setInputMode(uiInputModeAsk)
 	return true
+}
+
+func (m *uiModel) answerQueuedApprovalCommentary(resp clientui.PromptAnswer) tea.Cmd {
+	hasNext := m.askController().answer(resp, nil)
+	if hasNext {
+		m.activity = uiActivityQuestion
+	} else {
+		m.activity = uiActivityRunning
+	}
+	return nil
 }
 
 func (c uiAskController) setActiveAsk(evt askEvent) {

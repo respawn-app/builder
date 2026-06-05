@@ -166,6 +166,62 @@ func TestBusyEnterQueuesInjectedInputWithoutRuntimeCreateDuringUpdate(t *testing
 	}
 }
 
+func TestQueuedRuntimeWorkCheckDoesNotSubmitWhenRuntimeBecameBusy(t *testing.T) {
+	client := &runtimeControlFakeClient{hasQueuedUserWork: true}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	cmd := m.inputController().queuedRuntimeWorkCheckCmd()
+	if cmd == nil {
+		t.Fatal("expected queued runtime work check command")
+	}
+	m.setBusy(true)
+	raw := cmd()
+	msg, ok := raw.(queuedRuntimeWorkCheckDoneMsg)
+	if !ok {
+		t.Fatalf("unexpected queue check message %T", raw)
+	}
+	next, followCmd := m.Update(msg)
+	updated := next.(*uiModel)
+	if followCmd != nil {
+		t.Fatal("did not expect queued submit command while runtime is busy")
+	}
+	if client.submitQueuedCalls != 0 {
+		t.Fatalf("queued submit started while runtime busy: %d", client.submitQueuedCalls)
+	}
+	if !updated.isBusy() {
+		t.Fatal("expected busy state preserved")
+	}
+}
+
+func TestIdleRuntimeResumesInjectedQueueThatWasEnqueuedWhileBusy(t *testing.T) {
+	client := &runtimeControlFakeClient{hasQueuedUserWork: true, submitQueuedResult: "done"}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.injectedQueue = []injectedRuntimeQueueItem{{LocalID: "local-1", ServerID: "server-1", Text: "follow up", State: injectedRuntimeQueueEnqueued}}
+	m.pendingInjected = []clientui.QueuedUserMessage{{ID: "server-1", Text: "follow up"}}
+
+	cmd := m.inputController().resumeQueuedInputsAfterIdleRuntime()
+	if cmd == nil {
+		t.Fatal("expected idle runtime to resume enqueued injected work")
+	}
+	raw := cmd()
+	msg, ok := raw.(queuedRuntimeWorkCheckDoneMsg)
+	if !ok {
+		t.Fatalf("unexpected queue check message %T", raw)
+	}
+	next, submitCmd := m.Update(msg)
+	updated := next.(*uiModel)
+	if submitCmd == nil {
+		t.Fatal("expected queued submit command after idle injected resume")
+	}
+	if !updated.isBusy() {
+		t.Fatal("expected queued injected resume to mark UI busy")
+	}
+	_ = collectCmdMessages(t, submitCmd)
+	if client.submitQueuedCalls != 1 {
+		t.Fatalf("expected one queued submit call, got %d", client.submitQueuedCalls)
+	}
+}
+
 func TestPendingInjectedCreateCanceledBeforeCompletionDiscardsLateServerItem(t *testing.T) {
 	client := &runtimeControlFakeClient{queueUserMessageID: "server-queue-1", discardQueuedResult: true}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
