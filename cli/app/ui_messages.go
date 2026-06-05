@@ -293,12 +293,6 @@ type clipboardTextCopyDoneMsg struct {
 	Err error
 }
 
-type copyFinalAnswerDoneMsg struct {
-	NoAnswer   bool
-	RefreshErr error
-	CopyErr    error
-}
-
 type askEvent struct {
 	req              clientui.PendingPromptEvent
 	reply            chan askReply

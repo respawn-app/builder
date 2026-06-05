@@ -95,7 +95,7 @@ type uiInputFeatureState struct {
 	commandRegistry       *commands.Registry
 	hasOtherSessions      bool
 	hasOtherSessionsKnown bool
-	authSlashCommandName  string
+	authSlashCommand      authSlashCommandKind
 	authSlashCommandErr   string
 	authSlashSessionOpen  bool
 	authSlashLoading      bool

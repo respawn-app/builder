@@ -13,6 +13,36 @@ import (
 
 const slashCommandPickerLines = 7
 
+type authSlashCommandKind uint8
+
+const (
+	authSlashCommandUnknown authSlashCommandKind = iota
+	authSlashCommandLogin
+	authSlashCommandLogout
+)
+
+func authSlashCommandFromName(name string) authSlashCommandKind {
+	switch strings.TrimSpace(name) {
+	case "login":
+		return authSlashCommandLogin
+	case "logout":
+		return authSlashCommandLogout
+	default:
+		return authSlashCommandUnknown
+	}
+}
+
+func (k authSlashCommandKind) commandName() string {
+	switch k {
+	case authSlashCommandLogin:
+		return "login"
+	case authSlashCommandLogout:
+		return "logout"
+	default:
+		return ""
+	}
+}
+
 type slashCommandPickerState struct {
 	visible   bool
 	matches   []commands.Command
@@ -128,7 +158,7 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 		if command.Name == "copy" && !m.hasAssistantFinalAnswerToCopy() {
 			continue
 		}
-		if isAuthSlashCommand(command.Name) && command.Name != m.authSlashCommandName {
+		if isAuthSlashCommand(command.Name) && command.Name != m.authSlashCommand.commandName() {
 			continue
 		}
 		filtered = append(filtered, command)
@@ -150,7 +180,7 @@ func (m *uiModel) requestAuthSlashCommandRefresh() tea.Cmd {
 		return nil
 	}
 	if m.statusConfig.AuthManager == nil {
-		m.authSlashCommandName = "login"
+		m.authSlashCommand = authSlashCommandLogin
 		m.authSlashCommandErr = ""
 		m.authSlashResolved = m.authSlashGeneration
 		m.authSlashLoading = false
@@ -177,12 +207,12 @@ func (m *uiModel) applyAuthSlashCommandRefreshed(msg authSlashCommandRefreshedMs
 	m.authSlashLoading = false
 	m.authSlashResolved = msg.generation
 	if msg.err != nil {
-		m.authSlashCommandName = ""
+		m.authSlashCommand = authSlashCommandUnknown
 		m.authSlashCommandErr = msg.err.Error()
 		m.clampSlashCommandSelection()
 		return
 	}
-	m.authSlashCommandName = strings.TrimSpace(msg.name)
+	m.authSlashCommand = authSlashCommandFromName(msg.name)
 	m.authSlashCommandErr = ""
 	m.clampSlashCommandSelection()
 }

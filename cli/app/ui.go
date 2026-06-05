@@ -70,7 +70,6 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	mainView := m.runtimeMainView()
 	status := mainView.Status
 	m.applyRuntimeMainViewState(mainView)
-	m.authSlashCommandName = "login"
 	if !m.hasRuntimeClient() {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}

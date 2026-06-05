@@ -413,6 +413,9 @@ func TestSlashCommandPickerShowsLoginWhenAuthIsMissingOrAPIKey(t *testing.T) {
 			if !slashPickerContainsCommand(state, "login") {
 				t.Fatalf("expected /login in slash picker, got %+v", slashPickerCommandNames(state))
 			}
+			if m.authSlashCommand != authSlashCommandLogin {
+				t.Fatalf("expected typed auth slash command login, got %v", m.authSlashCommand)
+			}
 			if slashPickerContainsCommand(state, "logout") {
 				t.Fatalf("did not expect /logout in slash picker, got %+v", slashPickerCommandNames(state))
 			}
@@ -488,6 +491,9 @@ func TestSlashCommandPickerShowsLogoutForOAuthAuth(t *testing.T) {
 	if !slashPickerContainsCommand(state, "logout") {
 		t.Fatalf("expected /logout in slash picker, got %+v", slashPickerCommandNames(state))
 	}
+	if m.authSlashCommand != authSlashCommandLogout {
+		t.Fatalf("expected typed auth slash command logout, got %v", m.authSlashCommand)
+	}
 	if slashPickerContainsCommand(state, "login") {
 		t.Fatalf("did not expect /login in slash picker, got %+v", slashPickerCommandNames(state))
 	}
@@ -505,6 +511,9 @@ func TestSlashCommandPickerHidesAuthCommandsWhenAuthStateCannotLoad(t *testing.T
 	}
 	if m.authSlashCommandErr == "" {
 		t.Fatal("expected auth slash command error to be recorded")
+	}
+	if m.authSlashCommand != authSlashCommandUnknown {
+		t.Fatalf("expected typed auth slash command unknown on load error, got %v", m.authSlashCommand)
 	}
 }
 
