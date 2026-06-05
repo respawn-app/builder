@@ -244,6 +244,9 @@ func (m *uiModel) processActionCmd(action, id, logPath string, inputDraftToken u
 	if m == nil || m.processClient == nil {
 		return nil
 	}
+	if m.processList.actionInFlight {
+		return nil
+	}
 	token := m.nextProcessActionToken()
 	surfaceGeneration := m.processList.surfaceGeneration
 	client := m.processClient
@@ -305,12 +308,12 @@ func (m *uiModel) applyProcessActionDone(msg processActionDoneMsg) tea.Cmd {
 	m.processList.actionInFlight = false
 	if msg.err != nil {
 		statusCmd := m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
+		c := uiInputController{model: m}
 		switch msg.action {
 		case "kill", "logs":
-			c := uiInputController{model: m}
 			return tea.Batch(statusCmd, c.resumeQueuedInputsAfterIdleRuntime())
 		default:
-			return statusCmd
+			return tea.Batch(statusCmd, c.resumeQueuedInputsAfterIdleRuntime())
 		}
 	}
 	c := uiInputController{model: m}
@@ -414,6 +417,9 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 	m := c.model
 	if m.processClient == nil {
 		return m, c.showErrorStatus("background process client is unavailable")
+	}
+	if m.processList.actionInFlight {
+		return m, c.showTransientStatus("process action already in flight")
 	}
 	action = strings.ToLower(strings.TrimSpace(action))
 	id = strings.TrimSpace(id)

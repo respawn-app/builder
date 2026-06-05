@@ -76,7 +76,7 @@ func TestGoalCommandOpensGoalOverlayWhileBusy(t *testing.T) {
 	}
 }
 
-func TestGoalMutationsCoalesceWhileInFlight(t *testing.T) {
+func TestGoalMutationsCoalesceAfterApplyingInFlightCompletion(t *testing.T) {
 	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: clientui.RuntimeGoalStatusPaused}}
 	m := newProjectedClosedUIModel(client)
 
@@ -104,8 +104,8 @@ func TestGoalMutationsCoalesceWhileInFlight(t *testing.T) {
 	if followUpCmd == nil {
 		t.Fatal("expected follow-up goal mutation command")
 	}
-	if updated.goal.goal != nil && updated.goal.goal.Status == clientui.RuntimeGoalStatusPaused {
-		t.Fatal("expected older pause completion not to update goal UI while resume is queued")
+	if updated.goal.goal == nil || updated.goal.goal.Status != clientui.RuntimeGoalStatusPaused {
+		t.Fatalf("expected pause completion to update goal UI before follow-up, got %+v", updated.goal.goal)
 	}
 	_ = collectCmdMessages(t, followUpCmd)
 	if client.resumeGoalCalls != 1 {

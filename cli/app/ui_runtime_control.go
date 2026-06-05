@@ -369,35 +369,38 @@ func (m *uiModel) applyRuntimeControlDone(msg runtimeControlDoneMsg) tea.Cmd {
 		errText := formatSubmissionError(msg.err)
 		return m.inputController().appendErrorFeedbackWithStatus(errText, m.setTransientStatusWithKind(errText, uiStatusNoticeError))
 	}
+	var followUpCmd tea.Cmd
 	if runtimeControlOperationUsesEnabledTarget(msg.operation) {
 		pending := m.runtimeControlPending[msg.operation]
 		if pending.inFlight && pending.desiredEnabled != pending.inFlightEnabled {
 			pending.inFlight = false
 			m.runtimeControlPending[msg.operation] = pending
-			return m.runtimeControlCommand(msg.operation, "", pending.desiredEnabled, pending.compactionMode)
+			followUpCmd = m.runtimeControlCommand(msg.operation, "", pending.desiredEnabled, pending.compactionMode)
+		} else {
+			m.clearRuntimeControlPending(msg.operation)
 		}
-		m.clearRuntimeControlPending(msg.operation)
 	}
 	if runtimeControlOperationUsesTextTarget(msg.operation) {
 		pending := m.runtimeControlPending[msg.operation]
 		if pending.inFlight && pending.desiredText != pending.inFlightText {
 			pending.inFlight = false
 			m.runtimeControlPending[msg.operation] = pending
-			return m.runtimeControlCommand(msg.operation, pending.desiredText, false, "")
+			followUpCmd = m.runtimeControlCommand(msg.operation, pending.desiredText, false, "")
+		} else {
+			m.clearRuntimeControlPending(msg.operation)
 		}
-		m.clearRuntimeControlPending(msg.operation)
 	}
 	switch msg.operation {
 	case runtimeControlSetSessionName:
 		m.sessionName = strings.TrimSpace(msg.text)
-		return tea.SetWindowTitle(m.windowTitle())
+		return sequenceCmds(tea.SetWindowTitle(m.windowTitle()), followUpCmd)
 	case runtimeControlSetThinkingLevel:
 		m.thinkingLevel = strings.TrimSpace(msg.text)
-		return m.inputController().appendSystemFeedback("Thinking level set to " + m.thinkingLevel)
+		return sequenceCmds(m.inputController().appendSystemFeedback("Thinking level set to "+m.thinkingLevel), followUpCmd)
 	case runtimeControlSetFastMode:
 		m.fastModeEnabled = msg.enabled
 		status := fastModeToggleStatusMessage(m.fastModeEnabled, msg.changed)
-		return m.inputController().appendSystemFeedbackWithMirroredStatus(status, uiStatusNoticeSuccess)
+		return sequenceCmds(m.inputController().appendSystemFeedbackWithMirroredStatus(status, uiStatusNoticeSuccess), followUpCmd)
 	case runtimeControlSetReviewer:
 		nextMode := strings.TrimSpace(msg.mode)
 		if nextMode == "" {
@@ -406,14 +409,14 @@ func (m *uiModel) applyRuntimeControlDone(msg runtimeControlDoneMsg) tea.Cmd {
 		m.reviewerMode = nextMode
 		m.reviewerEnabled = nextMode != "off"
 		status := reviewerToggleStatusMessage(m.reviewerEnabled, nextMode, msg.changed)
-		return m.inputController().appendSystemFeedbackWithMirroredStatus(status, uiStatusNoticeNeutral)
+		return sequenceCmds(m.inputController().appendSystemFeedbackWithMirroredStatus(status, uiStatusNoticeNeutral), followUpCmd)
 	case runtimeControlSetAutoCompaction:
 		m.autoCompactionEnabled = msg.enabled
 		status := autoCompactionToggleStatusMessage(msg.enabled, msg.changed, msg.compactionMode)
-		return m.inputController().appendSystemFeedbackWithMirroredStatus(status, uiStatusNoticeNeutral)
+		return sequenceCmds(m.inputController().appendSystemFeedbackWithMirroredStatus(status, uiStatusNoticeNeutral), followUpCmd)
 	case runtimeControlInterrupt:
-		return nil
+		return followUpCmd
 	default:
-		return nil
+		return followUpCmd
 	}
 }

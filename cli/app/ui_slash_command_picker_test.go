@@ -619,6 +619,37 @@ func TestSlashCommandPickerTypingSlashDefersAuthLoadToCommand(t *testing.T) {
 	}
 }
 
+func TestSlashCommandPickerDroppedAuthRefreshCanBeRescheduled(t *testing.T) {
+	manager := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "access-token",
+				TokenType:   "Bearer",
+			},
+		},
+	}), nil, nil)
+	m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: manager}))
+	m.replaceMainInput("/", -1)
+	droppedCmd := m.refreshSlashCommandFilterFromInput()
+	if droppedCmd == nil {
+		t.Fatal("expected first auth slash refresh command")
+	}
+
+	cmd := m.refreshSlashCommandFilterFromInput()
+	if cmd == nil {
+		t.Fatal("expected dropped auth slash refresh to be rescheduled")
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, _ := m.Update(msg)
+		m = next.(*uiModel)
+	}
+	if state := m.slashCommandPicker(); !slashPickerContainsCommand(state, "logout") {
+		t.Fatalf("expected /logout after rescheduled auth refresh, got %+v", slashPickerCommandNames(state))
+	}
+}
+
 type errorAuthStore struct {
 	err error
 }

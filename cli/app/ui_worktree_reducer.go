@@ -67,19 +67,17 @@ func (r uiWorktreeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			return handledUIFeatureUpdate(m, nil)
 		}
 		m.worktrees.switchPending = false
-		if followUp := m.takeQueuedWorktreeSwitchCmd(); followUp != nil {
-			m.syncViewport()
-			return handledUIFeatureUpdate(m, tea.Batch(followUp, m.ensureSpinnerTicking()))
-		}
+		followUp := tea.Cmd(nil)
 		if msg.err != nil {
+			followUp = m.takeQueuedWorktreeSwitchCmd()
 			if !m.worktrees.isOpen() {
 				status := formatSubmissionError(msg.err)
 				m.syncViewport()
-				return handledUIFeatureUpdate(m, m.setTransientStatusWithKind(status, uiStatusNoticeError))
+				return handledUIFeatureUpdate(m, tea.Batch(m.setTransientStatusWithKind(status, uiStatusNoticeError), followUp))
 			}
 			m.worktrees.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
-			return handledUIFeatureUpdate(m, m.ensureSpinnerTicking())
+			return handledUIFeatureUpdate(m, tea.Batch(followUp, m.ensureSpinnerTicking()))
 		}
 		var overlayCmd tea.Cmd
 		if m.worktrees.isOpen() {
@@ -88,8 +86,9 @@ func (r uiWorktreeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		}
 		status := "Switched to " + worktreeDisplayName(msg.resp.Worktree)
 		feedbackCmd := m.setTransientStatusWithKind(status, uiStatusNoticeSuccess)
+		followUp = m.takeQueuedWorktreeSwitchCmd()
 		m.syncViewport()
-		return handledUIFeatureUpdate(m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking()))
+		return handledUIFeatureUpdate(m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), followUp, m.ensureSpinnerTicking()))
 	case worktreeDeleteDoneMsg:
 		if msg.token != m.worktrees.mutationToken {
 			m.syncViewport()

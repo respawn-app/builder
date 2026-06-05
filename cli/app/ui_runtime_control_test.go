@@ -393,7 +393,7 @@ func TestRuntimeControlCompletionsAreScopedPerOperation(t *testing.T) {
 	}
 }
 
-func TestRuntimeControlTextMutationsCoalesceUntilInFlightCompletion(t *testing.T) {
+func TestRuntimeControlTextMutationsCoalesceAfterApplyingInFlightCompletion(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
@@ -419,8 +419,8 @@ func TestRuntimeControlTextMutationsCoalesceUntilInFlightCompletion(t *testing.T
 	}
 	next, followUpCmd := m.Update(firstDone)
 	updated := next.(*uiModel)
-	if updated.thinkingLevel == "high" {
-		t.Fatal("expected coalesced older thinking-level completion not to update UI")
+	if updated.thinkingLevel != "high" {
+		t.Fatalf("expected first thinking-level completion to update UI before follow-up, got %q", updated.thinkingLevel)
 	}
 	if followUpCmd == nil {
 		t.Fatal("expected follow-up command for coalesced thinking-level target")
@@ -443,7 +443,7 @@ func TestRuntimeControlTextMutationsCoalesceUntilInFlightCompletion(t *testing.T
 	}
 }
 
-func TestRuntimeControlRapidFastToggleUsesPendingTargetAndIgnoresOlderCompletion(t *testing.T) {
+func TestRuntimeControlRapidFastToggleUsesPendingTargetAfterApplyingOlderCompletion(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
@@ -472,8 +472,8 @@ func TestRuntimeControlRapidFastToggleUsesPendingTargetAndIgnoresOlderCompletion
 	}
 	next, followUpCmd := m.Update(firstDone)
 	updated := next.(*uiModel)
-	if updated.fastModeEnabled {
-		t.Fatal("expected older fast toggle completion to be ignored")
+	if !updated.fastModeEnabled {
+		t.Fatal("expected first fast toggle completion to apply before follow-up")
 	}
 	if followUpCmd == nil {
 		t.Fatal("expected follow-up command for coalesced fast target")

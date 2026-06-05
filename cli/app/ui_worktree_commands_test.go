@@ -963,6 +963,62 @@ func TestWorktreeSwitchCommandsCoalesceWhileInFlight(t *testing.T) {
 	}
 }
 
+func TestWorktreeSwitchCompletionAppliesBeforeQueuedSwitchRuns(t *testing.T) {
+	client := &worktreeCommandTestClient{
+		listResp:   testLinkedWorktreeListResponse(),
+		switchResp: serverapi.WorktreeSwitchResponse{Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a"}},
+	}
+	m := newWorktreeTestModel(t, client)
+
+	next, firstCmd := m.inputController().handleWorktreeSwitchCommand("feature-a")
+	updated := next.(*uiModel)
+	if firstCmd == nil {
+		t.Fatal("expected first switch command")
+	}
+	next, secondCmd := updated.inputController().handleWorktreeSwitchCommand("main")
+	updated = next.(*uiModel)
+	if secondCmd != nil {
+		t.Fatal("did not expect second switch command while first is in flight")
+	}
+
+	var firstDone worktreeSwitchDoneMsg
+	foundFirst := false
+	for _, msg := range collectCmdMessages(t, firstCmd) {
+		if typed, ok := msg.(worktreeSwitchDoneMsg); ok {
+			firstDone = typed
+			foundFirst = true
+		}
+	}
+	if !foundFirst {
+		t.Fatal("expected first worktree switch completion")
+	}
+	client.switchErr = errors.New("queued switch failed")
+	next, followCmd := updated.Update(firstDone)
+	updated = next.(*uiModel)
+	if updated.transientStatus != "Switched to feature-a" {
+		t.Fatalf("expected first switch success status before queued follow-up, got %q", updated.transientStatus)
+	}
+	msgs := collectCmdMessages(t, followCmd)
+	sawRefresh := false
+	sawQueuedSwitch := false
+	for _, msg := range msgs {
+		switch typed := msg.(type) {
+		case runtimeMainViewRefreshedMsg:
+			sawRefresh = true
+		case worktreeSwitchDoneMsg:
+			if typed.err != nil {
+				sawQueuedSwitch = true
+			}
+		}
+	}
+	if !sawRefresh {
+		t.Fatalf("expected first switch to schedule main-view refresh before queued failure, got %+v", msgs)
+	}
+	if !sawQueuedSwitch {
+		t.Fatalf("expected queued switch command to still run, got %+v", msgs)
+	}
+}
+
 func TestWorktreeDeleteTargetResolutionPrefersDisplayNameMatchBeforeBranchMatch(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees,

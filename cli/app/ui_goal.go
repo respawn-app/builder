@@ -242,53 +242,55 @@ func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
 		}
 		return m.inputController().appendErrorFeedbackWithStatus(detailErr, m.inputController().showErrorStatus(detailErr))
 	}
+	var followUpCmd tea.Cmd
 	if goalRuntimeOperationMutates(msg.operation) {
 		pending := m.goalRuntimePending
 		if pending.inFlight && (pending.desiredOperation != pending.inFlightOperation || pending.desiredObjective != pending.inFlightObjective) {
 			m.goalRuntimePending.inFlight = false
-			return m.goalRuntimeCommand(pending.desiredOperation, pending.desiredObjective)
+			followUpCmd = m.goalRuntimeCommand(pending.desiredOperation, pending.desiredObjective)
+		} else {
+			m.goalRuntimePending = goalRuntimePendingState{}
 		}
-		m.goalRuntimePending = goalRuntimePendingState{}
 	}
 	switch msg.operation {
 	case goalRuntimeShow:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
 		m.goal.error = ""
-		return nil
+		return followUpCmd
 	case goalRuntimeCheckSet:
 		if goalIsActive(msg.goal) {
 			m.openGoalConfirmOverlay("replace", msg.goal, msg.objective, nil)
-			return m.pushGoalOverlayIfNeeded()
+			return sequenceCmds(m.pushGoalOverlayIfNeeded(), followUpCmd)
 		}
-		return m.goalRuntimeCommand(goalRuntimeSet, msg.objective)
+		return sequenceCmds(m.goalRuntimeCommand(goalRuntimeSet, msg.objective), followUpCmd)
 	case goalRuntimeCheckClear:
 		if goalRequiresClearConfirmation(msg.goal) {
 			m.openGoalConfirmOverlay("clear", msg.goal, "", nil)
-			return m.pushGoalOverlayIfNeeded()
+			return sequenceCmds(m.pushGoalOverlayIfNeeded(), followUpCmd)
 		}
-		return m.goalRuntimeCommand(goalRuntimeClear, "")
+		return sequenceCmds(m.goalRuntimeCommand(goalRuntimeClear, ""), followUpCmd)
 	case goalRuntimeSet:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
 		overlayCmd := tea.Cmd(nil)
 		if m.goal.isOpen() && strings.TrimSpace(m.goal.confirmMode) != "" {
 			overlayCmd = m.inputController().stopGoalFlowCmd()
 		}
-		return sequenceCmds(overlayCmd, m.inputController().appendGoalFeedback("Goal set"))
+		return sequenceCmds(overlayCmd, m.inputController().appendGoalFeedback("Goal set"), followUpCmd)
 	case goalRuntimePause:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
-		return m.inputController().appendGoalFeedback("Goal paused")
+		return sequenceCmds(m.inputController().appendGoalFeedback("Goal paused"), followUpCmd)
 	case goalRuntimeResume:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
-		return m.inputController().appendGoalFeedback("Goal resumed")
+		return sequenceCmds(m.inputController().appendGoalFeedback("Goal resumed"), followUpCmd)
 	case goalRuntimeClear:
 		m.goal.goal = nil
 		overlayCmd := tea.Cmd(nil)
 		if m.goal.isOpen() && strings.TrimSpace(m.goal.confirmMode) != "" {
 			overlayCmd = m.inputController().stopGoalFlowCmd()
 		}
-		return sequenceCmds(overlayCmd, m.inputController().appendGoalFeedback("Goal cleared"))
+		return sequenceCmds(overlayCmd, m.inputController().appendGoalFeedback("Goal cleared"), followUpCmd)
 	default:
-		return nil
+		return followUpCmd
 	}
 }
 

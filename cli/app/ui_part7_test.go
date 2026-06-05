@@ -275,6 +275,76 @@ func TestAutoDrainResumesAfterQueuedPSNonMutatingActionError(t *testing.T) {
 	}
 }
 
+func TestAutoDrainResumesAfterQueuedPSInlineActionError(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIProcessClient(failingQueuedProcessClient{err: errors.New("inline failed")}))
+	m.setBusy(true)
+	m.activity = uiActivityRunning
+	m.queued = queuedInputsForTest("/ps inline proc-1", "summarize this")
+
+	next, cmd := m.Update(submitDoneMsg{})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected command batch from queued /ps inline execution")
+	}
+	if !updated.processList.actionInFlight {
+		t.Fatal("expected queued /ps inline action to remain in flight")
+	}
+
+	updated = applyProcessActionCommandForTest(t, updated, cmd)
+	if !strings.Contains(updated.transientStatus, "inline failed") {
+		t.Fatalf("expected process error status, got %q", updated.transientStatus)
+	}
+	if !updated.isBusy() {
+		t.Fatal("expected follow-up prompt to start after inline action error")
+	}
+	if updated.activeSubmit.text != "summarize this" {
+		t.Fatalf("expected follow-up prompt active, got %q", updated.activeSubmit.text)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected follow-up queue drained, got %+v", updated.queued)
+	}
+}
+
+type countingProcessActionClient struct {
+	killCalls int
+}
+
+func (c *countingProcessActionClient) ListProcesses(context.Context) ([]clientui.BackgroundProcess, error) {
+	return []clientui.BackgroundProcess{{ID: "proc-1", LogPath: "/tmp/process.log"}}, nil
+}
+
+func (c *countingProcessActionClient) KillProcess(context.Context, string) error {
+	c.killCalls++
+	return nil
+}
+
+func (c *countingProcessActionClient) InlineOutput(context.Context, string, int) (string, string, error) {
+	return "output", "", nil
+}
+
+func TestPSActionsAreSerializedWhileInFlight(t *testing.T) {
+	client := &countingProcessActionClient{}
+	m := newProjectedStaticUIModel(WithUIProcessClient(client))
+	m.processList.entries = []clientui.BackgroundProcess{{ID: "proc-1", LogPath: "/tmp/process.log"}}
+
+	_, firstCmd := m.inputController().runProcessAction("kill", "proc-1")
+	if firstCmd == nil {
+		t.Fatal("expected first process action command")
+	}
+	_, secondCmd := m.inputController().runProcessAction("kill", "proc-1")
+	if secondCmd == nil {
+		t.Fatal("expected second process action to produce status feedback")
+	}
+	_ = collectCmdMessages(t, secondCmd)
+	if client.killCalls != 0 {
+		t.Fatalf("second action should not start an RPC while first is in flight, got %d calls", client.killCalls)
+	}
+	_ = applyProcessActionCommandForTest(t, m, firstCmd)
+	if client.killCalls != 1 {
+		t.Fatalf("expected exactly one process action RPC, got %d", client.killCalls)
+	}
+}
+
 func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIConversationFreshness(clientui.ConversationFreshnessEstablished),
