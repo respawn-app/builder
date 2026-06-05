@@ -169,8 +169,6 @@ type uiStatusFeatureState struct {
 	debugKeys               bool
 	debugMode               bool
 	transcriptDiagnostics   bool
-	tuiStrictIOMode         tuiStrictIOMode
-	tuiStrictIOModeExplicit bool
 }
 
 type uiTranscriptFeatureState struct {

@@ -67,16 +67,13 @@ func newUISessionTransitionFeatureState() uiSessionTransitionFeatureState {
 
 func newUIStatusFeatureState() uiStatusFeatureState {
 	debug := envFlagEnabled("BUILDER_DEBUG")
-	strictMode, strictExplicit := initialTUIStrictIOMode(debug)
 	return uiStatusFeatureState{
-		statusRepository:        newMemoryUIStatusRepository(),
-		clipboardImagePaster:    newSystemClipboardImagePaster(),
-		clipboardTextCopier:     newSystemClipboardTextCopier(),
-		debugKeys:               envFlagEnabled("BUILDER_DEBUG_KEYS"),
-		debugMode:               debug,
-		transcriptDiagnostics:   envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
-		tuiStrictIOMode:         strictMode,
-		tuiStrictIOModeExplicit: strictExplicit,
+		statusRepository:      newMemoryUIStatusRepository(),
+		clipboardImagePaster:  newSystemClipboardImagePaster(),
+		clipboardTextCopier:   newSystemClipboardTextCopier(),
+		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugMode:             debug,
+		transcriptDiagnostics: envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
 	}
 }
 

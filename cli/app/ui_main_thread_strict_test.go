@@ -56,7 +56,7 @@ func TestTUIStrictIOViewDoesNotFetchProcessesForStatusOrOverlay(t *testing.T) {
 	processes := &countingProcessClient{}
 	m := newProjectedStaticUIModel(
 		WithUIProcessClient(processes),
-		WithUITUIStrictIO("panic"),
+		WithUIDebug(true),
 	)
 	m.termWidth = 100
 	m.termHeight = 14
@@ -73,7 +73,7 @@ func TestTUIStrictIOViewDoesNotFetchProcessesForStatusOrOverlay(t *testing.T) {
 
 func TestTUIStrictIOBusyEnterQueuesInjectedInputAsCommand(t *testing.T) {
 	client := &runtimeControlFakeClient{queueUserMessageID: "server-queue-1"}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUITUIStrictIO("panic"))
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIDebug(true))
 	m.startupCmds = nil
 	m.setBusy(true)
 	m.input = "queued steering"
@@ -97,7 +97,7 @@ func TestTUIStrictIOBusyEnterQueuesInjectedInputAsCommand(t *testing.T) {
 
 func TestTUIStrictIOCompactDoneChecksQueuedRuntimeWorkAsCommand(t *testing.T) {
 	client := &runtimeControlFakeClient{}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUITUIStrictIO("panic"))
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIDebug(true))
 	m.startupCmds = nil
 	m.setBusy(true)
 	m.setCompacting(true)
@@ -119,7 +119,7 @@ func TestTUIStrictIOCompactDoneChecksQueuedRuntimeWorkAsCommand(t *testing.T) {
 
 func TestTUIStrictIORuntimeControlSlashRunsAsCommand(t *testing.T) {
 	client := &runtimeControlFakeClient{}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUITUIStrictIO("panic"))
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIDebug(true))
 	m.startupCmds = nil
 
 	handled, _, cmd := m.inputController().handleEnteredSlashCommandInput("/name New Name")
@@ -169,7 +169,7 @@ func TestTUIStrictIOStatusOpenDefersCollectorBaseToCommand(t *testing.T) {
 	request := populateStatusRequestCacheKeys(uiStatusRequest{WorkspaceRoot: t.TempDir(), CurrentTime: time.Now()})
 	repository.StoreGit(request.CacheKeys.Git, uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "cached"}}, time.Now())
 	m := newProjectedStaticUIModel(
-		WithUITUIStrictIO("panic"),
+		WithUIDebug(true),
 		WithUIStatusCollector(collector),
 		WithUIStatusRepository(repository),
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: request.WorkspaceRoot}),
@@ -194,7 +194,7 @@ func TestTUIStrictIOWorktreeSwitchRunsAsCommand(t *testing.T) {
 		WorktreeID: "wt-feature", DisplayName: "feature", CanonicalRoot: "/repo-feature", BranchName: "feature",
 	})
 	client := &worktreeCommandTestClient{listResp: resp}
-	m := newWorktreeTestModel(t, client, WithUITUIStrictIO("panic"))
+	m := newWorktreeTestModel(t, client, WithUIDebug(true))
 
 	_, cmd := m.inputController().handleWorktreeCommand("switch feature")
 	if cmd == nil {
