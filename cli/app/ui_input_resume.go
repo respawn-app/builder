@@ -96,7 +96,7 @@ func (c uiInputController) submitQueuedUserMessagesCmd() tea.Cmd {
 
 func submitQueuedRuntimeUserMessages(ctx context.Context, client clientui.RuntimeClient) (string, error) {
 	if client == nil {
-		return "", nil
+		return "", errors.New("runtime engine is not configured")
 	}
 	return client.SubmitQueuedUserMessages(ctx)
 }

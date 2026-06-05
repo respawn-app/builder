@@ -146,13 +146,63 @@ func TestCopySlashCommandDoesNotUseVisibleProjectionWhenRuntimeStatusIsStale(t *
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected transient-status command")
+		t.Fatal("expected runtime refresh command")
 	}
 	if copier.calls != 0 {
 		t.Fatalf("did not expect clipboard copy from visible projection, got %d", copier.calls)
 	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, cmd = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
+	if copier.calls != 0 {
+		t.Fatalf("did not expect clipboard copy from visible projection after refresh, got %d", copier.calls)
+	}
 	if updated.transientStatus != "No final answer available to copy" {
 		t.Fatalf("expected no-answer status, got %q", updated.transientStatus)
+	}
+	if cmd == nil {
+		t.Fatal("expected transient-status clear command")
+	}
+}
+
+func TestCopySlashCommandRefreshesRuntimeStatusBeforeCopying(t *testing.T) {
+	copier := &stubClipboardTextCopier{}
+	client := &runtimeControlFakeClient{
+		status: clientui.RuntimeStatus{LastCommittedAssistantFinalAnswer: "refreshed final"},
+		cachedMainView: clientui.RuntimeMainView{Status: clientui.RuntimeStatus{
+			LastCommittedAssistantFinalAnswer: "",
+		}},
+		hasCachedMainView: true,
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIClipboardTextCopier(copier))
+	m.input = "/copy"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected runtime refresh command")
+	}
+	if client.refreshMainViewCalls != 0 {
+		t.Fatalf("refresh happened during Update: %d", client.refreshMainViewCalls)
+	}
+
+	var followCmd tea.Cmd
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, followCmd = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
+	if client.refreshMainViewCalls != 1 {
+		t.Fatalf("expected one refresh from copy command, got %d", client.refreshMainViewCalls)
+	}
+	if copier.calls != 1 || copier.text != "refreshed final" {
+		t.Fatalf("expected refreshed final answer copied once, calls=%d text=%q", copier.calls, copier.text)
+	}
+	if updated.transientStatus != "Copied final answer to clipboard" {
+		t.Fatalf("unexpected transient status %q", updated.transientStatus)
+	}
+	if followCmd == nil {
+		t.Fatal("expected transient-status clear command")
 	}
 }
 

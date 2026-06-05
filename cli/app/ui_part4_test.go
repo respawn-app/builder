@@ -1037,6 +1037,31 @@ func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testi
 	}
 }
 
+func TestInterruptedSubmitDoneRunsQueuedRuntimeDiscardCleanup(t *testing.T) {
+	client := &runtimeControlFakeClient{discardQueuedResult: true}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.setBusy(true)
+	m.setInputSubmitLocked(true)
+	m.lockedInjectID = "server-queue-1"
+	m.pendingInjected = []clientui.QueuedUserMessage{{ID: "server-queue-1", Text: "restore me"}}
+
+	next, cmd := m.Update(submitDoneMsg{err: submissionerror.ErrInterrupted})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected queued runtime discard cleanup command")
+	}
+	if updated.isInputSubmitLocked() {
+		t.Fatal("expected submit lock released after interrupted completion")
+	}
+	if updated.input != "" {
+		t.Fatalf("did not expect locked submitted input restored, got %q", updated.input)
+	}
+	_ = collectCmdMessages(t, cmd)
+	if client.discardQueuedCalls != 1 || client.discardQueuedID != "server-queue-1" {
+		t.Fatalf("expected runtime queued item discarded, calls=%d id=%q", client.discardQueuedCalls, client.discardQueuedID)
+	}
+}
+
 func TestInterruptedSubmitDoneDoesNotRestoreFlushedSubmittedText(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.setBusy(true)

@@ -38,6 +38,30 @@ type countingSessionViewClient struct {
 	lastSuffixReq     serverapi.SessionCommittedTranscriptSuffixRequest
 }
 
+type runtimeClientWithoutCachedMainView struct {
+	clientui.RuntimeClient
+	mainView      clientui.RuntimeMainView
+	mainViewCalls int
+	suffixReq     clientui.CommittedTranscriptSuffixRequest
+}
+
+func (c *runtimeClientWithoutCachedMainView) MainView() clientui.RuntimeMainView {
+	c.mainViewCalls++
+	return c.mainView
+}
+
+func (c *runtimeClientWithoutCachedMainView) RefreshCommittedTranscriptSuffix(req clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error) {
+	c.suffixReq = req
+	return clientui.CommittedTranscriptSuffix{
+		SessionID:             c.mainView.Session.SessionID,
+		Revision:              c.mainView.Session.Transcript.Revision,
+		CommittedEntryCount:   c.mainView.Session.Transcript.CommittedEntryCount,
+		StartEntryCount:       req.AfterEntryCount,
+		NextEntryCount:        c.mainView.Session.Transcript.CommittedEntryCount,
+		ConversationFreshness: c.mainView.Session.ConversationFreshness,
+	}, nil
+}
+
 func (c *countingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
 	c.count.Add(1)
 	c.mainViewCount.Add(1)
@@ -1134,6 +1158,44 @@ func TestCommittedSuffixMultiToolDetailRoundTripLeavesNoLiveSpinnerAfterFinalRes
 		if counts[key] != 1 {
 			t.Fatalf("committed transcript row count %s = %d, want 1; entries=%+v", key, counts[key], m.transcriptEntries)
 		}
+	}
+}
+
+func TestNativeResizeCommittedTranscriptSuffixFallsBackToMainViewWhenCacheUnavailable(t *testing.T) {
+	client := &runtimeClientWithoutCachedMainView{
+		RuntimeClient: &runtimeControlFakeClient{},
+		mainView: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID: "session-1",
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            9,
+				CommittedEntryCount: 900,
+			},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	client.mainViewCalls = 0
+
+	cmd := m.requestNativeResizeCommittedTranscriptSuffix(3)
+	if cmd == nil {
+		t.Fatal("expected native resize suffix request command")
+	}
+	if client.mainViewCalls != 0 {
+		t.Fatalf("main view fallback happened during Update: %d calls", client.mainViewCalls)
+	}
+	raw := cmd()
+	msg, ok := raw.(nativeResizeTranscriptSuffixRefreshedMsg)
+	if !ok {
+		t.Fatalf("unexpected command message type %T", raw)
+	}
+	if msg.token != 3 || msg.err != nil {
+		t.Fatalf("unexpected resize suffix response: %+v", msg)
+	}
+	if client.mainViewCalls != 1 {
+		t.Fatalf("expected main view fallback in command, got %d calls", client.mainViewCalls)
+	}
+	wantAfter := 900 - clientui.MaxCommittedTranscriptSuffixLimit
+	if client.suffixReq.AfterEntryCount != wantAfter || client.suffixReq.Limit != clientui.MaxCommittedTranscriptSuffixLimit {
+		t.Fatalf("resize suffix request = %+v, want after=%d limit=%d", client.suffixReq, wantAfter, clientui.MaxCommittedTranscriptSuffixLimit)
 	}
 }
 

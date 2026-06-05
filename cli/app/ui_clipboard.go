@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"builder/shared/clientui"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -531,13 +533,34 @@ func (m *uiModel) copyClipboardTextCmd(text string) tea.Cmd {
 	copier := m.clipboardTextCopier
 	copyText := text
 	return func() tea.Msg {
-		if copier == nil {
-			return clipboardTextCopyDoneMsg{Err: &uiClipboardCopyError{Kind: uiClipboardCopyErrorUnsupported, Message: "Clipboard copy is unavailable"}}
+		ctx, cancel := context.WithTimeout(context.Background(), clipboardTextCopyTimeout)
+		defer cancel()
+		return clipboardTextCopyDoneMsg{Err: copyClipboardText(ctx, copier, copyText)}
+	}
+}
+
+func (m *uiModel) copyLatestAssistantFinalAnswerFromRuntimeCmd(client clientui.RuntimeClient) tea.Cmd {
+	copier := m.clipboardTextCopier
+	return func() tea.Msg {
+		view, err := client.RefreshMainView()
+		if err != nil {
+			return copyFinalAnswerDoneMsg{RefreshErr: err}
+		}
+		answer := strings.TrimSpace(view.Status.LastCommittedAssistantFinalAnswer)
+		if answer == "" {
+			return copyFinalAnswerDoneMsg{NoAnswer: true}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), clipboardTextCopyTimeout)
 		defer cancel()
-		return clipboardTextCopyDoneMsg{Err: copier.CopyText(ctx, copyText)}
+		return copyFinalAnswerDoneMsg{CopyErr: copyClipboardText(ctx, copier, view.Status.LastCommittedAssistantFinalAnswer)}
 	}
+}
+
+func copyClipboardText(ctx context.Context, copier uiClipboardTextCopier, text string) error {
+	if copier == nil {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorUnsupported, Message: "Clipboard copy is unavailable"}
+	}
+	return copier.CopyText(ctx, text)
 }
 
 func (m *uiModel) handleClipboardTextCopyDone(msg clipboardTextCopyDoneMsg) tea.Cmd {
@@ -546,6 +569,17 @@ func (m *uiModel) handleClipboardTextCopyDone(msg clipboardTextCopyDoneMsg) tea.
 		return m.setTransientStatusWithKind(message, kind)
 	}
 	return m.setTransientStatusWithKind("Copied final answer to clipboard", uiStatusNoticeSuccess)
+}
+
+func (m *uiModel) handleCopyFinalAnswerDone(msg copyFinalAnswerDoneMsg) tea.Cmd {
+	m.observeRuntimeRequestResult(msg.RefreshErr)
+	if msg.RefreshErr != nil {
+		return m.setTransientStatusWithKind("Failed to refresh final answer: "+msg.RefreshErr.Error(), uiStatusNoticeError)
+	}
+	if msg.NoAnswer {
+		return m.setTransientStatusWithKind("No final answer available to copy", uiStatusNoticeError)
+	}
+	return m.handleClipboardTextCopyDone(clipboardTextCopyDoneMsg{Err: msg.CopyErr})
 }
 
 func clipboardImagePasteStatus(err error) (string, uiStatusNoticeKind) {

@@ -249,6 +249,10 @@ func (r uiClipboardFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		cmd := m.handleClipboardTextCopyDone(msg)
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, cmd)
+	case copyFinalAnswerDoneMsg:
+		cmd := m.handleCopyFinalAnswerDone(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
 	}
 	return uiFeatureUpdateResult{}
 }

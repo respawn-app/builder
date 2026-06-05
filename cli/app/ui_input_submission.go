@@ -263,7 +263,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 			m.activity = uiActivityInterrupted
 			m.logf("step.interrupted")
 			m.syncViewport()
-			return m, nil
+			return m, batchCmds(unlockCmd, restoreInjectedCmd)
 		}
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError

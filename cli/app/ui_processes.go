@@ -14,7 +14,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const uiProcessOperationTimeout = 5 * time.Second
+const (
+	uiProcessInlineMaxChars   = 12_000
+	uiProcessOperationTimeout = 5 * time.Second
+)
 
 func (m *uiModel) applyProcessEntries(entries []clientui.BackgroundProcess) {
 	selectedID := ""
@@ -263,7 +266,7 @@ func (m *uiModel) processActionCmd(action, id, logPath string, inputDraftToken u
 		case "kill":
 			msg.err = client.KillProcess(ctx, id)
 		case "inline":
-			msg.output, msg.logPath, msg.err = client.InlineOutput(ctx, id, 12_000)
+			msg.output, msg.logPath, msg.err = client.InlineOutput(ctx, id, uiProcessInlineMaxChars)
 		case "logs":
 			if msg.logPath == "" {
 				entries, err := client.ListProcesses(ctx)

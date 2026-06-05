@@ -106,21 +106,30 @@ func (m *uiModel) requestNativeResizeCommittedTranscriptSuffix(token uint64) tea
 	if m == nil || !m.hasRuntimeClient() {
 		return nil
 	}
-	client, ok := m.runtimeClient().(interface {
+	runtimeClient := m.runtimeClient()
+	client, ok := runtimeClient.(interface {
 		RefreshCommittedTranscriptSuffix(clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error)
 	})
 	if !ok {
 		return nil
 	}
-	req := m.nativeResizeCommittedTranscriptSuffixRequest()
+	committedCount, hasCachedServerCount := m.cachedServerCommittedTranscriptEntryCount()
 	return func() tea.Msg {
+		if !hasCachedServerCount {
+			committedCount = max(committedCount, runtimeClient.MainView().Session.Transcript.CommittedEntryCount)
+		}
+		req := nativeResizeCommittedTranscriptSuffixRequestForCommittedCount(committedCount)
 		suffix, err := client.RefreshCommittedTranscriptSuffix(req)
 		return nativeResizeTranscriptSuffixRefreshedMsg{token: token, suffix: suffix, err: err}
 	}
 }
 
 func (m *uiModel) nativeResizeCommittedTranscriptSuffixRequest() clientui.CommittedTranscriptSuffixRequest {
-	committedCount := m.cachedServerCommittedTranscriptEntryCount()
+	committedCount, _ := m.cachedServerCommittedTranscriptEntryCount()
+	return nativeResizeCommittedTranscriptSuffixRequestForCommittedCount(committedCount)
+}
+
+func nativeResizeCommittedTranscriptSuffixRequestForCommittedCount(committedCount int) clientui.CommittedTranscriptSuffixRequest {
 	limit := clientui.MaxCommittedTranscriptSuffixLimit
 	after := committedCount - limit
 	if after < 0 {
@@ -129,9 +138,9 @@ func (m *uiModel) nativeResizeCommittedTranscriptSuffixRequest() clientui.Commit
 	return clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: after, Limit: limit}
 }
 
-func (m *uiModel) cachedServerCommittedTranscriptEntryCount() int {
+func (m *uiModel) cachedServerCommittedTranscriptEntryCount() (int, bool) {
 	if m == nil {
-		return 0
+		return 0, false
 	}
 	committedCount := 0
 	if m.ongoingCommittedDelivery.initialized {
@@ -143,9 +152,10 @@ func (m *uiModel) cachedServerCommittedTranscriptEntryCount() int {
 	}); ok {
 		if view, hasCached := cached.CachedMainView(); hasCached {
 			committedCount = max(committedCount, view.Session.Transcript.CommittedEntryCount)
+			return committedCount, true
 		}
 	}
-	return committedCount
+	return committedCount, false
 }
 
 func (m *uiModel) applyCommittedTranscriptSuffixForNativeReplay(suffix clientui.CommittedTranscriptSuffix) tea.Cmd {

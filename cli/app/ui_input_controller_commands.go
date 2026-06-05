@@ -152,6 +152,9 @@ func (m *uiModel) hasAssistantFinalAnswerToCopy() bool {
 
 func (c uiInputController) handleCopyCommand() (tea.Model, tea.Cmd) {
 	m := c.model
+	if client := m.runtimeClient(); client != nil {
+		return m, m.copyLatestAssistantFinalAnswerFromRuntimeCmd(client)
+	}
 	text := m.latestAssistantFinalAnswer()
 	if strings.TrimSpace(text) == "" {
 		return m, c.showErrorStatus("No final answer available to copy")

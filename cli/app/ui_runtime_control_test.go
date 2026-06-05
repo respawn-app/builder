@@ -20,6 +20,8 @@ type runtimeControlFakeClient struct {
 	status                 clientui.RuntimeStatus
 	sessionView            clientui.RuntimeSessionView
 	mainView               clientui.RuntimeMainView
+	cachedMainView         clientui.RuntimeMainView
+	hasCachedMainView      bool
 	transcript             clientui.TranscriptPage
 	setSessionNameArg      string
 	setThinkingLevelArg    string
@@ -83,6 +85,9 @@ func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
 	return clientui.RuntimeMainView{Status: f.status, Session: f.sessionView}
 }
 func (f *runtimeControlFakeClient) CachedMainView() (clientui.RuntimeMainView, bool) {
+	if f.hasCachedMainView {
+		return f.cachedMainView, true
+	}
 	return f.MainView(), true
 }
 func (f *runtimeControlFakeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
