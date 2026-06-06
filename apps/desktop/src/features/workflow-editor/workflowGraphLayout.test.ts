@@ -94,6 +94,7 @@ describe("layoutWorkflowGraph", () => {
 
   it("renders join nodes as inspectable merge diamonds with raw join edges", async () => {
     const graph = await layoutWorkflowGraph(joinWorkflow, emptyValidation);
+    const joinOutgoingRoutePoints = edgeByID(graph.edges, "edge-join-synth")?.data?.routePoints ?? [];
 
     expect(nodeByID(graph.nodes, "join")).toMatchObject({
       type: "workflowJoin",
@@ -115,6 +116,9 @@ describe("layoutWorkflowGraph", () => {
       target: "synth",
       type: "workflow",
     });
+    expect(joinOutgoingRoutePoints.length).toBeGreaterThan(2);
+    expectRouteSegmentsToBeOrthogonal(joinOutgoingRoutePoints);
+    expectRouteToHaveCorner(joinOutgoingRoutePoints);
   });
 
   it("keeps chained join hops inspectable instead of synthesizing edge chains", async () => {
@@ -217,6 +221,31 @@ function assertEndpointHandle(
   const handle = side === "source" ? edge.sourceHandle : edge.targetHandle;
   const point = edge.data?.routePoints.at(side === "source" ? 0 : -1);
   expect(point?.y).toBe(workflowGraphEndpointPoint(node, handle, side, nodes).y);
+}
+
+function expectRouteSegmentsToBeOrthogonal(
+  points: readonly Readonly<{ x: number; y: number }>[],
+): void {
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous !== undefined) {
+      expect(point.x === previous.x || point.y === previous.y).toBe(true);
+    }
+  }
+}
+
+function expectRouteToHaveCorner(points: readonly Readonly<{ x: number; y: number }>[]): void {
+  expect(
+    points.some((point, index) => {
+      const previous = points[index - 1];
+      const next = points[index + 1];
+      return (
+        previous !== undefined &&
+        next !== undefined &&
+        (previous.x - point.x) * (next.y - point.y) !== (previous.y - point.y) * (next.x - point.x)
+      );
+    }),
+  ).toBe(true);
 }
 
 const emptyValidation: WorkflowValidation = { valid: true, errors: [] };
