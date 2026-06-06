@@ -229,6 +229,7 @@ function EdgeDraftDetails({
   const transitionGroup = transitionGroupByID(definition, edge.transitionGroupID);
   const fanOutTransition = transitionGroupIsFanOut(definition, edge.transitionGroupID);
   const startEdge = details.sourceKind === "start";
+  const targetAgent = details.targetKind === "agent";
   const continuationAvailable = details.sourceKind === "agent" || details.targetKind === "agent";
   const disabledReason = t("workflowEditor.edgeControlNotApplicable");
   const contextModeDisabled = startEdge;
@@ -283,41 +284,45 @@ function EdgeDraftDetails({
           />
         ) : null}
         <TooltipProvider delayDuration={0}>
-          <DisabledInteractionGuard disabled={contextModeDisabled} reason={disabledReason}>
-            <SelectField
-              disabled={contextModeDisabled}
-              label={t("workflowEditor.contextMode")}
-              onValueChange={(value) => {
-                if (value !== "new_session" && !continuationAvailable) {
-                  return;
-                }
-                controller.dispatch({
-                  input: {
-                    contextMode: value,
-                    contextSource: value === "new_session" ? immediateContextSource : edge.contextSource,
-                    edgeID: edge.id,
-                  },
-                  type: "editEdgeRoute",
-                });
-              }}
-              options={contextModeOptions(t, !continuationAvailable)}
-              value={edge.contextMode}
-            />
-          </DisabledInteractionGuard>
-          <DisabledInteractionGuard disabled={contextSourceDisabled} reason={disabledReason}>
-            <SelectField
-              disabled={contextSourceDisabled}
-              label={t("workflowEditor.contextSource")}
-              onValueChange={(value) => {
-                controller.dispatch({
-                  input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
-                  type: "editEdgeRoute",
-                });
-              }}
-              options={contextSourceOptions(definition, edge, t)}
-              value={contextSourceSelectValue(definition, edge)}
-            />
-          </DisabledInteractionGuard>
+          {targetAgent ? (
+            <>
+              <DisabledInteractionGuard disabled={contextModeDisabled} reason={disabledReason}>
+                <SelectField
+                  disabled={contextModeDisabled}
+                  label={t("workflowEditor.contextMode")}
+                  onValueChange={(value) => {
+                    if (value !== "new_session" && !continuationAvailable) {
+                      return;
+                    }
+                    controller.dispatch({
+                      input: {
+                        contextMode: value,
+                        contextSource: value === "new_session" ? immediateContextSource : edge.contextSource,
+                        edgeID: edge.id,
+                      },
+                      type: "editEdgeRoute",
+                    });
+                  }}
+                  options={contextModeOptions(t, !continuationAvailable)}
+                  value={edge.contextMode}
+                />
+              </DisabledInteractionGuard>
+              <DisabledInteractionGuard disabled={contextSourceDisabled} reason={disabledReason}>
+                <SelectField
+                  disabled={contextSourceDisabled}
+                  label={t("workflowEditor.contextSource")}
+                  onValueChange={(value) => {
+                    controller.dispatch({
+                      input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
+                      type: "editEdgeRoute",
+                    });
+                  }}
+                  options={contextSourceOptions(definition, edge, t)}
+                  value={contextSourceSelectValue(definition, edge)}
+                />
+              </DisabledInteractionGuard>
+            </>
+          ) : null}
           <DisabledInteractionGuard disabled={requiresApprovalDisabled} reason={disabledReason}>
             <ApprovalToggle
               checked={edge.requiresApproval}
@@ -1047,6 +1052,7 @@ function EdgeDetails({
   const derivedEdge = derivedEdgeWiring(definition, edge.id);
   const promptParameters = edgePromptPlaceholderParameters(definition, edge);
   const fanOutTransition = transitionGroupIsFanOut(definition, edge.transitionGroupID);
+  const targetAgent = details.targetKind === "agent";
   return (
     <InspectorStack>
       <DetailSection
@@ -1064,11 +1070,15 @@ function EdgeDetails({
         <DetailRow label={t("workflowEditor.key")} mono value={details.transitionID} />
         {fanOutTransition ? <DetailRow label={t("workflowEditor.branchKey")} mono value={edge.key} /> : null}
         <DetailRow label={t("workflowEditor.transitionGroup")} value={details.transitionGroupLabel} />
-        <DetailRow
-          label={t("workflowEditor.contextMode")}
-          value={formatContextModeLabel(edge.contextMode, t)}
-        />
-        <DetailRow label={t("workflowEditor.contextSource")} value={formatContextSourceLabel(edge, t)} />
+        {targetAgent ? (
+          <>
+            <DetailRow
+              label={t("workflowEditor.contextMode")}
+              value={formatContextModeLabel(edge.contextMode, t)}
+            />
+            <DetailRow label={t("workflowEditor.contextSource")} value={formatContextSourceLabel(edge, t)} />
+          </>
+        ) : null}
         <DetailRow
           label={t("workflowEditor.requiresApproval")}
           value={edge.requiresApproval ? t("workflowEditor.required") : t("workflowEditor.none")}

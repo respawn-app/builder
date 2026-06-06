@@ -1569,16 +1569,6 @@ describe("WorkflowEditorRoute", () => {
       target: { value: "review" },
     });
 
-    fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
-    expect(await screen.findByRole("menuitemradio", { name: "Continue session" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(
-      await screen.findByRole("menuitemradio", { name: "Compact and continue session" }),
-    ).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "New session" }));
-
     const routeSections = within(inspector).getAllByRole("region", { name: "Route" });
     expect(routeSections).toHaveLength(1);
     const routeSection = routeSections[0];
@@ -1596,6 +1586,8 @@ describe("WorkflowEditorRoute", () => {
     ).not.toBeInTheDocument();
     const routeControls = within(routeSection);
     expect(routeControls.queryByRole("button", { name: "Target node" })).not.toBeInTheDocument();
+    expect(routeControls.queryByRole("button", { name: "Context mode" })).not.toBeInTheDocument();
+    expect(routeControls.queryByRole("button", { name: "Context source" })).not.toBeInTheDocument();
     expect(routeControls.queryByText("Source node")).not.toBeInTheDocument();
     expect(routeControls.queryByText("Target node")).not.toBeInTheDocument();
     const routeGraphic = within(inspector).getByTestId("workflow-edge-route-graphic");
@@ -1625,8 +1617,6 @@ describe("WorkflowEditorRoute", () => {
           id: "edge-2",
           key: "done",
           requires_approval: false,
-          context_mode: "new_session",
-          context_source: { kind: "immediate_source", node_key: "" },
         }),
       ]);
       expect(saveCall?.params).toMatchObject({
@@ -1668,10 +1658,40 @@ describe("WorkflowEditorRoute", () => {
     expect(within(routeSection).getByRole("textbox", { name: "Branch key" })).toHaveValue("implement");
   });
 
-  it("disables context source for new-session edges and saves immediate source", async () => {
+  it("hides context controls for transitions into non-agent nodes", async () => {
     const services = createTestServices([
       ...startupRoutes,
       { method: "workflow.get", result: workflowDefinitionResponse },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      { method: "workflow.graph.validateDraft", result: validGraphValidationResponse },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <OpenEdgeInspectorButton edgeID="edge-1" />
+            <SidebarHost />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const routeSection = within(inspector).getByRole("region", { name: "Route" });
+
+    expect(within(routeSection).queryByRole("button", { name: "Context mode" })).not.toBeInTheDocument();
+    expect(within(routeSection).queryByRole("button", { name: "Context source" })).not.toBeInTheDocument();
+    expect(within(routeSection).queryByText("Context mode")).not.toBeInTheDocument();
+    expect(within(routeSection).queryByText("Context source")).not.toBeInTheDocument();
+  });
+
+  it("disables context source for new-session edges and saves immediate source", async () => {
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponseWithReviewBranch },
       { method: "workflow.validate", result: { valid: true, errors: [] } },
       {
         method: "workflow.graph.validateDraft",
@@ -1710,7 +1730,7 @@ describe("WorkflowEditorRoute", () => {
         <SidebarProvider>
           <WorkflowEditorDraftBridgeProvider>
             <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
-            <OpenEdgeInspectorButton />
+            <OpenEdgeInspectorButton edgeID="edge-review" />
             <SidebarHost />
           </WorkflowEditorDraftBridgeProvider>
         </SidebarProvider>
@@ -1724,12 +1744,17 @@ describe("WorkflowEditorRoute", () => {
     const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
 
     fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Continue session" }));
+    fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "New session" }));
 
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
     const contextSource = within(routeSection).getByRole("button", { name: "Context source" });
     expect(contextSource).toBeDisabled();
     expect(within(routeSection).getByText("Immediate source")).toBeInTheDocument();
+    fireEvent.change(within(routeSection).getByRole("textbox", { name: "Transition text" }), {
+      target: { value: "Review updated" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -1737,7 +1762,7 @@ describe("WorkflowEditorRoute", () => {
       const saveCall = services.transport.calls.find((call) => call.method === "workflow.graph.save");
       const expectedEdges: unknown = expect.arrayContaining([
         expect.objectContaining({
-          id: "edge-2",
+          id: "edge-review",
           context_mode: "new_session",
           context_source: { kind: "immediate_source", node_key: "" },
         }),
@@ -1753,7 +1778,7 @@ describe("WorkflowEditorRoute", () => {
   it("filters context source choices to guaranteed agent predecessors", async () => {
     const services = createTestServices([
       ...startupRoutes,
-      { method: "workflow.get", result: workflowDefinitionResponseWithUnrelatedAgent },
+      { method: "workflow.get", result: workflowDefinitionResponseWithReviewBranch },
       { method: "workflow.validate", result: { valid: true, errors: [] } },
       {
         method: "workflow.graph.validateDraft",
@@ -1768,7 +1793,7 @@ describe("WorkflowEditorRoute", () => {
         <SidebarProvider>
           <WorkflowEditorDraftBridgeProvider>
             <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
-            <OpenEdgeInspectorButton edgeID="edge-1" />
+            <OpenEdgeInspectorButton edgeID="edge-review" />
             <SidebarHost />
           </WorkflowEditorDraftBridgeProvider>
         </SidebarProvider>
@@ -1787,10 +1812,6 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.pointerDown(within(routeSection).getByRole("button", { name: "Context source" }));
 
     expect(await screen.findByRole("menuitemradio", { name: "Implement" })).toBeInTheDocument();
-    expect(await screen.findByRole("menuitemradio", { name: "Previous run of this target" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
     expect(screen.queryByRole("menuitemradio", { name: "Review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio", { name: "Start" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio", { name: "Join" })).not.toBeInTheDocument();
@@ -2034,7 +2055,8 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
     const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
-    expect(within(routeSection).getByRole("button", { name: "Context source" })).toBeDisabled();
+    expect(within(routeSection).queryByRole("button", { name: "Context mode" })).not.toBeInTheDocument();
+    expect(within(routeSection).queryByRole("button", { name: "Context source" })).not.toBeInTheDocument();
     const requiresApproval = within(routeSection).getByRole("checkbox", { name: "Requires approval" });
     expect(requiresApproval).not.toBeChecked();
 
@@ -2253,6 +2275,8 @@ describe("WorkflowEditorRoute", () => {
     expect(screen.getByText("Key")).toBeInTheDocument();
     expect(screen.queryByText("Transition ID")).not.toBeInTheDocument();
     expect(screen.queryByText("Branch key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Context mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Context source")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Derived parameter bindings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Derived provision requirements" })).not.toBeInTheDocument();
   });
