@@ -1107,6 +1107,24 @@ func TestServiceWorkflowGraphSaveAllowsEmptyPromptButTaskStartRejects(t *testing
 	graph := workflowGraphDraftFromDefinition(source.Definition)
 	graph = setWorkflowGraphDraftEdgePrompt(graph, "edge-start-"+workflowID, "")
 
+	preview, err := service.PreviewWorkflowGraphSave(ctx, serverapi.WorkflowGraphSavePreviewRequest{
+		WorkflowID:      workflowID,
+		ExpectedVersion: source.Definition.Workflow.Version,
+		Graph:           graph,
+	})
+	if err != nil {
+		t.Fatalf("PreviewWorkflowGraphSave empty prompt: %v", err)
+	}
+	if !preview.CanSave || len(preview.Blockers) != 0 {
+		t.Fatalf("empty-prompt preview = %+v, want can save without blockers", preview)
+	}
+	if preview.ValidationResults[serverapi.WorkflowValidationModeDraft].Valid != true {
+		t.Fatalf("empty-prompt preview draft validation = %+v, want valid", preview.ValidationResults[serverapi.WorkflowValidationModeDraft])
+	}
+	if preview.ValidationResults[serverapi.WorkflowValidationModeExecution].Valid {
+		t.Fatalf("empty-prompt preview execution validation = %+v, want invalid", preview.ValidationResults[serverapi.WorkflowValidationModeExecution])
+	}
+
 	saved, err := service.SaveWorkflowGraph(ctx, serverapi.WorkflowGraphSaveRequest{
 		WorkflowID:      workflowID,
 		ExpectedVersion: source.Definition.Workflow.Version,

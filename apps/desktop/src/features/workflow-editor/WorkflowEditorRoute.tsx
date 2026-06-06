@@ -1113,8 +1113,8 @@ function WorkflowEditorStatusIsland({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const validationErrors = normalizeWorkflowValidationErrors(
-    controller.dirty.graphDirty
-      ? (controller.draftValidation?.errors ?? [])
+    controller.dirty.graphDirty && controller.draftValidation === null
+      ? []
       : [...(controller.draftValidation?.errors ?? []), ...(controller.executionValidation?.errors ?? [])],
   );
   const hasIssues =

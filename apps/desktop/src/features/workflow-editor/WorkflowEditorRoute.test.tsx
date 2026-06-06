@@ -1229,6 +1229,86 @@ describe("WorkflowEditorRoute", () => {
     expect(services.transport.calls.some((call) => call.method === "workflow.graph.save")).toBe(true);
   });
 
+  it("allows saving empty agent-target prompts while showing execution validation", async () => {
+    const user = userEvent.setup();
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponseWithReviewBranch },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        handler(_params, callIndex) {
+          return callIndex === 0
+            ? validGraphValidationResponse
+            : emptyAgentPromptExecutionGraphValidationResponse;
+        },
+      },
+      {
+        method: "workflow.graph.savePreview",
+        result: {
+          current_version: 1,
+          validation_results: emptyAgentPromptExecutionGraphValidationResponse.results,
+          impact: graphSaveImpactResponse,
+          blockers: [],
+          can_save: true,
+          confirmation_required: false,
+        },
+      },
+      {
+        method: "workflow.graph.save",
+        handler(params) {
+          const edges = workflowGraphSaveEdges(params);
+          const reviewEdge = edges.find((edge) => edge.id === "edge-review");
+          expect(reviewEdge).toEqual(expect.objectContaining({ id: "edge-review" }));
+          expect(reviewEdge).not.toHaveProperty("prompt_template");
+          return {
+            saved: true,
+            definition: workflowDefinitionResponseWithEdgePrompt("edge-review", "", 2).definition,
+            current_version: 2,
+            validation_results: emptyAgentPromptExecutionGraphValidationResponse.results,
+            impact: graphSaveImpactResponse,
+            blockers: [],
+            can_save: true,
+            confirmation_required: false,
+          };
+        },
+      },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <OpenEdgeInspectorButton edgeID="edge-review" />
+            <SidebarHost />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+
+    await user.clear(within(inspector).getByRole("textbox", { name: "Prompt" }));
+
+    const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
+    expect(
+      await within(unsavedChanges).findByText("transition into an agent node requires a prompt"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(unsavedChanges).getByRole("button", { name: "Save" })).toBeEnabled();
+    });
+
+    fireEvent.click(within(unsavedChanges).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls.some((call) => call.method === "workflow.graph.save")).toBe(true);
+    });
+  });
+
   it("edits Start node display name and key from the normal node inspector", async () => {
     window.history.pushState(null, "", "/workflows/workflow-1/editor");
     const services = createTestServices([
@@ -2655,6 +2735,16 @@ function parameterKeys(container: HTMLElement): readonly string[] {
     .map((field) => field.dataset.parameterKey ?? "");
 }
 
+function workflowGraphSaveEdges(params: unknown): readonly Readonly<Record<string, unknown>>[] {
+  if (!isRecord(params) || !isRecord(params.graph) || !Array.isArray(params.graph.edges)) {
+    throw new Error("Expected workflow graph save params with graph edges.");
+  }
+  if (!params.graph.edges.every(isRecord)) {
+    throw new Error("Expected workflow graph save edges to be objects.");
+  }
+  return params.graph.edges;
+}
+
 function hasRepairedGroupedBranchFanout(params: unknown): boolean {
   if (!isRecord(params) || !isRecord(params.graph) || !Array.isArray(params.graph.edges)) {
     return false;
@@ -3781,6 +3871,30 @@ const validGraphValidationResponse = {
   results: {
     draft: { errors: [], valid: true },
     execution: { errors: [], valid: true },
+  },
+};
+
+const emptyAgentPromptExecutionValidationResponse = {
+  valid: false,
+  errors: [
+    {
+      code: "workflow.validation.transition_prompt_required",
+      message: "transition into an agent node requires a prompt",
+      workflow_id: "workflow-1",
+      node_id: "review",
+      transition_group_id: "tg-review",
+      edge_id: "edge-review",
+      related_ids: [],
+      blocks_context: true,
+    },
+  ],
+};
+
+const emptyAgentPromptExecutionGraphValidationResponse = {
+  derived_wiring: graphValidationResponse.derived_wiring,
+  results: {
+    draft: { errors: [], valid: true },
+    execution: emptyAgentPromptExecutionValidationResponse,
   },
 };
 
