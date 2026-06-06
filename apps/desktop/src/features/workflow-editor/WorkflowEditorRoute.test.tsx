@@ -2281,13 +2281,35 @@ describe("WorkflowEditorRoute", () => {
     );
 
     expect(await screen.findByRole("region", { name: "Route" })).toBeInTheDocument();
+    expect(screen.getByText("Label")).toBeInTheDocument();
     expect(screen.getByText("Key")).toBeInTheDocument();
     expect(screen.queryByText("Transition ID")).not.toBeInTheDocument();
     expect(screen.queryByText("Branch key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model-facing description")).not.toBeInTheDocument();
     expect(screen.queryByText("Context mode")).not.toBeInTheDocument();
     expect(screen.queryByText("Context source")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Derived parameter bindings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Derived provision requirements" })).not.toBeInTheDocument();
+  });
+
+  it("renders read-only transition model-facing descriptions when present", async () => {
+    const describedDefinition = {
+      ...cachedWorkflowDefinition,
+      transitionGroups: cachedWorkflowDefinition.transitionGroups.map((group) =>
+        group.id === "tg-2" ? { ...group, description: "Finish the workflow when all work is complete." } : group,
+      ),
+    };
+    render(
+      <AppProviders services={createTestServices(startupRoutes)}>
+        <CachedEdgeInspectorFixture definition={describedDefinition} />
+      </AppProviders>,
+    );
+
+    expect(await screen.findByRole("region", { name: "Route" })).toBeInTheDocument();
+    expect(screen.getByText("Label")).toBeInTheDocument();
+    expect(screen.getByText("Key")).toBeInTheDocument();
+    expect(screen.getByText("Model-facing description")).toBeInTheDocument();
+    expect(screen.getByText("Finish the workflow when all work is complete.")).toBeInTheDocument();
   });
 
   it("renders read-only node inspector without kind, group, or titled identity behavior islands", async () => {
@@ -2746,13 +2768,19 @@ function domRect({
   };
 }
 
-function CachedEdgeInspectorFixture() {
+function CachedEdgeInspectorFixture({
+  definition = cachedWorkflowDefinition,
+  edgeID = "edge-2",
+}: Readonly<{
+  definition?: typeof cachedWorkflowDefinition | undefined;
+  edgeID?: string | undefined;
+}>) {
   const queryClient = useQueryClient();
   useEffect(() => {
-    queryClient.setQueryData(queryKeys.workflowDefinition("workflow-1"), cachedWorkflowDefinition);
+    queryClient.setQueryData(queryKeys.workflowDefinition("workflow-1"), definition);
     queryClient.setQueryData(queryKeys.workflowValidation("workflow-1", "execution"), cachedValidation);
-  }, [queryClient]);
-  return <WorkflowInspectorSidebar selection={{ kind: "edge", edgeID: "edge-2" }} workflowID="workflow-1" />;
+  }, [definition, queryClient]);
+  return <WorkflowInspectorSidebar selection={{ kind: "edge", edgeID }} workflowID="workflow-1" />;
 }
 
 function CachedNodeInspectorFixture() {
@@ -3846,8 +3874,8 @@ const cachedWorkflowDefinition = {
     },
   ],
   transitionGroups: [
-    { id: "tg-1", workflowID: "workflow-1", sourceNodeID: "node-1", transitionID: "join", name: "Join" },
-    { id: "tg-2", workflowID: "workflow-1", sourceNodeID: "join", transitionID: "done", name: "Done" },
+    { description: "", id: "tg-1", workflowID: "workflow-1", sourceNodeID: "node-1", transitionID: "join", name: "Join" },
+    { description: "", id: "tg-2", workflowID: "workflow-1", sourceNodeID: "join", transitionID: "done", name: "Done" },
   ],
   edges: [
     {

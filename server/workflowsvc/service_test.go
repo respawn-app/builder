@@ -1053,6 +1053,49 @@ func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 	}
 }
 
+func TestServiceWorkflowGraphSaveDescriptionOnlyFeedsRuntimeTransitions(t *testing.T) {
+	ctx, service, binding := newWorkflowServiceTestContext(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
+	source, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow source: %v", err)
+	}
+	graph := workflowGraphDraftFromDefinition(source.Definition)
+	description := "Use this transition when the agent has completed implementation."
+	graph = setWorkflowGraphDraftTransitionDescription(graph, "group-done-"+workflowID, description)
+
+	saved, err := service.SaveWorkflowGraph(ctx, serverapi.WorkflowGraphSaveRequest{
+		WorkflowID:      workflowID,
+		ExpectedVersion: source.Definition.Workflow.Version,
+		Graph:           graph,
+	})
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph description-only: %v", err)
+	}
+	if !saved.Saved || saved.CurrentVersion != source.Definition.Workflow.Version+1 {
+		t.Fatalf("description-only save = %+v, want saved version bump", saved)
+	}
+
+	reloaded, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow reloaded: %v", err)
+	}
+	if workflowServiceTransitionGroupByID(t, reloaded.Definition, "group-done-"+workflowID).Description != description {
+		t.Fatalf("reloaded transition description = %q, want %q", workflowServiceTransitionGroupByID(t, reloaded.Definition, "group-done-"+workflowID).Description, description)
+	}
+
+	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
+	started := startWorkflowServiceTask(t, ctx, service, task.Task.ID)
+	runContext, err := service.store.GetRunStartContext(ctx, workflow.RunID(started.RunID))
+	if err != nil {
+		t.Fatalf("GetRunStartContext: %v", err)
+	}
+	if len(runContext.TransitionOptions) != 1 || runContext.TransitionOptions[0].ID != "done" || runContext.TransitionOptions[0].Description != description {
+		t.Fatalf("runtime transition options = %+v, want done description %q", runContext.TransitionOptions, description)
+	}
+}
+
 func TestWorkflowValidationResponsePreservesWorkflowIDFallback(t *testing.T) {
 	resp := workflowValidationResponse("workflow-1", workflow.ValidationResult{Errors: []workflow.ValidationError{{
 		Code:    workflow.CodeInvalidNodeKey,

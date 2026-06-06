@@ -75,6 +75,51 @@ func TestWorkflowNodeAndEdgeRequestValidation(t *testing.T) {
 	}
 }
 
+func TestWorkflowTransitionGroupDescriptionRequestValidation(t *testing.T) {
+	validAdd := WorkflowTransitionGroupAddRequest{
+		WorkflowID:   "workflow-1",
+		SourceNodeID: "node-1",
+		TransitionID: "review",
+		DisplayName:  "Review",
+		Description:  "Use this when implementation needs review.",
+	}
+	if err := validAdd.Validate(); err != nil {
+		t.Fatalf("valid transition group add rejected: %v", err)
+	}
+	emptyDescriptionAdd := validAdd
+	emptyDescriptionAdd.Description = ""
+	if err := emptyDescriptionAdd.Validate(); err != nil {
+		t.Fatalf("empty transition group add description rejected: %v", err)
+	}
+	oversizedAdd := validAdd
+	oversizedAdd.Description = strings.Repeat("x", 1001)
+	if err := oversizedAdd.Validate(); err == nil || !strings.Contains(err.Error(), "<= 1000") {
+		t.Fatalf("oversized transition group add description error = %v", err)
+	}
+
+	validUpdate := WorkflowTransitionGroupUpdateRequest{
+		WorkflowID:   "workflow-1",
+		GroupID:      "group-1",
+		SourceNodeID: "node-1",
+		TransitionID: "review",
+		DisplayName:  "Review",
+		Description:  "Use this when implementation needs review.",
+	}
+	if err := validUpdate.Validate(); err != nil {
+		t.Fatalf("valid transition group update rejected: %v", err)
+	}
+	emptyDescriptionUpdate := validUpdate
+	emptyDescriptionUpdate.Description = ""
+	if err := emptyDescriptionUpdate.Validate(); err != nil {
+		t.Fatalf("empty transition group update description rejected: %v", err)
+	}
+	oversizedUpdate := validUpdate
+	oversizedUpdate.Description = strings.Repeat("x", 1001)
+	if err := oversizedUpdate.Validate(); err == nil || !strings.Contains(err.Error(), "<= 1000") {
+		t.Fatalf("oversized transition group update description error = %v", err)
+	}
+}
+
 func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
 	if err := (WorkflowTaskCreateRequest{ProjectID: "project-1", Title: "Task"}).Validate(); err != nil {
 		t.Fatalf("valid task create rejected: %v", err)

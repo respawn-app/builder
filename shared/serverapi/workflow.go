@@ -1228,7 +1228,9 @@ func validateWorkflowTransitionGroupFields(workflowID string, groupID string, so
 		return err
 	}
 	if strings.TrimSpace(displayName) != "" {
-		return validateDisplayName(displayName)
+		if err := validateDisplayName(displayName); err != nil {
+			return err
+		}
 	}
 	if len([]rune(description)) > 1000 {
 		return workflowRequestError(WorkflowRequestErrorTooLong, "description", "description must be <= 1000 characters")
