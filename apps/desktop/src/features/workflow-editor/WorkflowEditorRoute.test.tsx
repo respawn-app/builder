@@ -1778,7 +1778,7 @@ describe("WorkflowEditorRoute", () => {
   it("filters context source choices to guaranteed agent predecessors", async () => {
     const services = createTestServices([
       ...startupRoutes,
-      { method: "workflow.get", result: workflowDefinitionResponseWithReviewBranch },
+      { method: "workflow.get", result: workflowDefinitionResponseWithStartAndReviewBranch },
       { method: "workflow.validate", result: { valid: true, errors: [] } },
       {
         method: "workflow.graph.validateDraft",
@@ -1812,6 +1812,10 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.pointerDown(within(routeSection).getByRole("button", { name: "Context source" }));
 
     expect(await screen.findByRole("menuitemradio", { name: "Implement" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitemradio", { name: "Previous run of this target" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     expect(screen.queryByRole("menuitemradio", { name: "Review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio", { name: "Start" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio", { name: "Join" })).not.toBeInTheDocument();
@@ -3269,6 +3273,46 @@ const workflowDefinitionResponseWithReviewBranch = {
         prompt_template: "Review the task.",
         parameters: [{ key: "summary", description: "Summary" }],
       },
+    ],
+  },
+};
+
+const workflowDefinitionResponseWithStartAndReviewBranch = {
+  definition: {
+    ...workflowDefinitionResponseWithReviewBranch.definition,
+    nodes: [
+      {
+        id: "start",
+        workflow_id: "workflow-1",
+        key: "start",
+        kind: "start",
+        display_name: "Start",
+      },
+      ...workflowDefinitionResponseWithReviewBranch.definition.nodes,
+    ],
+    transition_groups: [
+      {
+        id: "tg-start",
+        workflow_id: "workflow-1",
+        source_node_id: "start",
+        transition_id: "implement",
+        display_name: "Implement",
+      },
+      ...workflowDefinitionResponseWithReviewBranch.definition.transition_groups,
+    ],
+    edges: [
+      {
+        id: "edge-start",
+        workflow_id: "workflow-1",
+        transition_group_id: "tg-start",
+        key: "implement",
+        target_node_id: "node-1",
+        requires_approval: false,
+        context_mode: "new_session",
+        context_source: { kind: "immediate_source" },
+        prompt_template: "Implement the task.",
+      },
+      ...workflowDefinitionResponseWithReviewBranch.definition.edges,
     ],
   },
 };
