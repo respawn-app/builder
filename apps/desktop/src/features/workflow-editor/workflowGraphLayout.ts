@@ -120,7 +120,7 @@ export async function layoutWorkflowGraph(
       "elk.direction": "RIGHT",
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.layered.considerModelOrder.strategy": "PREFER_NODES",
-      "elk.layered.cycleBreaking.strategy": "GREEDY_MODEL_ORDER",
+      "elk.layered.cycleBreaking.strategy": "DFS_NODE_ORDER",
       "elk.layered.feedbackEdges": "true",
       "elk.spacing.edgeEdge": "28",
       "elk.spacing.edgeNode": "44",
