@@ -157,7 +157,7 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 		blockRole = RenderIntentToolWebSearch
 	} else if isPatchToolCall(entry.ToolCall) {
 		blockRole = RenderIntentToolPatch
-	} else if isShellToolCall(entry.ToolCall, entry.Text) {
+	} else if entry.ToolCall != nil && entry.ToolCall.UsesShellRendering() {
 		blockRole = RenderIntentToolShell
 	}
 	combined := m.toolCallDisplayText(entry, blockRole, opts)
@@ -195,7 +195,7 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		blockRole = RenderIntentToolWebSearch
 	} else if isPatchToolCall(entry.ToolCall) {
 		blockRole = RenderIntentToolPatch
-	} else if isShellToolCall(entry.ToolCall, entry.Text) {
+	} else if entry.ToolCall != nil && entry.ToolCall.UsesShellRendering() {
 		blockRole = RenderIntentToolShell
 	}
 	combined := toolCallDisplayText(entry.ToolCall, entry.Text)
@@ -259,7 +259,11 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 		if nextRole.IsToolResult() {
 			answer = strings.TrimSpace(resultEntry.Text)
 			if opts.mode == transcriptBlockModeOngoing {
-				answer = strings.TrimSpace(ongoingTranscriptText(resultEntry))
+				resultText := resultEntry.Text
+				if strings.TrimSpace(resultEntry.OngoingText) != "" {
+					resultText = resultEntry.OngoingText
+				}
+				answer = strings.TrimSpace(resultText)
 			}
 			blockRole = blockRole.BaseToolResultIntent(nextRole)
 			consumed[resultIdx] = struct{}{}

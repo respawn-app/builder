@@ -269,11 +269,6 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 	return command + transcript.InlineMetaSeparator + inlineMeta
 }
 
-func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
-	_ = text
-	return meta != nil && meta.UsesShellRendering()
-}
-
 func isPatchToolCall(meta *transcript.ToolCallMeta) bool {
 	if meta == nil {
 		return false

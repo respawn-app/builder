@@ -138,8 +138,8 @@ func (p TranscriptViewProjection) Clone() TranscriptViewProjection {
 		InputRevision:          p.InputRevision,
 		Ongoing:                p.Ongoing.Clone(),
 		Detail:                 p.Detail.Clone(),
-		OngoingLines:           cloneProjectionLines(p.OngoingLines),
-		DetailLines:            cloneProjectionLines(p.DetailLines),
+		OngoingLines:           append([]TranscriptProjectionLine(nil), p.OngoingLines...),
+		DetailLines:            append([]TranscriptProjectionLine(nil), p.DetailLines...),
 		OngoingLineOwners:      append([]int(nil), p.OngoingLineOwners...),
 		DetailLineOwners:       append([]int(nil), p.DetailLineOwners...),
 		OngoingEntryLineRanges: cloneLineRangeMap(p.OngoingEntryLineRanges),
@@ -456,7 +456,7 @@ func (m Model) CommittedOngoingProjectionForEntries(entries []TranscriptEntry) T
 func (m Model) TranscriptProjectionInput() TranscriptProjectionInput {
 	input := m.transcriptProjectionInput()
 	input.Entries = cloneTranscriptEntries(input.Entries)
-	input.StreamingReasoning = cloneStreamingReasoningEntries(input.StreamingReasoning)
+	input.StreamingReasoning = append([]StreamingReasoningEntry(nil), input.StreamingReasoning...)
 	return input
 }
 
@@ -504,7 +504,7 @@ func ProjectTranscriptViews(input TranscriptProjectionInput, state TranscriptPro
 		renderer.transcriptInput.TotalEntries = renderer.transcriptInput.BaseOffset + len(renderer.transcriptInput.Entries)
 	}
 	renderer.transcriptInput.Ongoing = input.Ongoing
-	renderer.transcriptInput.StreamingReasoning = cloneStreamingReasoningEntries(input.StreamingReasoning)
+	renderer.transcriptInput.StreamingReasoning = append([]StreamingReasoningEntry(nil), input.StreamingReasoning...)
 
 	ongoing := projectionFromOngoingBlocks(renderer.buildTranscriptBlocks(transcriptBlockOptions{
 		mode:             transcriptBlockModeOngoing,
@@ -914,13 +914,6 @@ func cloneTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {
 	return out
 }
 
-func cloneStreamingReasoningEntries(entries []StreamingReasoningEntry) []StreamingReasoningEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	return append([]StreamingReasoningEntry(nil), entries...)
-}
-
 func cloneExpandedEntrySet(entries map[int]struct{}) map[int]struct{} {
 	if len(entries) == 0 {
 		return nil
@@ -930,13 +923,6 @@ func cloneExpandedEntrySet(entries map[int]struct{}) map[int]struct{} {
 		out[entry] = struct{}{}
 	}
 	return out
-}
-
-func cloneProjectionLines(lines []TranscriptProjectionLine) []TranscriptProjectionLine {
-	if len(lines) == 0 {
-		return nil
-	}
-	return append([]TranscriptProjectionLine(nil), lines...)
 }
 
 func cloneLineRangeMap(ranges map[int]lineRange) map[int]lineRange {
@@ -1055,7 +1041,11 @@ func PendingToolEntries(entries []TranscriptEntry) []TranscriptEntry {
 		if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
-		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+		text := entry.Text
+		if strings.TrimSpace(entry.OngoingText) != "" {
+			text = entry.OngoingText
+		}
+		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		include[idx] = struct{}{}
@@ -1106,7 +1096,11 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 		if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
-		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+		text := entry.Text
+		if strings.TrimSpace(entry.OngoingText) != "" {
+			text = entry.OngoingText
+		}
+		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		resultIdx := resultIndex.findMatchingToolResultIndex(entries, idx, consumedResults)
@@ -1125,7 +1119,11 @@ func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, re
 		if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
-		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+		text := entry.Text
+		if strings.TrimSpace(entry.OngoingText) != "" {
+			text = entry.OngoingText
+		}
+		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		resultIdx := resultIndex.findMatchingToolResultIndex(entries, idx, consumedResults)
@@ -1135,11 +1133,4 @@ func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, re
 		consumedResults[resultIdx] = struct{}{}
 	}
 	return boundary
-}
-
-func ongoingTranscriptText(entry TranscriptEntry) string {
-	if strings.TrimSpace(entry.OngoingText) != "" {
-		return entry.OngoingText
-	}
-	return entry.Text
 }
