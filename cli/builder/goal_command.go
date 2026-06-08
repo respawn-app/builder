@@ -222,7 +222,11 @@ func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 		return 0
 	}
 	if agent && !*confirmed {
-		fmt.Fprintln(stderr, prompts.GoalCompleteConfirmRequiredPrompt)
+		objective := ""
+		if current.Goal != nil {
+			objective = current.Goal.Objective
+		}
+		fmt.Fprintln(stderr, prompts.RenderGoalCompleteConfirmRequiredPrompt(objective))
 		return 1
 	}
 	actor := "user"

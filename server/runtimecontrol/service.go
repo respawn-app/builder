@@ -544,14 +544,21 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 		if err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
-		if strings.TrimSpace(req.Actor) == string(session.GoalActorAgent) && goalBlocksAgentSet(engine.Goal()) {
-			return serverapi.RuntimeGoalShowResponse{}, errors.New(strings.TrimSpace(prompts.GoalAgentCommandDeniedPrompt))
+		if strings.TrimSpace(req.Actor) == string(session.GoalActorAgent) {
+			currentGoal := engine.Goal()
+			if goalBlocksAgentSet(currentGoal) {
+				return serverapi.RuntimeGoalShowResponse{}, goalAgentOverwriteDeniedError(*currentGoal)
+			}
 		}
 		if err := engine.RequireGoalLoopStartAllowed(); err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
 		goal, err := engine.SetGoal(trimmedObjective, session.GoalActor(req.Actor))
 		if err != nil {
+			var blocked session.GoalAgentOverwriteBlockedError
+			if errors.As(err, &blocked) {
+				return serverapi.RuntimeGoalShowResponse{}, goalAgentOverwriteDeniedError(blocked.Goal)
+			}
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
 		if err := engine.StartGoalLoop(); err != nil {
@@ -563,6 +570,10 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 
 func goalBlocksAgentSet(goal *session.GoalState) bool {
 	return goal != nil && goal.Status != session.GoalStatusComplete
+}
+
+func goalAgentOverwriteDeniedError(goal session.GoalState) error {
+	return errors.New(strings.TrimSpace(prompts.RenderGoalAgentDuplicateSetDeniedPrompt(goal.Objective, string(goal.Status))))
 }
 
 func (s *Service) PauseGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {

@@ -121,7 +121,7 @@ func TestGoalAgentEnvSetOverwritePrintsDeniedPrompt(t *testing.T) {
 	existing := &serverapi.RuntimeGoal{ID: "goal-1", Objective: "existing goal", Status: "active"}
 	remote := &recordingGoalRemote{
 		goal:   existing,
-		setErr: errors.New(strings.TrimSpace(prompts.GoalAgentCommandDeniedPrompt)),
+		setErr: errors.New(strings.TrimSpace(prompts.RenderGoalAgentDuplicateSetDeniedPrompt(existing.Objective, existing.Status))),
 	}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -131,8 +131,13 @@ func TestGoalAgentEnvSetOverwritePrintsDeniedPrompt(t *testing.T) {
 	if code := goalSubcommand([]string{"set", "replacement goal"}, stdout, stderr); code == 0 {
 		t.Fatalf("goal set overwrite exit = 0")
 	}
-	if !strings.Contains(stderr.String(), strings.TrimSpace(prompts.GoalAgentCommandDeniedPrompt)) {
+	if !strings.Contains(stderr.String(), "Overwriting an existing goal is not allowed") ||
+		!strings.Contains(stderr.String(), "existing goal") ||
+		!strings.Contains(stderr.String(), "active or paused") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "Detected invocation by the agent") {
+		t.Fatalf("stderr used generic agent-denial reason: %q", stderr.String())
 	}
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -191,8 +196,14 @@ func TestGoalAgentCompleteRequiresConfirmTripwire(t *testing.T) {
 	if code := goalSubcommand([]string{"complete"}, new(strings.Builder), stderr); code == 0 {
 		t.Fatalf("goal complete without confirm exit = 0")
 	}
-	if !strings.Contains(stderr.String(), prompts.GoalCompleteConfirmRequiredPrompt) {
-		t.Fatalf("stderr = %q", stderr.String())
+	if !strings.Contains(stderr.String(), "<goal>\nship goal mode\n</goal>") {
+		t.Fatalf("stderr did not include active goal text: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--confirm") {
+		t.Fatalf("stderr did not include confirm instruction: %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "{{") {
+		t.Fatalf("stderr contained unrendered template placeholder: %q", stderr.String())
 	}
 	if len(remote.completeReq) != 0 {
 		t.Fatalf("complete called before confirm: %+v", remote.completeReq)
@@ -363,6 +374,34 @@ func TestGoalCommandSubprocessTargetsLiveSessionFromUnboundWorktree(t *testing.T
 	}
 	if show.Goal == nil || show.Goal.Status != "active" || show.Goal.Objective != "exercise live goal CLI" {
 		t.Fatalf("show goal = %+v", show.Goal)
+	}
+
+	overwriteOutput, overwriteErr, overwriteRunErr := runGoalCommandSubprocessRaw(t, builderPath, unboundWorktree, store.Meta().SessionID, "set", "replacement live goal CLI")
+	if overwriteRunErr == nil {
+		t.Fatalf("goal set overwrite unexpectedly succeeded stdout=%q stderr=%q", overwriteOutput, overwriteErr)
+	}
+	if overwriteOutput != "" {
+		t.Fatalf("goal set overwrite stdout = %q, want empty", overwriteOutput)
+	}
+	for _, want := range []string{
+		"status: active",
+		"<goal>\nexercise live goal CLI\n</goal>",
+		"Overwriting an existing goal is not allowed",
+		"active or paused",
+	} {
+		if !strings.Contains(overwriteErr, want) {
+			t.Fatalf("goal set overwrite stderr missing %q: %q", want, overwriteErr)
+		}
+	}
+	if strings.Contains(overwriteErr, "Detected invocation by the agent") {
+		t.Fatalf("goal set overwrite stderr used generic agent-denial reason: %q", overwriteErr)
+	}
+	record, err = metadataStore.ResolvePersistedSession(context.Background(), store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolvePersistedSession after rejected overwrite: %v", err)
+	}
+	if goal := record.Meta.Goal; goal == nil || goal.Objective != "exercise live goal CLI" || goal.Status != session.GoalStatusActive {
+		t.Fatalf("persisted goal after rejected overwrite = %+v", goal)
 	}
 
 	completeOutput, completeErr := runGoalCommandSubprocess(t, builderPath, unboundWorktree, store.Meta().SessionID, "complete", "--confirm")

@@ -1,1 +1,8 @@
-You should only mark the goal as completed when it is done fully, end-to-end, across all todo/plan items, if any, and you can show verifiable proof of completion. Your completion of the goal will be verified and evaluated. If you testify that the goal is achieved now, rerun this command with `--confirm` to accept the penalty for incomplete goals, or continue working until the goal is achieved. If you are unsure if the goal is achieved, for example you haven't run a full verification pass to compare the results (such as code) to PRD/plans/other requirements, do this now before calling with `--confirm`. If you intended to seek help by doing this, use ask_question instead.
+You should only mark the goal as completed when it is done fully, end-to-end, across all todo/plan items, if any, and you can show verifiable proof of completion. Your completion of the goal will be verified and evaluated.
+
+Here's the goal that the user set:
+<goal>
+{{objective}}
+</goal>
+
+If you testify that the goal stated above is fully achieved now, rerun this command with `--confirm` to accept the shutdown penalty for incomplete goals, or continue working until the goal is achieved. If you are unsure if the goal is achieved, for example you haven't run a full verification pass to compare the results (such as code) to PRD/plans/other requirements, do this now before calling with `--confirm`. If you intended to seek help by running this, use ask_question instead.

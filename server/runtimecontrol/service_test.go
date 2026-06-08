@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
@@ -352,22 +351,44 @@ func TestServiceSetGoalAllowsAgentWithoutExistingGoal(t *testing.T) {
 }
 
 func TestServiceSetGoalRejectsAgentOverwrite(t *testing.T) {
-	store, engine, service := newRuntimeControlTestService(t, &blockingRuntimeControlClient{}, nil, runtime.Config{})
-	if _, err := engine.SetGoal("existing goal", session.GoalActorUser); err != nil {
-		t.Fatalf("SetGoal initial: %v", err)
-	}
+	for _, tt := range []struct {
+		name   string
+		status session.GoalStatus
+	}{
+		{name: "active", status: session.GoalStatusActive},
+		{name: "paused", status: session.GoalStatusPaused},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, engine, service := newRuntimeControlTestService(t, &blockingRuntimeControlClient{}, nil, runtime.Config{})
+			if _, err := engine.SetGoal("existing goal\n\n- keep markdown", session.GoalActorUser); err != nil {
+				t.Fatalf("SetGoal initial: %v", err)
+			}
+			if tt.status == session.GoalStatusPaused {
+				if _, err := engine.SetGoalStatus(session.GoalStatusPaused, session.GoalActorUser); err != nil {
+					t.Fatalf("SetGoalStatus paused: %v", err)
+				}
+			}
 
-	_, err := service.SetGoal(context.Background(), serverapi.RuntimeGoalSetRequest{
-		ClientRequestID: "agent-goal-overwrite",
-		SessionID:       store.Meta().SessionID,
-		Objective:       "agent replacement",
-		Actor:           "agent",
-	})
-	if err == nil || !strings.Contains(err.Error(), strings.TrimSpace(prompts.GoalAgentCommandDeniedPrompt)) {
-		t.Fatalf("agent overwrite error = %v, want denied prompt", err)
-	}
-	if goal := store.Meta().Goal; goal == nil || goal.Objective != "existing goal" {
-		t.Fatalf("goal after rejected overwrite = %+v", goal)
+			_, err := service.SetGoal(context.Background(), serverapi.RuntimeGoalSetRequest{
+				ClientRequestID: "agent-goal-overwrite-" + tt.name,
+				SessionID:       store.Meta().SessionID,
+				Objective:       "agent replacement",
+				Actor:           "agent",
+			})
+			if err == nil ||
+				!strings.Contains(err.Error(), "status: "+string(tt.status)) ||
+				!strings.Contains(err.Error(), "<goal>\nexisting goal\n\n- keep markdown\n</goal>") ||
+				!strings.Contains(err.Error(), "Overwriting an existing goal is not allowed") ||
+				!strings.Contains(err.Error(), "active or paused") {
+				t.Fatalf("agent overwrite error = %v, want denied prompt", err)
+			}
+			if strings.Contains(err.Error(), "Detected invocation by the agent") {
+				t.Fatalf("agent overwrite used generic agent-denial reason: %v", err)
+			}
+			if goal := store.Meta().Goal; goal == nil || goal.Objective != "existing goal\n\n- keep markdown" || goal.Status != tt.status {
+				t.Fatalf("goal after rejected overwrite = %+v", goal)
+			}
+		})
 	}
 }
 
