@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"builder/server/tools/shell/postprocess"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -26,7 +27,10 @@ func NormalizeBackgroundOutputMode(raw string) BackgroundOutputMode {
 }
 
 func SummarizeBackgroundEvent(evt Event, opts BackgroundNoticeOptions) BackgroundNoticeSummary {
-	maxChars := normalizeOutputChars(opts.MaxChars)
+	maxChars := opts.MaxChars
+	if maxChars <= 0 {
+		maxChars = defaultOutputTokenCap * 4
+	}
 	mode := effectiveBackgroundOutputMode(evt.Snapshot.ExitCode, opts.SuccessOutputMode)
 	preview, lineCount, truncated := backgroundNoticePreview(evt, maxChars, mode)
 	state := strings.TrimSpace(evt.Snapshot.State)
@@ -106,7 +110,10 @@ func backgroundNoticePreview(evt Event, maxChars int, mode BackgroundOutputMode)
 	if mode == BackgroundOutputConcise {
 		return "", 0, false
 	}
-	preview := formatCapturedOutput(evt.Preview, evt.Snapshot.RawOutput)
+	preview := evt.Preview
+	if !evt.Snapshot.RawOutput {
+		preview = postprocess.SanitizeOutput(preview)
+	}
 	truncated := evt.Removed > 0
 	if strings.TrimSpace(preview) == "" {
 		return "", 0, truncated
@@ -155,7 +162,9 @@ type backgroundPreviewBuilder struct {
 }
 
 func newBackgroundPreviewBuilder(maxChars int, mode BackgroundOutputMode, sanitize bool) *backgroundPreviewBuilder {
-	maxChars = normalizeOutputChars(maxChars)
+	if maxChars <= 0 {
+		maxChars = defaultOutputTokenCap * 4
+	}
 	mode = NormalizeBackgroundOutputMode(string(mode))
 	return &backgroundPreviewBuilder{
 		maxChars: maxChars,
