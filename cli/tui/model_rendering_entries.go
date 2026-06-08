@@ -53,18 +53,15 @@ func (m Model) detailExpansionSymbolStyle(role RenderIntent) roleSymbolColorStyl
 }
 
 func (m Model) entryRenderWidth(role RenderIntent, symbolOverride string) int {
-	renderWidth := m.viewportWidth - lipgloss.Width(m.entryPrefix(role, symbolOverride)) - m.detailViewportRailWidth()
+	railWidth := 0
+	if m.compactDetail && m.mode == ModeDetail {
+		railWidth = max(lipgloss.Width(uiglyphs.SelectionRailBlank), lipgloss.Width(uiglyphs.SelectionRailGlyph))
+	}
+	renderWidth := m.viewportWidth - lipgloss.Width(m.entryPrefix(role, symbolOverride)) - railWidth
 	if renderWidth < 1 {
 		return 1
 	}
 	return renderWidth
-}
-
-func (m Model) detailViewportRailWidth() int {
-	if !m.compactDetail || m.mode != ModeDetail {
-		return 0
-	}
-	return max(lipgloss.Width(uiglyphs.SelectionRailBlank), lipgloss.Width(uiglyphs.SelectionRailGlyph))
 }
 
 func (m Model) flattenEntryWithMetaAndSymbol(role RenderIntent, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {

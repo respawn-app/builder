@@ -30,7 +30,11 @@ func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme str
 	model := transcriptProjectionRenderer(theme, width, 0)
 	model.toolSymbolGap = 2
 	model.transcriptInput.Entries = append([]TranscriptEntry(nil), entries...)
-	blocks := model.buildOngoingBlocks(false)
+	blocks := model.buildTranscriptBlocks(transcriptBlockOptions{
+		mode:             transcriptBlockModeOngoing,
+		includeStreaming: false,
+		applySelection:   true,
+	})
 	blocks = model.applyPendingSpinner(blocks, entries, spinnerForEntry)
 	if len(blocks) == 0 {
 		return TranscriptProjection{}

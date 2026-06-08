@@ -63,18 +63,6 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 	return blocks
 }
 
-func (m Model) renderFlatCommittedOngoingTranscript() string {
-	return m.CommittedOngoingProjection().Render(TranscriptDivider)
-}
-
-func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
-	return m.buildTranscriptBlocks(transcriptBlockOptions{
-		mode:             transcriptBlockModeOngoing,
-		includeStreaming: includeStreaming,
-		applySelection:   true,
-	})
-}
-
 type transcriptBlockMode int
 
 const (
@@ -374,7 +362,9 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role Re
 	}
 	text := entry.Text
 	if opts.mode == transcriptBlockModeOngoing {
-		text = m.ongoingEntryText(entry)
+		if strings.TrimSpace(entry.OngoingText) != "" {
+			text = entry.OngoingText
+		}
 		if role == RenderIntentReviewerStatus {
 			text = compactReviewerStatusForOngoing(text)
 		} else if role == RenderIntentReviewerSuggestions {
@@ -573,13 +563,6 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 		return "", false
 	}
 	return combined, true
-}
-
-func (m Model) ongoingEntryText(entry TranscriptEntry) string {
-	if strings.TrimSpace(entry.OngoingText) != "" {
-		return entry.OngoingText
-	}
-	return entry.Text
 }
 
 func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {

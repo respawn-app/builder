@@ -506,7 +506,11 @@ func ProjectTranscriptViews(input TranscriptProjectionInput, state TranscriptPro
 	renderer.transcriptInput.Ongoing = input.Ongoing
 	renderer.transcriptInput.StreamingReasoning = cloneStreamingReasoningEntries(input.StreamingReasoning)
 
-	ongoing := projectionFromOngoingBlocks(renderer.buildOngoingBlocks(true))
+	ongoing := projectionFromOngoingBlocks(renderer.buildTranscriptBlocks(transcriptBlockOptions{
+		mode:             transcriptBlockModeOngoing,
+		includeStreaming: true,
+		applySelection:   true,
+	}))
 	detail := renderer.DetailProjection(true, true)
 	return TranscriptViewProjection{
 		InputRevision:          input.Revision,
@@ -891,7 +895,11 @@ func projectCommittedOngoingTranscriptWithRenderer(renderer Model, entries []Tra
 	renderer.transcriptInput.Entries = append([]TranscriptEntry(nil), committed...)
 	renderer.transcriptInput.Ongoing = ""
 	renderer.transcriptInput.StreamingReasoning = nil
-	return projectionFromOngoingBlocks(renderer.buildOngoingBlocks(false))
+	return projectionFromOngoingBlocks(renderer.buildTranscriptBlocks(transcriptBlockOptions{
+		mode:             transcriptBlockModeOngoing,
+		includeStreaming: false,
+		applySelection:   true,
+	}))
 }
 
 func cloneTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {

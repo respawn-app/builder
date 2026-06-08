@@ -459,7 +459,7 @@ func (m Model) OngoingSnapshot() string {
 }
 
 func (m Model) OngoingCommittedSnapshot() string {
-	return m.renderFlatCommittedOngoingTranscript()
+	return m.CommittedOngoingProjection().Render(TranscriptDivider)
 }
 
 func (m Model) OngoingStreamingText() string {
