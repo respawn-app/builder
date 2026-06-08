@@ -233,13 +233,6 @@ func (c defaultUIStatusCollector) adapter() statuscollect.Collector {
 	}
 }
 
-func statusOnOff(value bool) string {
-	if value {
-		return "on"
-	}
-	return "off"
-}
-
 func (m *uiModel) openStatusOverlay() {
 	m.status.open = true
 	m.status.scroll = 0

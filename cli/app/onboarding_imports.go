@@ -162,20 +162,6 @@ func discoverExistingOnboardingSkillNamesInRoot(root string) (map[string]bool, e
 	return names, nil
 }
 
-func (d onboardingImportDiscovery) hasSkillCandidates() bool {
-	if d.skipSkills {
-		return false
-	}
-	return hasImportProviderItems(d.skillSymlinkItems)
-}
-
-func (d onboardingImportDiscovery) hasCommandCandidates() bool {
-	if d.skipCommands {
-		return false
-	}
-	return hasImportProviderItems(d.commandSymlinkItems)
-}
-
 func hasImportProviderItems[T any](byProvider map[onboardingImportProviderID][]T) bool {
 	for _, items := range byProvider {
 		if len(items) > 0 {
