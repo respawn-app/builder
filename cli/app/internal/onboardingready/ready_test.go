@@ -10,17 +10,6 @@ import (
 	"builder/shared/config"
 )
 
-type stubRunner struct {
-	run func(context.Context, config.App, AuthState) (Result, error)
-}
-
-func (r stubRunner) RunInteractiveOnboarding(ctx context.Context, cfg config.App, authState AuthState) (Result, error) {
-	if r.run == nil {
-		return Result{}, nil
-	}
-	return r.run(ctx, cfg, authState)
-}
-
 func TestEnsureSkipsWhenSettingsFileExists(t *testing.T) {
 	cfg := config.App{Source: config.SourceReport{SettingsFileExists: true, SettingsPath: "/tmp/settings.toml"}}
 	got, changed, err := Ensure(context.Background(), Request{
@@ -52,13 +41,13 @@ func TestEnsureInteractivePassesLoadedAuthStateToRunner(t *testing.T) {
 		ReloadConfig: func() (config.App, error) {
 			return config.App{Source: config.SourceReport{SettingsPath: "/tmp/reloaded.toml"}}, nil
 		},
-		Runner: stubRunner{run: func(_ context.Context, _ config.App, authState AuthState) (Result, error) {
+		Runner: func(_ context.Context, _ config.App, authState AuthState) (Result, error) {
 			called = true
 			if authState.Method.APIKey == nil || authState.Method.APIKey.Key != "sk-test" {
 				t.Fatalf("unexpected auth state: %+v", authState.Method)
 			}
 			return Result{Completed: true, CreatedDefaultConfig: true, SettingsPath: "/tmp/settings.toml"}, nil
-		}},
+		},
 	})
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
@@ -78,7 +67,9 @@ func TestEnsureInteractiveRequiresAuthManager(t *testing.T) {
 	_, _, err := Ensure(context.Background(), Request{
 		Interactive:  true,
 		ReloadConfig: func() (config.App, error) { return config.App{}, nil },
-		Runner:       stubRunner{},
+		Runner: func(context.Context, config.App, AuthState) (Result, error) {
+			return Result{}, nil
+		},
 	})
 	if err == nil || err.Error() != "auth manager is required for onboarding" {
 		t.Fatalf("expected missing auth manager error, got %v", err)
@@ -92,9 +83,9 @@ func TestEnsureReturnsRunnerError(t *testing.T) {
 		AuthManager:  mgr,
 		Interactive:  true,
 		ReloadConfig: func() (config.App, error) { return config.App{}, nil },
-		Runner: stubRunner{run: func(context.Context, config.App, AuthState) (Result, error) {
+		Runner: func(context.Context, config.App, AuthState) (Result, error) {
 			return Result{}, expected
-		}},
+		},
 	})
 	if !errors.Is(err, expected) {
 		t.Fatalf("expected runner error, got %v", err)

@@ -53,7 +53,7 @@ func EstimatedToolCallsForTokenBudget(tokenBudget int) int {
 	}
 	quotient := tokenBudget / EstimatedTokensPerToolCall
 	remainder := tokenBudget % EstimatedTokensPerToolCall
-	if remainder >= EstimatedTokensPerToolCall/2 && quotient < maxInt() {
+	if remainder >= EstimatedTokensPerToolCall/2 && quotient < int(^uint(0)>>1) {
 		quotient++
 	}
 	return quotient
@@ -84,13 +84,9 @@ func clampInt64ToInt(value int64) int {
 	if value <= 0 {
 		return 0
 	}
-	limit := int64(maxInt())
+	limit := int64(int(^uint(0) >> 1))
 	if value > limit {
 		return int(limit)
 	}
 	return int(value)
-}
-
-func maxInt() int {
-	return int(^uint(0) >> 1)
 }

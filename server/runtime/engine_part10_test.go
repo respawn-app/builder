@@ -53,7 +53,7 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("first submit: %v", err)
@@ -165,7 +165,7 @@ func TestFreshChildSessionReinjectsDeveloperContextEvenWhenParentAlreadyInjected
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng := mustNewTestEngine(t, child, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, child, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if _, err := eng.SubmitUserMessage(context.Background(), "first child turn"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -245,7 +245,7 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-1"}, Usage: llm.Usage{WindowTokens: 200000}},
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-2"}, Usage: llm.Usage{WindowTokens: 200000}},
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("first submit: %v", err)
@@ -316,7 +316,7 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
 
 	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:          "gpt-5",
 		DisabledSkills: map[string]bool{"workspace skill": true},
 	})
@@ -358,7 +358,7 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
 
 	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -458,7 +458,7 @@ func TestNewRejectsEmptyModel(t *testing.T) {
 	workspace := t.TempDir()
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
 
-	_, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	_, err := New(store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 	if err == nil {
 		t.Fatal("expected New to reject empty model")
 	}
@@ -485,7 +485,7 @@ func TestSubmitInjectsEnvironmentLineWithLabeledModelIdentifier(t *testing.T) {
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:                 "gpt-5.3-codex",
 		ThinkingLevel:         "high",
 		AutoCompactTokenLimit: 1_000_000_000,
@@ -522,10 +522,10 @@ func TestHeadlessModeTransitionDecisionsFollowLatestMarker(t *testing.T) {
 	if headlessModeActive(nil) {
 		t.Fatal("did not expect headless mode without history")
 	}
-	if !shouldInjectHeadlessModePrompt(nil) {
+	if headlessModeActive(nil) {
 		t.Fatal("expected enter prompt when no headless marker exists")
 	}
-	if shouldInjectHeadlessModeExitPrompt(nil) {
+	if headlessModeActive(nil) {
 		t.Fatal("did not expect exit prompt without an active headless phase")
 	}
 
@@ -533,10 +533,10 @@ func TestHeadlessModeTransitionDecisionsFollowLatestMarker(t *testing.T) {
 	if !headlessModeActive(headless) {
 		t.Fatal("expected headless mode to be active after headless marker")
 	}
-	if shouldInjectHeadlessModePrompt(headless) {
+	if shouldInjectHeadlessModePromptForState(headlessModeActive(headless)) {
 		t.Fatal("did not expect enter prompt during active headless phase")
 	}
-	if !shouldInjectHeadlessModeExitPrompt(headless) {
+	if !headlessModeActive(headless) {
 		t.Fatal("expected exit prompt during active headless phase")
 	}
 
@@ -547,10 +547,10 @@ func TestHeadlessModeTransitionDecisionsFollowLatestMarker(t *testing.T) {
 	if headlessModeActive(exited) {
 		t.Fatal("did not expect headless mode after exit marker")
 	}
-	if !shouldInjectHeadlessModePrompt(exited) {
+	if !shouldInjectHeadlessModePromptForState(headlessModeActive(exited)) {
 		t.Fatal("expected enter prompt after exit marker")
 	}
-	if shouldInjectHeadlessModeExitPrompt(exited) {
+	if headlessModeActive(exited) {
 		t.Fatal("did not expect exit prompt after exit marker")
 	}
 }
@@ -561,7 +561,7 @@ func TestManualCompactionReinjectsHeadlessEnterOnlyWhileHeadlessRemainsActive(t 
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
 		t.Fatalf("append headless mode: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestManualCompactionDoesNotReinjectHeadlessEnterAfterExit(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
 		t.Fatalf("append headless mode: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	interactiveEngine := mustNewTestEngine(t, store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	interactiveEngine := mustNewTestEngine(t, store, interactiveClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "regular start"); err != nil {
 		t.Fatalf("interactive submit: %v", err)
 	}
@@ -670,7 +670,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	headlessEngine := mustNewTestEngine(t, store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
+	headlessEngine := mustNewTestEngine(t, store, headlessClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", HeadlessMode: true})
 
 	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "continue headlessly"); err != nil {
 		t.Fatalf("headless submit 1: %v", err)
@@ -733,7 +733,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	headlessEngine := mustNewTestEngine(t, store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
+	headlessEngine := mustNewTestEngine(t, store, headlessClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", HeadlessMode: true})
 	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "run headless"); err != nil {
 		t.Fatalf("headless submit: %v", err)
 	}
@@ -760,7 +760,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	interactiveEngine := mustNewTestEngine(t, store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	interactiveEngine := mustNewTestEngine(t, store, interactiveClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "continue interactively"); err != nil {
 		t.Fatalf("interactive submit 1: %v", err)
@@ -832,7 +832,7 @@ func TestSubmitUserMessageDoesNotInjectHeadlessExitPromptForNormalSession(t *tes
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "plain user"); err != nil {
 		t.Fatalf("submit: %v", err)

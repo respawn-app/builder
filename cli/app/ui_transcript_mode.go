@@ -25,25 +25,25 @@ func (m *uiModel) maybeRequestDetailTranscriptPage() tea.Cmd {
 		}
 		if firstVisible <= m.view.TranscriptBaseOffset()+1 {
 			if req, ok := m.detailTranscript.pageBefore(); ok {
-				return m.requestRuntimeTranscriptPage(req)
+				return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(req, true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)).cmd
 			}
 		}
 		loadedLast := m.view.TranscriptBaseOffset() + m.view.LoadedTranscriptEntryCount() - 1
 		if lastVisible >= loadedLast-1 {
 			if req, ok := m.detailTranscript.pageAfter(); ok {
-				return m.requestRuntimeTranscriptPage(req)
+				return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(req, true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)).cmd
 			}
 		}
 		return nil
 	}
 	if m.view.DetailScroll() <= uiDetailTranscriptEdgeLineMargin {
 		if req, ok := m.detailTranscript.pageBefore(); ok {
-			return m.requestRuntimeTranscriptPage(req)
+			return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(req, true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)).cmd
 		}
 	}
 	if m.view.DetailMaxScroll()-m.view.DetailScroll() <= uiDetailTranscriptEdgeLineMargin {
 		if req, ok := m.detailTranscript.pageAfter(); ok {
-			return m.requestRuntimeTranscriptPage(req)
+			return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(req, true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)).cmd
 		}
 	}
 	return nil

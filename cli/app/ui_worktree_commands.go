@@ -4,18 +4,19 @@ import (
 	"strings"
 
 	"builder/cli/app/internal/worktreemutation"
-	"builder/cli/app/internal/worktreeview"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const worktreeUsageText = "Usage: /wt | /wt status | /wt create | /wt new | /wt delete [target] | /wt remove [target] | /wt rm [target] | /wt switch <target>"
+
 func (c uiInputController) handleWorktreeCommand(args string) (tea.Model, tea.Cmd) {
 	m := c.model
 	if m.worktreeClient == nil {
 		errText := "worktree client is unavailable"
-		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+		return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", errText, ""), c.model.sendTransientStatusWithNoticeID(errText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 	parts := strings.Fields(strings.TrimSpace(args))
 	if len(parts) == 0 {
@@ -25,22 +26,22 @@ func (c uiInputController) handleWorktreeCommand(args string) (tea.Model, tea.Cm
 	switch subcommand {
 	case "status":
 		if len(parts) != 1 {
-			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+			return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", worktreeUsageText, ""), c.model.sendTransientStatusWithNoticeID(worktreeUsageText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
 		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{})
 	case "new", "create":
 		if len(parts) != 1 {
-			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+			return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", worktreeUsageText, ""), c.model.sendTransientStatusWithNoticeID(worktreeUsageText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
 		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{OpenCreate: true})
 	case "switch":
 		if len(parts) != 2 {
-			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+			return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", worktreeUsageText, ""), c.model.sendTransientStatusWithNoticeID(worktreeUsageText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
 		return c.handleWorktreeSwitchCommand(parts[1])
 	case "delete", "remove", "rm":
 		if len(parts) > 2 {
-			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+			return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", worktreeUsageText, ""), c.model.sendTransientStatusWithNoticeID(worktreeUsageText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
 		token := ""
 		if len(parts) == 2 {
@@ -48,7 +49,7 @@ func (c uiInputController) handleWorktreeCommand(args string) (tea.Model, tea.Cm
 		}
 		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{OpenDelete: true, ConfirmDeleteTarget: token})
 	default:
-		return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+		return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", worktreeUsageText, ""), c.model.sendTransientStatusWithNoticeID(worktreeUsageText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 }
 
@@ -114,16 +115,4 @@ func (m *uiModel) suggestedWorktreeSessionName() string {
 		}
 	}
 	return ""
-}
-
-func worktreeUsage() string {
-	return "Usage: /wt | /wt status | /wt create | /wt new | /wt delete [target] | /wt remove [target] | /wt rm [target] | /wt switch <target>"
-}
-
-func worktreeDisplayName(item serverapi.WorktreeView) string {
-	return worktreeview.DisplayName(item)
-}
-
-func sanitizeWorktreeBranchSuggestion(raw string) string {
-	return worktreeview.SanitizeBranchSuggestion(raw)
 }

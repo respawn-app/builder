@@ -103,7 +103,7 @@ func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error
 		}
 		return e.appendMessage(stepID, metaResult.Headless[0])
 	}
-	if !shouldInjectHeadlessModeExitPromptForState(headlessActive) {
+	if !headlessActive {
 		return nil
 	}
 	metaResult, err := builder.Build(metaContextBuildOptions{IncludeHeadlessExit: true})
@@ -143,18 +143,6 @@ func (e *Engine) injectWorkflowModePromptIfNeeded(ctx context.Context, stepID st
 
 func shouldInjectHeadlessModePromptForState(active bool) bool {
 	return !active
-}
-
-func shouldInjectHeadlessModeExitPromptForState(active bool) bool {
-	return active
-}
-
-func shouldInjectHeadlessModePrompt(messages []llm.Message) bool {
-	return shouldInjectHeadlessModePromptForState(headlessModeActive(messages))
-}
-
-func shouldInjectHeadlessModeExitPrompt(messages []llm.Message) bool {
-	return shouldInjectHeadlessModeExitPromptForState(headlessModeActive(messages))
 }
 
 func headlessModeActive(messages []llm.Message) bool {

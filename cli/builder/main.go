@@ -117,7 +117,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		return taskSubcommand(args[1:], stdout, stderr)
 	}
 
-	rootFS := newCommandFlagSet("builder", stderr, writeRootUsage)
+	rootFS := newCommandFlagSet("builder", stderr, rootUsage)
 	showVersion := rootFS.Bool("version", false, "print version and exit")
 	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
 	flags := registerSessionFlags(rootFS)
@@ -191,7 +191,7 @@ func isTerminalWriter(w io.Writer) bool {
 func runSubcommand(args []string) int {
 	runFS := flag.NewFlagSet("builder run", flag.ContinueOnError)
 	runFS.SetOutput(os.Stderr)
-	runFS.Usage = func() { writeRunUsage(runFS) }
+	runFS.Usage = func() { runUsage.write(runFS) }
 	flags := registerCommonFlags(runFS, true)
 	agentRoleRaw := runFS.String("agent", "", "subagent role override")
 	fastRole := runFS.Bool("fast", false, "use the built-in fast subagent role")
@@ -278,7 +278,7 @@ func runSubcommand(args []string) int {
 	}
 	result, runErr := runPromptApp(ctx, opts, prompt, timeout, progress)
 	continueID := strings.TrimSpace(result.SessionID)
-	continueCmd := buildRunContinueCommand(continueID)
+	continueCmd := selfcmd.ContinueRunCommand(continueID)
 	continueHint := buildRunContinueHint(continueID)
 	if runErr != nil {
 		code := runErrorCode(runErr)
@@ -369,7 +369,7 @@ func effectiveSessionID(flags commonFlags) (string, error) {
 }
 
 func sessionIDSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	sessionFS := newCommandFlagSet("builder session-id", stderr, writeSessionIDUsage)
+	sessionFS := newCommandFlagSet("builder session-id", stderr, sessionIDUsage)
 	if ok, exitCode := parseCommandFlags(sessionFS, args); !ok {
 		return exitCode
 	}
@@ -529,12 +529,8 @@ func effectiveRunAgentRole(raw string, fast bool) (string, error) {
 	return normalized, nil
 }
 
-func buildRunContinueCommand(sessionID string) string {
-	return selfcmd.ContinueRunCommand(sessionID)
-}
-
 func buildRunContinueHint(sessionID string) string {
-	command := buildRunContinueCommand(sessionID)
+	command := selfcmd.ContinueRunCommand(sessionID)
 	if command == "" {
 		return ""
 	}

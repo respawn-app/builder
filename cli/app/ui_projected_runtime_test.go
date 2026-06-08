@@ -413,13 +413,13 @@ func TestHydratingClientAndLiveClientConvergeWithoutDuplicateCommittedRows(t *te
 	hydratingClient := &runtimeControlFakeClient{transcript: authoritative}
 	hydrating := newProjectedTestUIModel(hydratingClient, hydratingEvents, nil)
 	hydrating.startupCmds = nil
-	if cmd := hydrating.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := hydrating.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
 	live := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), nil)
 	live.startupCmds = nil
-	if cmd := live.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := live.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -430,7 +430,7 @@ func TestHydratingClientAndLiveClientConvergeWithoutDuplicateCommittedRows(t *te
 	}
 	hydratingEvents <- committedFinal
 	close(hydratingEvents)
-	liveCmd := live.runtimeAdapter().handleProjectedRuntimeEvent(committedFinal)
+	liveCmd := live.runtimeAdapter().applyProjectedRuntimeEvent(committedFinal, true).cmd
 	for _, msg := range collectCmdMessages(t, liveCmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect live client committed event to require hydration, got %+v", msg)

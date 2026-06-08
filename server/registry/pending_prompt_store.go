@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,7 @@ func (s *pendingPromptStore) Begin(req askquestion.Request) (PendingPromptSnapsh
 	if s == nil {
 		return PendingPromptSnapshot{}, false
 	}
-	requestID := normalizeRegistrySessionID(req.ID)
+	requestID := strings.TrimSpace(req.ID)
 	if requestID == "" {
 		return PendingPromptSnapshot{}, false
 	}
@@ -55,7 +56,7 @@ func (s *pendingPromptStore) Complete(requestID string) (PendingPromptSnapshot, 
 	if s == nil {
 		return PendingPromptSnapshot{}, false
 	}
-	id := normalizeRegistrySessionID(requestID)
+	id := strings.TrimSpace(requestID)
 	if id == "" {
 		return PendingPromptSnapshot{}, false
 	}
@@ -84,7 +85,7 @@ func (s *pendingPromptStore) Await(ctx context.Context, req askquestion.Request,
 	if s == nil {
 		return askquestion.Response{}, fmt.Errorf("pending prompt store is required")
 	}
-	requestID := normalizeRegistrySessionID(req.ID)
+	requestID := strings.TrimSpace(req.ID)
 	if requestID == "" {
 		return askquestion.Response{}, fmt.Errorf("session id and request id are required")
 	}
@@ -126,7 +127,7 @@ func (s *pendingPromptStore) Submit(resp askquestion.Response, err error, publis
 	if s == nil {
 		return fmt.Errorf("pending prompt store is required")
 	}
-	requestID := normalizeRegistrySessionID(resp.RequestID)
+	requestID := strings.TrimSpace(resp.RequestID)
 	if requestID == "" {
 		return fmt.Errorf("session id and request id are required")
 	}

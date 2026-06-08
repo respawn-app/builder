@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"builder/cli/app/internal/serverbridge"
 	"builder/shared/config"
 )
 
@@ -37,8 +36,4 @@ func Env(cfg config.App) []string {
 		env = append(env, "BUILDER_SERVER_PORT="+strconv.Itoa(cfg.Settings.ServerPort))
 	}
 	return env
-}
-
-func ReleaseReservation(cfg config.App) {
-	serverbridge.ReleaseServeReservation(cfg)
 }

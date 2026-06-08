@@ -175,7 +175,7 @@ func (w *DerivedWiring) deriveJoinAggregateParameters(join Node, incomingByNode 
 				continue
 			}
 			if owner, exists := ownerByField[name]; exists && owner != groupID {
-				w.addDiagnostic(CodeProvisionFieldOverlap, fmt.Sprintf("%s: join aggregate parameter %s is produced by multiple transitions", nodeMessageSubject(join), name), ValidationError{NodeID: join.ID, FieldName: name, TransitionGroupID: groupID})
+				w.addDiagnostic(CodeProvisionFieldOverlap, fmt.Sprintf("%s: join aggregate parameter %s is produced by multiple transitions", fmt.Sprintf("Node %s", nodeDisplayName(join)), name), ValidationError{NodeID: join.ID, FieldName: name, TransitionGroupID: groupID})
 				continue
 			}
 			ownerByField[name] = groupID

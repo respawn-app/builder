@@ -73,14 +73,14 @@ func TestCompactDoneResumesQueuedSteeringAsNewTurn(t *testing.T) {
 		t.Fatalf("expected one resumed steering model request, got %d", len(requests))
 	}
 	hasSteeredUser := false
-	for _, message := range requestMessages(requests[0]) {
+	for _, message := range llm.MessagesFromItems(requests[0].Items) {
 		if message.Role == llm.RoleUser && message.Content == "steered message" {
 			hasSteeredUser = true
 			break
 		}
 	}
 	if !hasSteeredUser {
-		t.Fatalf("expected resumed request to include steered message, got %+v", requestMessages(requests[0]))
+		t.Fatalf("expected resumed request to include steered message, got %+v", llm.MessagesFromItems(requests[0].Items))
 	}
 
 	deadline := time.Now().Add(2 * time.Second)

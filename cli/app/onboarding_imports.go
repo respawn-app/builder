@@ -46,26 +46,6 @@ type onboardingImportDiscoveryDoneMsg struct {
 	discovery onboardingImportDiscovery
 }
 
-func supportedOnboardingSkillImportProviders() []onboardingImportProvider {
-	return onboardingimportproviders.SkillSupported()
-}
-
-func supportedOnboardingCommandImportProviders() []onboardingImportProvider {
-	return onboardingimportproviders.CommandSupported()
-}
-
-func onboardingImportProviderByID(providerID onboardingImportProviderID) (onboardingImportProvider, bool) {
-	return onboardingimportproviders.ByID(providerID)
-}
-
-func onboardingImportProviderLabels(providers []onboardingImportProvider) string {
-	return onboardingimportproviders.Labels(providers)
-}
-
-func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
-	return discoverOnboardingImportsForWorkspace(globalRoot, "")
-}
-
 func discoverOnboardingImportsForWorkspace(globalRoot string, workspaceRoot string) onboardingImportDiscovery {
 	discovery := onboardingImportDiscovery{
 		skillSymlinkRoots:   map[onboardingImportProviderID]string{},
@@ -75,7 +55,7 @@ func discoverOnboardingImportsForWorkspace(globalRoot string, workspaceRoot stri
 		commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{},
 	}
 	var err error
-	discovery.generatedSkillItems, err = discoverGeneratedSkillItems()
+	discovery.generatedSkillItems, err = onboardingimportgenerated.Discover()
 	if err != nil {
 		discovery.err = err
 		return discovery
@@ -85,12 +65,12 @@ func discoverOnboardingImportsForWorkspace(globalRoot string, workspaceRoot stri
 		discovery.err = err
 		return discovery
 	}
-	discovery.skipSkills, err = shouldSkipOnboardingImport(filepath.Join(globalRoot, "skills"))
+	discovery.skipSkills, err = onboardingimportfs.ShouldSkipTarget(filepath.Join(globalRoot, "skills"))
 	if err != nil {
 		discovery.err = err
 		return discovery
 	}
-	discovery.skipCommands, err = shouldSkipCommandImport(globalRoot)
+	discovery.skipCommands, err = onboardingimportfs.ShouldSkipCommandImport(globalRoot)
 	if err != nil {
 		discovery.err = err
 		return discovery
@@ -100,10 +80,10 @@ func discoverOnboardingImportsForWorkspace(globalRoot string, workspaceRoot stri
 		discovery.err = fmt.Errorf("resolve home dir: %w", err)
 		return discovery
 	}
-	for _, provider := range supportedOnboardingSkillImportProviders() {
+	for _, provider := range onboardingimportproviders.SkillSupported() {
 		base := filepath.Join(home, provider.HomeEntry)
 		if !discovery.skipSkills {
-			skillRoot, symlinkSkills, symlinkSkillsErr := discoverProviderSkillSymlinkItems(provider, base)
+			skillRoot, symlinkSkills, symlinkSkillsErr := onboardingimportfs.DiscoverProviderSkills(provider, base)
 			if symlinkSkillsErr != nil {
 				discovery.err = symlinkSkillsErr
 				return discovery
@@ -114,10 +94,10 @@ func discoverOnboardingImportsForWorkspace(globalRoot string, workspaceRoot stri
 			}
 		}
 	}
-	for _, provider := range supportedOnboardingCommandImportProviders() {
+	for _, provider := range onboardingimportproviders.CommandSupported() {
 		base := filepath.Join(home, provider.HomeEntry)
 		if !discovery.skipCommands {
-			commandRoot, symlinkItems, symlinkErr := discoverProviderCommandSymlinkItems(provider, base)
+			commandRoot, symlinkItems, symlinkErr := onboardingimportfs.DiscoverProviderCommands(provider, base)
 			if symlinkErr != nil {
 				discovery.err = symlinkErr
 				return discovery
@@ -129,10 +109,6 @@ func discoverOnboardingImportsForWorkspace(globalRoot string, workspaceRoot stri
 		}
 	}
 	return discovery
-}
-
-func discoverGeneratedSkillItems() ([]onboardingSkillImportItem, error) {
-	return onboardingimportgenerated.Discover()
 }
 
 func discoverExistingOnboardingSkillNames(globalRoot string, workspaceRoot string) (map[string]bool, error) {
@@ -179,19 +155,11 @@ func discoverExistingOnboardingSkillNamesInRoot(root string) (map[string]bool, e
 		if !ok {
 			continue
 		}
-		if normalized := normalizeOnboardingSkillName(meta.Name); normalized != "" {
+		if normalized := onboardingimportskills.NormalizeName(meta.Name); normalized != "" {
 			names[normalized] = true
 		}
 	}
 	return names, nil
-}
-
-func discoverProviderSkillSymlinkItems(provider onboardingImportProvider, base string) (string, []onboardingSkillImportItem, error) {
-	return onboardingimportfs.DiscoverProviderSkills(provider, base)
-}
-
-func discoverProviderCommandSymlinkItems(provider onboardingImportProvider, base string) (string, []onboardingCommandImportItem, error) {
-	return onboardingimportfs.DiscoverProviderCommands(provider, base)
 }
 
 func (d onboardingImportDiscovery) hasSkillCandidates() bool {
@@ -217,10 +185,6 @@ func hasImportProviderItems[T any](byProvider map[onboardingImportProviderID][]T
 	return false
 }
 
-func providerLabel(provider onboardingImportProviderID) string {
-	return onboardingimportproviders.Label(provider)
-}
-
 func applyImportChoice(selection *onboardingImportSelection, choiceID string) error {
 	next, err := onboardingimportchoice.ApplyChoice(*selection, choiceID)
 	if err != nil {
@@ -237,7 +201,7 @@ func buildSkillImportScreen(state *onboardingFlowState) onboardingScreen {
 	if state.imports.err != nil {
 		return onboardingScreen{ID: "skills_import", Kind: onboardingScreenChoice, Title: "Import skills?", Body: "Builder could not inspect importable skills on this machine.", ErrorText: state.imports.err.Error(), Options: []onboardingOption{{ID: "none", Title: "Do not import"}}, DefaultOptionID: "none"}
 	}
-	defaultID := recommendedSymlinkImportChoiceID(state.imports.skillSymlinkItems)
+	defaultID := onboardingimportchoice.RecommendedSymlinkChoiceID(state.imports.skillSymlinkItems, onboardingimportproviders.OrderList())
 	if state.skillImport.Mode == onboardingImportModeNone {
 		defaultID = "none"
 	}
@@ -245,9 +209,9 @@ func buildSkillImportScreen(state *onboardingFlowState) onboardingScreen {
 		defaultID = "symlink:" + string(state.skillImport.Provider)
 	}
 	options := []onboardingOption{{ID: "none", Title: "Do not import"}}
-	for _, provider := range sortedImportProviders(state.imports.skillSymlinkItems) {
+	for _, provider := range onboardingimportproviders.SortedProviderIDs(state.imports.skillSymlinkItems) {
 		count := len(state.imports.skillSymlinkItems[provider])
-		options = append(options, onboardingOption{ID: "symlink:" + string(provider), Title: fmt.Sprintf("Symlink to %s (%d found)", providerLabel(provider), count)})
+		options = append(options, onboardingOption{ID: "symlink:" + string(provider), Title: fmt.Sprintf("Symlink to %s (%d found)", onboardingimportproviders.Label(provider), count)})
 	}
 	if !containsOnboardingOption(options, defaultID) && len(options) > 1 {
 		defaultID = options[1].ID
@@ -257,20 +221,20 @@ func buildSkillImportScreen(state *onboardingFlowState) onboardingScreen {
 
 func importSkillsBody(discovery onboardingImportDiscovery) string {
 	providers := make([]string, 0)
-	for _, provider := range sortedImportProviders(discovery.skillSymlinkItems) {
-		providers = append(providers, providerLabel(provider))
+	for _, provider := range onboardingimportproviders.SortedProviderIDs(discovery.skillSymlinkItems) {
+		providers = append(providers, onboardingimportproviders.Label(provider))
 	}
 	return "Builder found importable skills from " + strings.Join(providers, ", ") + ". Would you like to symlink to the other provider's directories?"
 }
 
 func buildCommandImportScreen(state *onboardingFlowState) onboardingScreen {
 	if state.imports.pending {
-		return onboardingScreen{ID: "commands_import", Kind: onboardingScreenLoading, Title: "Import slash commands?", LoadingText: "Scanning " + onboardingImportProviderLabels(supportedOnboardingCommandImportProviders()) + " slash commands..."}
+		return onboardingScreen{ID: "commands_import", Kind: onboardingScreenLoading, Title: "Import slash commands?", LoadingText: "Scanning " + onboardingimportproviders.Labels(onboardingimportproviders.CommandSupported()) + " slash commands..."}
 	}
 	if state.imports.err != nil {
 		return onboardingScreen{ID: "commands_import", Kind: onboardingScreenChoice, Title: "Import slash commands?", Body: "Builder could not inspect importable slash commands on this machine.", ErrorText: state.imports.err.Error(), Options: []onboardingOption{{ID: "none", Title: "Do not import"}}, DefaultOptionID: "none"}
 	}
-	defaultID := recommendedSymlinkImportChoiceID(state.imports.commandSymlinkItems)
+	defaultID := onboardingimportchoice.RecommendedSymlinkChoiceID(state.imports.commandSymlinkItems, onboardingimportproviders.OrderList())
 	if state.commandImport.Mode == onboardingImportModeNone {
 		defaultID = "none"
 	}
@@ -278,9 +242,9 @@ func buildCommandImportScreen(state *onboardingFlowState) onboardingScreen {
 		defaultID = "symlink:" + string(state.commandImport.Provider)
 	}
 	options := []onboardingOption{{ID: "none", Title: "Do not import"}}
-	for _, provider := range sortedImportProviders(state.imports.commandSymlinkItems) {
+	for _, provider := range onboardingimportproviders.SortedProviderIDs(state.imports.commandSymlinkItems) {
 		count := len(state.imports.commandSymlinkItems[provider])
-		options = append(options, onboardingOption{ID: "symlink:" + string(provider), Title: fmt.Sprintf("Symlink to %s (%d found)", providerLabel(provider), count)})
+		options = append(options, onboardingOption{ID: "symlink:" + string(provider), Title: fmt.Sprintf("Symlink to %s (%d found)", onboardingimportproviders.Label(provider), count)})
 	}
 	if !containsOnboardingOption(options, defaultID) && len(options) > 1 {
 		defaultID = options[1].ID
@@ -290,18 +254,10 @@ func buildCommandImportScreen(state *onboardingFlowState) onboardingScreen {
 
 func importCommandsBody(discovery onboardingImportDiscovery) string {
 	providers := make([]string, 0)
-	for _, provider := range sortedImportProviders(discovery.commandSymlinkItems) {
-		providers = append(providers, providerLabel(provider))
+	for _, provider := range onboardingimportproviders.SortedProviderIDs(discovery.commandSymlinkItems) {
+		providers = append(providers, onboardingimportproviders.Label(provider))
 	}
 	return "Builder found importable slash commands from " + strings.Join(providers, ", ") + ". Would you like to symlink to provider directories?"
-}
-
-func recommendedSymlinkImportChoiceID[T any](byProvider map[onboardingImportProviderID][]T) string {
-	return onboardingimportchoice.RecommendedSymlinkChoiceID(byProvider, onboardingImportProviderOrderList())
-}
-
-func onboardingImportProviderOrderList() []onboardingImportProviderID {
-	return onboardingimportproviders.OrderList()
 }
 
 func buildSkillSelectionScreen(state *onboardingFlowState) onboardingScreen {
@@ -310,7 +266,7 @@ func buildSkillSelectionScreen(state *onboardingFlowState) onboardingScreen {
 	body := "Pick skills to keep enabled for now. Builder will write config toggles for the unchecked skills."
 	options := make([]onboardingOption, 0, len(items))
 	if len(items) > 2 {
-		options = append(options, onboardingOption{ID: onboardingToggleAllOptionID, Title: toggleAllOptionTitleForSelection(items, selection)})
+		options = append(options, onboardingOption{ID: onboardingToggleAllOptionID, Title: onboardingimportskills.ToggleAllTitle(items, selection)})
 	}
 	for _, item := range items {
 		warning := ""
@@ -322,20 +278,12 @@ func buildSkillSelectionScreen(state *onboardingFlowState) onboardingScreen {
 	return onboardingScreen{ID: "skills_enabled", Kind: onboardingScreenMulti, Title: "Choose enabled skills", Body: body, Options: options, Selection: selection}
 }
 
-func toggleAllOptionTitleForSelection(items []onboardingSkillImportItem, selection map[string]bool) string {
-	return onboardingimportskills.ToggleAllTitle(items, selection)
-}
-
 func skillSelectionCandidates(state *onboardingFlowState) []onboardingSkillImportItem {
 	imported := make([]onboardingSkillImportItem, 0)
 	if state.skillImport.Mode == onboardingImportModeSymlinkSource && !state.imports.skipSkills {
 		imported = append(imported, state.imports.skillSymlinkItems[state.skillImport.Provider]...)
 	}
 	return onboardingimportskills.Candidates(imported, state.imports.generatedSkillItems, state.imports.existingSkillNames)
-}
-
-func normalizeOnboardingSkillName(raw string) string {
-	return onboardingimportskills.NormalizeName(raw)
 }
 
 func skillImportSummary(state *onboardingFlowState) string {
@@ -345,7 +293,7 @@ func skillImportSummary(state *onboardingFlowState) string {
 	if state.skillImport.Mode != onboardingImportModeSymlinkSource {
 		return ""
 	}
-	return fmt.Sprintf("Symlink %d skills from %s", len(skillSelectionCandidates(state)), providerLabel(state.skillImport.Provider))
+	return fmt.Sprintf("Symlink %d skills from %s", len(skillSelectionCandidates(state)), onboardingimportproviders.Label(state.skillImport.Provider))
 }
 
 func commandImportSummary(state *onboardingFlowState) string {
@@ -355,7 +303,7 @@ func commandImportSummary(state *onboardingFlowState) string {
 	if state.commandImport.Mode != onboardingImportModeSymlinkSource {
 		return ""
 	}
-	return fmt.Sprintf("Symlink %d from %s", len(state.imports.commandSymlinkItems[state.commandImport.Provider]), providerLabel(state.commandImport.Provider))
+	return fmt.Sprintf("Symlink %d from %s", len(state.imports.commandSymlinkItems[state.commandImport.Provider]), onboardingimportproviders.Label(state.commandImport.Provider))
 }
 
 func executeOnboardingImports(globalRoot string, state onboardingFlowState) (func() error, error) {
@@ -379,12 +327,8 @@ func executeOnboardingImports(globalRoot string, state onboardingFlowState) (fun
 	}, nil
 }
 
-func normalizeOnboardingImportSelection(selection onboardingImportSelection) onboardingImportSelection {
-	return onboardingimportchoice.NormalizeSelection(selection)
-}
-
 func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection) ([]string, error) {
-	selection = normalizeOnboardingImportSelection(selection)
+	selection = onboardingimportchoice.NormalizeSelection(selection)
 	if discovery.skipSkills {
 		if selection.Mode != onboardingImportModeNone {
 			return nil, fmt.Errorf("skills import should have been skipped because existing content was found")
@@ -406,11 +350,11 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 		}
 		sourcePath = fallbackPath
 	}
-	return onboardingimportfs.ExecuteSymlink(targetRoot, sourcePath, "skills", fmt.Sprintf("skills source %s", providerLabel(selection.Provider)))
+	return onboardingimportfs.ExecuteSymlink(targetRoot, sourcePath, "skills", fmt.Sprintf("skills source %s", onboardingimportproviders.Label(selection.Provider)))
 }
 
 func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection) ([]string, error) {
-	selection = normalizeOnboardingImportSelection(selection)
+	selection = onboardingimportchoice.NormalizeSelection(selection)
 	if discovery.skipCommands {
 		if selection.Mode != onboardingImportModeNone {
 			return nil, fmt.Errorf("slash command import should have been skipped because existing content was found")
@@ -432,7 +376,7 @@ func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery
 		}
 		sourcePath = fallbackPath
 	}
-	return onboardingimportfs.ExecuteSymlink(targetRoot, sourcePath, "slash command", fmt.Sprintf("slash command source %s", providerLabel(selection.Provider)))
+	return onboardingimportfs.ExecuteSymlink(targetRoot, sourcePath, "slash command", fmt.Sprintf("slash command source %s", onboardingimportproviders.Label(selection.Provider)))
 }
 
 func providerSkillSymlinkSource(providerID onboardingImportProviderID) (string, error) {
@@ -440,7 +384,7 @@ func providerSkillSymlinkSource(providerID onboardingImportProviderID) (string, 
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	provider, ok := onboardingImportProviderByID(providerID)
+	provider, ok := onboardingimportproviders.ByID(providerID)
 	if !ok {
 		return "", fmt.Errorf("unknown skills import provider %q", providerID)
 	}
@@ -452,18 +396,10 @@ func providerCommandSymlinkSource(providerID onboardingImportProviderID) (string
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	provider, ok := onboardingImportProviderByID(providerID)
+	provider, ok := onboardingimportproviders.ByID(providerID)
 	if !ok || !provider.SupportsCommandImport {
 		return "", fmt.Errorf("unknown slash command import provider %q", providerID)
 	}
 	base := filepath.Join(home, provider.HomeEntry)
 	return onboardingimportfs.ProviderCommandSourceAtBase(provider, base)
-}
-
-func shouldSkipOnboardingImport(path string) (bool, error) {
-	return onboardingimportfs.ShouldSkipTarget(path)
-}
-
-func shouldSkipCommandImport(globalRoot string) (bool, error) {
-	return onboardingimportfs.ShouldSkipCommandImport(globalRoot)
 }

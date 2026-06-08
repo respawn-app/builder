@@ -23,6 +23,6 @@ func BenchmarkRenderNativeScrollbackSnapshot(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = renderNativeScrollbackSnapshot(entries, "dark", 120)
+		_ = renderStyledNativeProjectionLines(tui.ProjectCommittedOngoingTranscript(entries, "dark", 120).Lines(tui.TranscriptDivider), "dark", 120)
 	}
 }

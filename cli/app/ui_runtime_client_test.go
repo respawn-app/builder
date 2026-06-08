@@ -224,8 +224,6 @@ type runtimeClientBlockingTool struct {
 	release chan struct{}
 }
 
-func (runtimeClientBlockingTool) Name() toolspec.ID { return toolspec.ToolExecCommand }
-
 func (t runtimeClientBlockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
 	case <-t.started:
@@ -510,7 +508,7 @@ func TestCommittedRuntimeEventPermanentOutputUsesCommittedSuffix(t *testing.T) {
 		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "authoritative suffix"}},
 	}
 
-	cmd := model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := model.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -519,7 +517,7 @@ func TestCommittedRuntimeEventPermanentOutputUsesCommittedSuffix(t *testing.T) {
 		CommittedEntryStart:        1,
 		CommittedEntryStartSet:     true,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "stale event payload", Phase: string(llm.MessagePhaseFinal)}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	var refresh runtimeCommittedTranscriptSuffixRefreshedMsg
 	for _, msg := range msgs {
@@ -574,7 +572,7 @@ func TestUserMessageFlushedAdvancesDeliveryCursorBeforeFollowingSuffix(t *testin
 	m := newProjectedStaticUIModel()
 	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(0, 1)
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		CommittedEntryCount:        1,
@@ -582,7 +580,7 @@ func TestUserMessageFlushedAdvancesDeliveryCursorBeforeFollowingSuffix(t *testin
 		CommittedEntryStart:        0,
 		CommittedEntryStartSet:     true,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
-	})
+	}, true).cmd
 	_ = collectCmdMessages(t, cmd)
 
 	if m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount != 1 {
@@ -1477,11 +1475,11 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	store, eng := newAppRuntimeEngine(t, fakeLLM, runtime.Config{}, runtimeClientBlockingTool{started: started, release: release})
+	store, eng := newAppRuntimeEngine(t, fakeLLM, runtime.Config{}, tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: runtimeClientBlockingTool{started: started, release: release}})
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	runtimeRegistry.Register(store.Meta().SessionID, eng)
 
-	runtimeClient := newRuntimeClient(
+	runtimeClient := newUIRuntimeClientWithReads(
 		store.Meta().SessionID,
 		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
@@ -1586,9 +1584,6 @@ func TestRuntimeClientMainViewSnapshotDoesNotPopulateTranscriptEndpoint(t *testi
 
 func TestRuntimeClientWithoutClientsIsNil(t *testing.T) {
 	if client := newUIRuntimeClientWithReads("session-1", nil, nil); client != nil {
-		t.Fatalf("expected nil runtime client, got %#v", client)
-	}
-	if client := newRuntimeClient("session-1", nil, nil); client != nil {
 		t.Fatalf("expected nil runtime client, got %#v", client)
 	}
 	_ = clientui.RuntimeMainView{}

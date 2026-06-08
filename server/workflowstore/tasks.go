@@ -10,6 +10,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 type CreateTaskRequest struct {
@@ -304,14 +305,14 @@ func resolveTaskSourceWorkspaceWithQueries(ctx context.Context, q *sqlitegen.Que
 func taskMetadataWithSourceWorkspaceSnapshot(ctx context.Context, q *sqlitegen.Queries, currentMetadata string, sourceWorkspaceID string) (string, error) {
 	payload := map[string]any{}
 	if strings.TrimSpace(currentMetadata) != "" {
-		if err := unmarshalJSON(currentMetadata, &payload); err != nil {
+		if err := workflowjson.UnmarshalString(currentMetadata, &payload); err != nil {
 			return "", fmt.Errorf("decode task metadata json: %w", err)
 		}
 	}
 	trimmedWorkspaceID := strings.TrimSpace(sourceWorkspaceID)
 	if trimmedWorkspaceID == "" {
 		delete(payload, "source_workspace_snapshot")
-		return marshalJSON(payload)
+		return workflowjson.MarshalString(payload)
 	}
 	workspace, err := q.GetWorkspaceByID(ctx, trimmedWorkspaceID)
 	if err != nil {
@@ -322,7 +323,7 @@ func taskMetadataWithSourceWorkspaceSnapshot(ctx context.Context, q *sqlitegen.Q
 		"display_name": workspaceSnapshotDisplayName(workspace.CanonicalRootPath),
 		"root_path":    workspace.CanonicalRootPath,
 	}
-	return marshalJSON(payload)
+	return workflowjson.MarshalString(payload)
 }
 
 func workspaceSnapshotDisplayName(rootPath string) string {
@@ -352,7 +353,7 @@ func (s *Store) StartTask(ctx context.Context, taskID workflow.TaskID) (StartTas
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := s.queries.WithTx(tx)
-	updatedStart, err := tx.ExecContext(ctx, workflowStoreQuery(startTaskCompleteStartPlacementQuery), "completed", now, prepared.startPlacement.ID, string(taskID))
+	updatedStart, err := tx.ExecContext(ctx, strings.TrimSuffix(startTaskCompleteStartPlacementQuery, "\n"), "completed", now, prepared.startPlacement.ID, string(taskID))
 	if err != nil {
 		return StartTaskResult{}, err
 	}
@@ -378,11 +379,16 @@ func (s *Store) StartTask(ctx context.Context, taskID workflow.TaskID) (StartTas
 	if err := insertTransitionEdgeSnapshotWithMetadata(ctx, q, transitionID, startEdgeSnapshot, targetPlacementID, "applied", workflowRunMetadata{}); err != nil {
 		return StartTaskResult{}, err
 	}
-	runSnapshotJSON, err := marshalJSON(runSnapshot)
+	runSnapshotJSON, err := workflowjson.MarshalString(runSnapshot)
 	if err != nil {
 		return StartTaskResult{}, err
 	}
-	runMetadataJSON, err := targetRunMetadata(startEdgeSnapshot, resolvedContextSourceRun{}, nil)
+	runMetadataJSON, err := workflowjson.MarshalString(workflowRunMetadata{
+		ContextMode:    string(startEdgeSnapshot.ContextMode),
+		ContextSource:  workflow.CanonicalContextSource(startEdgeSnapshot.ContextSource),
+		PromptTemplate: strings.TrimSpace(startEdgeSnapshot.PromptTemplate),
+		Parameters:     append([]workflow.Parameter(nil), startEdgeSnapshot.Parameters...),
+	})
 	if err != nil {
 		return StartTaskResult{}, err
 	}
@@ -486,7 +492,7 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 		return CompleteRunResult{}, fmt.Errorf("stale workflow run generation: got %d want %d", req.ExpectedGeneration, run.RunGeneration)
 	}
 	snapshot := runStartSnapshot{}
-	if err := unmarshalJSON(run.RunStartSnapshotJson, &snapshot); err != nil {
+	if err := workflowjson.UnmarshalString(run.RunStartSnapshotJson, &snapshot); err != nil {
 		return CompleteRunResult{}, err
 	}
 	selectedTransitionID := strings.TrimSpace(req.TransitionID)
@@ -516,7 +522,7 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 		}
 		return CompleteRunResult{}, CompletionValidationError{Issues: issues}
 	}
-	outputValuesJSON, err := marshalJSON(req.OutputValues)
+	outputValuesJSON, err := workflowjson.MarshalString(req.OutputValues)
 	if err != nil {
 		return CompleteRunResult{}, err
 	}
@@ -535,7 +541,7 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := s.queries.WithTx(tx)
-	updatedRun, err := tx.ExecContext(ctx, workflowStoreQuery(completeRunUpdateRunQuery),
+	updatedRun, err := tx.ExecContext(ctx, strings.TrimSuffix(completeRunUpdateRunQuery, "\n"),
 		now,
 		now,
 		run.ID,
@@ -595,7 +601,7 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 			continue
 		}
 		if edge.TargetNode.Kind == workflow.NodeKindJoin {
-			if err := insertTransitionEdgeSnapshot(ctx, q, transitionID, edge, "", "applied", resolvedContextSourceRun{}); err != nil {
+			if err := insertTransitionEdgeSnapshotWithMetadata(ctx, q, transitionID, edge, "", "applied", workflowRunMetadata{ContextSource: workflow.CanonicalContextSource(edge.ContextSource)}); err != nil {
 				return CompleteRunResult{}, err
 			}
 			joined, err := s.applyJoinIfReady(ctx, tx, q, now, run.TaskID, run.PlacementID, snapshot, edge)
@@ -612,7 +618,7 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 			return CompleteRunResult{}, fmt.Errorf("insert target placement: %w", err)
 		}
 		result.PlacementIDs = append(result.PlacementIDs, workflow.PlacementID(targetPlacementID))
-		if err := insertTransitionEdgeSnapshot(ctx, q, transitionID, edge, targetPlacementID, "applied", resolvedContextSourceRun{}); err != nil {
+		if err := insertTransitionEdgeSnapshotWithMetadata(ctx, q, transitionID, edge, targetPlacementID, "applied", workflowRunMetadata{ContextSource: workflow.CanonicalContextSource(edge.ContextSource)}); err != nil {
 			return CompleteRunResult{}, err
 		}
 		if edge.TargetNode.Kind != workflow.NodeKindAgent {
@@ -626,7 +632,7 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 		if !foundSnapshot {
 			return CompleteRunResult{}, fmt.Errorf("target node %q missing from run-start snapshot", edge.TargetNode.ID)
 		}
-		targetSnapshotJSON, err := marshalJSON(targetSnapshot)
+		targetSnapshotJSON, err := workflowjson.MarshalString(targetSnapshot)
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
@@ -638,7 +644,15 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
-		targetMetadataJSON, err := targetRunMetadata(edge, source, priorParameterValues)
+		targetMetadataJSON, err := workflowjson.MarshalString(workflowRunMetadata{
+			ContextMode:          string(edge.ContextMode),
+			ContextSource:        workflow.CanonicalContextSource(edge.ContextSource),
+			SourceRunID:          source.runID,
+			SourceSessionID:      source.sessionID,
+			PromptTemplate:       strings.TrimSpace(edge.PromptTemplate),
+			Parameters:           append([]workflow.Parameter(nil), edge.Parameters...),
+			PriorParameterValues: clonePriorParameterValues(priorParameterValues),
+		})
 		if err != nil {
 			return CompleteRunResult{}, err
 		}

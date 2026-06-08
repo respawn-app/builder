@@ -305,7 +305,7 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	if goal, err := m.clearRuntimeGoal(); err != nil || goal != nil {
 		t.Fatalf("clear runtime goal = (%+v, %v), want nil goal", goal, err)
 	}
-	m.appendRuntimeLocalEntry("system", "hello")
+	m.appendRuntimeLocalEntryWithNoticeID("system", "hello", "")
 	message, err := m.submitRuntimeUserMessage(context.Background(), "prompt")
 	if err != nil || message != "assistant" {
 		t.Fatalf("submit runtime user message = (%q, %v), want (assistant, nil)", message, err)

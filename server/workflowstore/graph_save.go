@@ -10,6 +10,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 type WorkflowGraphSaveRequest struct {
@@ -601,7 +602,7 @@ func applyWorkflowGraphSave(ctx context.Context, tx *sql.Tx, q *sqlitegen.Querie
 }
 
 func upsertWorkflowNodeGroup(ctx context.Context, tx *sql.Tx, group NodeGroupRecord) error {
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowNodeGroupQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowNodeGroupQuery, "\n"),
 		group.ID,
 		string(group.WorkflowID),
 		string(group.Key),
@@ -612,19 +613,19 @@ func upsertWorkflowNodeGroup(ctx context.Context, tx *sql.Tx, group NodeGroupRec
 }
 
 func upsertWorkflowNode(ctx context.Context, tx *sql.Tx, node NodeRecord, sortOrder int64) error {
-	inputFields, err := marshalJSON(node.InputFields)
+	inputFields, err := workflowjson.MarshalString(node.InputFields)
 	if err != nil {
 		return err
 	}
-	joinProviders, err := marshalJSON(node.JoinInputProviders)
+	joinProviders, err := workflowjson.MarshalString(node.JoinInputProviders)
 	if err != nil {
 		return err
 	}
-	outputFields, err := marshalJSON(node.OutputFields)
+	outputFields, err := workflowjson.MarshalString(node.OutputFields)
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowNodeQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowNodeQuery, "\n"),
 		string(node.ID),
 		string(node.WorkflowID),
 		string(node.Key),
@@ -642,7 +643,7 @@ func upsertWorkflowNode(ctx context.Context, tx *sql.Tx, node NodeRecord, sortOr
 }
 
 func upsertWorkflowTransitionGroup(ctx context.Context, tx *sql.Tx, group TransitionGroupRecord, sortOrder int64) error {
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowTransitionGroupQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowTransitionGroupQuery, "\n"),
 		string(group.ID),
 		string(group.SourceNodeID),
 		strings.TrimSpace(string(group.TransitionID)),
@@ -660,15 +661,15 @@ func upsertWorkflowEdge(ctx context.Context, tx *sql.Tx, edge EdgeRecord, sortOr
 	if err != nil {
 		return err
 	}
-	inputs, err := marshalJSON(edge.InputBindings)
+	inputs, err := workflowjson.MarshalString(edge.InputBindings)
 	if err != nil {
 		return err
 	}
-	requirements, err := marshalJSON(edge.OutputRequirements)
+	requirements, err := workflowjson.MarshalString(edge.OutputRequirements)
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowEdgeQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowEdgeQuery, "\n"),
 		string(edge.ID),
 		string(edge.TransitionGroupID),
 		string(edge.Key),

@@ -3,16 +3,20 @@ package embeddedstartup
 import (
 	"context"
 
-	"builder/cli/app/internal/serverbridge"
+	serverauth "builder/server/auth"
+	"builder/server/authflow"
+	serverembedded "builder/server/embedded"
+	serverstartup "builder/server/startup"
 	"builder/shared/config"
 )
 
-type Server = serverbridge.Server
-type AuthManager = serverbridge.AuthManager
+type Server = serverembedded.Server
+type AuthManager = serverauth.Manager
+
 type AuthHandler interface {
-	WrapStore(base serverbridge.AuthStore) serverbridge.AuthStore
-	NeedsInteraction(req serverbridge.InteractionRequest) bool
-	Interact(ctx context.Context, req serverbridge.InteractionRequest) (serverbridge.InteractionOutcome, error)
+	WrapStore(base serverauth.Store) serverauth.Store
+	NeedsInteraction(req authflow.InteractionRequest) bool
+	Interact(ctx context.Context, req authflow.InteractionRequest) (authflow.InteractionOutcome, error)
 	LookupEnv(key string) string
 }
 
@@ -31,16 +35,14 @@ type OnboardingRequest struct {
 	ReloadConfig func() (config.App, error)
 }
 
-type OnboardingHandler interface {
-	EnsureOnboardingReady(ctx context.Context, req OnboardingRequest) (config.App, error)
-}
+type OnboardingHandler func(ctx context.Context, req OnboardingRequest) (config.App, error)
 
 func Start(ctx context.Context, req Request, authHandler AuthHandler, onboardingHandler OnboardingHandler) (*Server, error) {
-	return serverbridge.StartEmbedded(ctx, buildStartupRequest(req), authHandler, adaptOnboardingHandler(onboardingHandler))
+	return serverstartup.Start(ctx, buildStartupRequest(req), authHandler, adaptOnboardingHandler(onboardingHandler))
 }
 
-func buildStartupRequest(req Request) serverbridge.StartupRequest {
-	return serverbridge.StartupRequest{
+func buildStartupRequest(req Request) serverstartup.Request {
+	return serverstartup.Request{
 		WorkspaceRoot:         req.WorkspaceRoot,
 		WorkspaceRootExplicit: req.WorkspaceRootExplicit,
 		SessionID:             req.SessionID,
@@ -50,21 +52,15 @@ func buildStartupRequest(req Request) serverbridge.StartupRequest {
 	}
 }
 
-func adaptOnboardingHandler(handler OnboardingHandler) serverbridge.StartupOnboardingHandler {
+func adaptOnboardingHandler(handler OnboardingHandler) serverstartup.OnboardingHandler {
 	if handler == nil {
 		return nil
 	}
-	return onboardingHandlerAdapter{inner: handler}
-}
-
-type onboardingHandlerAdapter struct {
-	inner OnboardingHandler
-}
-
-func (h onboardingHandlerAdapter) EnsureOnboardingReady(ctx context.Context, req serverbridge.StartupOnboardingRequest) (config.App, error) {
-	return h.inner.EnsureOnboardingReady(ctx, OnboardingRequest{
-		Config:       req.Config,
-		AuthManager:  req.AuthManager,
-		ReloadConfig: req.ReloadConfig,
-	})
+	return func(ctx context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
+		return handler(ctx, OnboardingRequest{
+			Config:       req.Config,
+			AuthManager:  req.AuthManager,
+			ReloadConfig: req.ReloadConfig,
+		})
+	}
 }

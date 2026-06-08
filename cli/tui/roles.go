@@ -24,7 +24,7 @@ func entryVisibility(entry TranscriptEntry) transcript.EntryVisibility {
 	if explicit := transcript.NormalizeEntryVisibility(entry.Visibility); explicit != transcript.EntryVisibilityAuto {
 		return explicit
 	}
-	return defaultEntryVisibilityForRole(roleFromEntry(entry))
+	return defaultEntryVisibilityForRole(TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)))
 }
 
 func defaultEntryVisibilityForRole(role TranscriptRole) transcript.EntryVisibility {

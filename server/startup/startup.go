@@ -43,9 +43,7 @@ type AuthState interface {
 	AuthManager() *auth.Manager
 }
 
-type OnboardingHandler interface {
-	EnsureOnboardingReady(ctx context.Context, req OnboardingRequest) (config.App, error)
-}
+type OnboardingHandler func(ctx context.Context, req OnboardingRequest) (config.App, error)
 
 type OnboardingRequest struct {
 	Config       config.App
@@ -82,7 +80,7 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 		}
 	}
 	if onboardingHandler != nil {
-		cfg, err = onboardingHandler.EnsureOnboardingReady(ctx, OnboardingRequest{
+		cfg, err = onboardingHandler(ctx, OnboardingRequest{
 			Config:      cfg,
 			AuthManager: authSupport.AuthManager,
 			ReloadConfig: func() (config.App, error) {

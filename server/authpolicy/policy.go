@@ -9,7 +9,7 @@ import (
 
 func RequiresStartupAuth(settings config.Settings) bool {
 	if baseURL := strings.TrimSpace(settings.OpenAIBaseURL); baseURL != "" {
-		if explicitBaseURLRequiresStartupAuth(baseURL) {
+		if llm.IsOpenAIFirstPartyBaseURL(baseURL) {
 			return true
 		}
 		return false
@@ -22,8 +22,4 @@ func RequiresStartupAuth(settings config.Settings) bool {
 		return false
 	}
 	return provider == llm.ProviderOpenAI
-}
-
-func explicitBaseURLRequiresStartupAuth(baseURL string) bool {
-	return llm.IsOpenAIFirstPartyBaseURL(baseURL)
 }

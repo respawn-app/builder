@@ -1,10 +1,6 @@
 package app
 
-import (
-	"strings"
-
-	tea "github.com/charmbracelet/bubbletea"
-)
+import "strings"
 
 func (m *uiModel) reviewerInvocationState() (bool, string) {
 	mode := strings.ToLower(strings.TrimSpace(m.cachedRuntimeStatus().ReviewerFrequency))
@@ -15,10 +11,6 @@ func (m *uiModel) reviewerInvocationState() (bool, string) {
 		mode = "off"
 	}
 	return mode != "off", mode
-}
-
-func (m *uiModel) autoCompactionState() bool {
-	return m.cachedRuntimeStatus().AutoCompactionEnabled
 }
 
 func (m *uiModel) fastModeState() (bool, bool) {
@@ -79,16 +71,4 @@ func autoCompactionToggleStatusMessage(enabled bool, changed bool, compactionMod
 		return "Auto-compaction disabled" + modeNote
 	}
 	return "Auto-compaction already disabled" + modeNote
-}
-
-func (c uiInputController) showTransientStatus(message string) tea.Cmd {
-	return c.model.setTransientStatus(message)
-}
-
-func (c uiInputController) showSuccessStatus(message string) tea.Cmd {
-	return c.model.setTransientStatusWithKind(message, uiStatusNoticeSuccess)
-}
-
-func (c uiInputController) showErrorStatus(message string) tea.Cmd {
-	return c.model.setTransientStatusWithKind(message, uiStatusNoticeError)
 }

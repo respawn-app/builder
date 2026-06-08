@@ -9,6 +9,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 func (s *Store) ListRunnableRuns(ctx context.Context, limit int64) ([]RunnableRunRecord, error) {
@@ -55,7 +56,7 @@ func (s *Store) InterruptRunGeneration(ctx context.Context, runID workflow.RunID
 		detailJSON = "{}"
 	}
 	now := s.now().UnixMilli()
-	result, err := s.db.ExecContext(ctx, workflowStoreQuery(interruptRunGenerationQuery),
+	result, err := s.db.ExecContext(ctx, strings.TrimSuffix(interruptRunGenerationQuery, "\n"),
 		now,
 		now,
 		strings.TrimSpace(reason),
@@ -81,7 +82,7 @@ func (s *Store) InterruptTaskRun(ctx context.Context, taskID workflow.TaskID, ru
 		return RunRecord{}, errors.New("task id is required")
 	}
 	trimmedRunID := strings.TrimSpace(string(runID))
-	rows, err := s.db.QueryContext(ctx, workflowStoreQuery(interruptTaskRunCandidatesQuery), string(taskID), trimmedRunID, trimmedRunID)
+	rows, err := s.db.QueryContext(ctx, strings.TrimSuffix(interruptTaskRunCandidatesQuery, "\n"), string(taskID), trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -151,7 +152,7 @@ func (s *Store) ResumeTaskRunByID(ctx context.Context, taskID workflow.TaskID, r
 		return RunRecord{}, errors.New("task is canceled")
 	}
 	trimmedRunID := strings.TrimSpace(string(runID))
-	rows, err := s.db.QueryContext(ctx, workflowStoreQuery(resumeTaskRunCandidatesQuery), string(taskID), trimmedRunID, trimmedRunID)
+	rows, err := s.db.QueryContext(ctx, strings.TrimSuffix(resumeTaskRunCandidatesQuery, "\n"), string(taskID), trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -178,14 +179,14 @@ func (s *Store) ResumeTaskRunByID(ctx context.Context, taskID workflow.TaskID, r
 		return RunRecord{}, errors.New("task has multiple interrupted workflow runs; run_id is required")
 	}
 	snapshot := runStartSnapshot{}
-	if err := unmarshalJSON(candidates[0].snapshotJSON, &snapshot); err != nil {
+	if err := workflowjson.UnmarshalString(candidates[0].snapshotJSON, &snapshot); err != nil {
 		return RunRecord{}, err
 	}
 	if err := s.validateRunnableRole(snapshot.Node.SubagentRole); err != nil {
 		return RunRecord{}, err
 	}
 	now := s.now().UnixMilli()
-	result, err := s.db.ExecContext(ctx, workflowStoreQuery(resumeTaskRunQuery), now, candidates[0].id)
+	result, err := s.db.ExecContext(ctx, strings.TrimSuffix(resumeTaskRunQuery, "\n"), now, candidates[0].id)
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -232,7 +233,7 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 	}
 	workflowRecord := WorkflowRecord{ID: workflow.WorkflowID(workflowRow.ID), Name: workflowRow.Name, Description: workflowRow.Description, Version: workflowRow.Version}
 	snapshot := runStartSnapshot{}
-	if err := unmarshalJSON(run.RunStartSnapshotJson, &snapshot); err != nil {
+	if err := workflowjson.UnmarshalString(run.RunStartSnapshotJson, &snapshot); err != nil {
 		return RunStartContext{}, err
 	}
 	inputValues, err := s.resolveRunInputValues(ctx, run.PlacementID, taskRecordFromTask(task))
@@ -245,7 +246,7 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 	}
 	runMetadata := workflowRunMetadata{}
 	if strings.TrimSpace(run.MetadataJson) != "" {
-		if err := unmarshalJSON(run.MetadataJson, &runMetadata); err != nil {
+		if err := workflowjson.UnmarshalString(run.MetadataJson, &runMetadata); err != nil {
 			return RunStartContext{}, fmt.Errorf("resolve workflow run metadata: %w", err)
 		}
 	}
@@ -318,7 +319,7 @@ type runTransitionContext struct {
 func (s *Store) resolveRunTransitionContext(ctx context.Context, placementID string, runMetadataJSON string) (runTransitionContext, error) {
 	var contextMode string
 	var sourceRunID sql.NullString
-	err := s.db.QueryRowContext(ctx, workflowStoreQuery(resolveRunTransitionContextQuery), placementID).Scan(&contextMode, &sourceRunID)
+	err := s.db.QueryRowContext(ctx, strings.TrimSuffix(resolveRunTransitionContextQuery, "\n"), placementID).Scan(&contextMode, &sourceRunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runTransitionContext{ContextMode: workflow.ContextModeNewSession}, nil
 	}
@@ -331,7 +332,7 @@ func (s *Store) resolveRunTransitionContext(ctx context.Context, placementID str
 	}
 	runMetadata := workflowRunMetadata{}
 	if strings.TrimSpace(runMetadataJSON) != "" {
-		if err := unmarshalJSON(runMetadataJSON, &runMetadata); err != nil {
+		if err := workflowjson.UnmarshalString(runMetadataJSON, &runMetadata); err != nil {
 			return runTransitionContext{}, fmt.Errorf("resolve workflow run metadata: %w", err)
 		}
 		if strings.TrimSpace(runMetadata.ContextMode) != "" {
@@ -349,7 +350,7 @@ func (s *Store) resolveRunTransitionContext(ctx context.Context, placementID str
 		return runTransitionContext{}, err
 	}
 	sourceSnapshot := runStartSnapshot{}
-	if err := unmarshalJSON(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
+	if err := workflowjson.UnmarshalString(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
 		return runTransitionContext{}, err
 	}
 	resolved.SourceRunID = workflow.RunID(sourceRun.ID)
@@ -359,7 +360,7 @@ func (s *Store) resolveRunTransitionContext(ctx context.Context, placementID str
 }
 
 func (s *Store) resolveRunInputValues(ctx context.Context, placementID string, task TaskRecord) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, workflowStoreQuery(resolveRunInputValuesQuery), placementID)
+	rows, err := s.db.QueryContext(ctx, strings.TrimSuffix(resolveRunInputValuesQuery, "\n"), placementID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve workflow run input values: %w", err)
 	}
@@ -378,11 +379,11 @@ func (s *Store) resolveRunInputValues(ctx context.Context, placementID string, t
 		return nil, err
 	}
 	outputValues := map[string]string{}
-	if err := unmarshalJSON(outputValuesJSON, &outputValues); err != nil {
+	if err := workflowjson.UnmarshalString(outputValuesJSON, &outputValues); err != nil {
 		return nil, err
 	}
 	bindings := []workflow.InputBinding{}
-	if err := unmarshalJSON(inputBindingsJSON, &bindings); err != nil {
+	if err := workflowjson.UnmarshalString(inputBindingsJSON, &bindings); err != nil {
 		return nil, err
 	}
 	return resolveInputBindingValues(task, commentary, outputValues, bindings)
@@ -433,7 +434,7 @@ func taskInputBindingValue(task TaskRecord, field string) string {
 }
 
 func (s *Store) AttachRunSession(ctx context.Context, runID workflow.RunID, expectedGeneration int64, sessionID string) error {
-	result, err := s.db.ExecContext(ctx, workflowStoreQuery(attachRunSessionQuery),
+	result, err := s.db.ExecContext(ctx, strings.TrimSuffix(attachRunSessionQuery, "\n"),
 		s.now().UnixMilli(),
 		strings.TrimSpace(sessionID),
 		string(runID),
@@ -458,7 +459,7 @@ func (s *Store) SetRunWaitingAsk(ctx context.Context, runID workflow.RunID, expe
 	if trimmedAskID == "" {
 		return fmt.Errorf("ask id is required")
 	}
-	result, err := s.db.ExecContext(ctx, workflowStoreQuery(setRunWaitingAskQuery),
+	result, err := s.db.ExecContext(ctx, strings.TrimSuffix(setRunWaitingAskQuery, "\n"),
 		s.now().UnixMilli(),
 		trimmedAskID,
 		string(runID),
@@ -482,7 +483,7 @@ func (s *Store) ClearRunWaitingAsk(ctx context.Context, runID workflow.RunID, ex
 	if trimmedAskID == "" {
 		return fmt.Errorf("ask id is required")
 	}
-	result, err := s.db.ExecContext(ctx, workflowStoreQuery(clearRunWaitingAskQuery),
+	result, err := s.db.ExecContext(ctx, strings.TrimSuffix(clearRunWaitingAskQuery, "\n"),
 		s.now().UnixMilli(),
 		string(runID),
 		expectedGeneration,
@@ -511,7 +512,7 @@ func (s *Store) ResolveTaskWaitingAsk(ctx context.Context, taskID workflow.TaskI
 	if trimmedAskID == "" {
 		return RunRecord{}, errors.New("ask id is required")
 	}
-	rows, err := s.db.QueryContext(ctx, workflowStoreQuery(resolveTaskWaitingAskQuery), trimmedTaskID, trimmedAskID, trimmedRunID, trimmedRunID)
+	rows, err := s.db.QueryContext(ctx, strings.TrimSuffix(resolveTaskWaitingAskQuery, "\n"), trimmedTaskID, trimmedAskID, trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}

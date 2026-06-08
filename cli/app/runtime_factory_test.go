@@ -86,12 +86,9 @@ func TestBuildLocalRuntimeHandler_CoversAllLocalToolContracts(t *testing.T) {
 		if !ok || !def.AvailableInLocalRuntime() {
 			continue
 		}
-		handler, err := buildLocalRuntimeHandler(def, ctx)
+		_, err := buildLocalRuntimeHandler(def, ctx)
 		if err != nil {
 			t.Fatalf("build local runtime handler for %s: %v", id, err)
-		}
-		if handler.Name() != id {
-			t.Fatalf("handler/name mismatch: got %s want %s", handler.Name(), id)
 		}
 	}
 }

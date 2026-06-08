@@ -26,11 +26,26 @@ type defaultConfigLine struct {
 
 type registrySetting interface {
 	applyDefault(*settingsState)
-	initSources(map[string]string)
 	applyFile(settingsFile, string, *settingsState, map[string]string) error
+}
+
+type sourceInitializingSetting interface {
+	initSources(map[string]string)
+}
+
+type envApplyingSetting interface {
 	applyEnv(envLookup, *settingsState, map[string]string) error
+}
+
+type cliApplyingSetting interface {
 	applyCLI(LoadOptions, *settingsState, map[string]string) error
+}
+
+type fileKeyRegisteringSetting interface {
 	registerFileKeys(*fileKeyTree)
+}
+
+type defaultLineAppendingSetting interface {
 	appendDefaultLines(*[]defaultConfigLine, settingsState)
 }
 
@@ -168,7 +183,7 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) string { return state.Settings.ProviderOverride },
 			"BUILDER_PROVIDER_OVERRIDE",
 			func(opts LoadOptions) (string, bool, error) { return trimmedCLIString(opts.ProviderOverride) },
-			normalizeProviderOverride,
+			func(raw string) string { return strings.ToLower(strings.TrimSpace(raw)) },
 			settingDocOptions{}),
 		newStringSetting("openai_base_url", "",
 			func(state *settingsState, value string) { state.Settings.OpenAIBaseURL = value },
@@ -354,7 +369,9 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) WorkflowCompletionMode { return state.Settings.Workflow.CompletionMode },
 			"BUILDER_WORKFLOW_COMPLETION_MODE",
 			nil,
-			normalizeWorkflowCompletionMode,
+			func(raw string) WorkflowCompletionMode {
+				return WorkflowCompletionMode(strings.ToLower(strings.TrimSpace(raw)))
+			},
 			settingDocOptions{}),
 		newIntSetting("workflow.concurrency", defaultWorkflowConcurrency,
 			func(state *settingsState, value int) { state.Settings.Workflow.Concurrency = value },
@@ -422,7 +439,7 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) string { return state.Settings.Reviewer.ProviderOverride },
 			"BUILDER_REVIEWER_PROVIDER_OVERRIDE",
 			nil,
-			normalizeProviderOverride,
+			func(raw string) string { return strings.ToLower(strings.TrimSpace(raw)) },
 			settingDocOptions{
 				omitInTOML: true,
 				defaultValue: func(settingsState) any {
@@ -590,7 +607,6 @@ func newSettingsRegistry() settingsRegistry {
 			validateProviderOverrideValue,
 			validateOpenAIBaseURL,
 			validateProviderCapabilitiesProviderID,
-			validateThinkingLevel,
 			validateModelVerbosity,
 			validateTheme,
 			validateNotificationMethod,
@@ -612,7 +628,9 @@ func newSettingsRegistry() settingsRegistry {
 
 	registry.fileKeys = newFileKeyTree()
 	for _, setting := range registry.settings {
-		setting.registerFileKeys(registry.fileKeys)
+		if fileKeySetting, ok := setting.(fileKeyRegisteringSetting); ok {
+			fileKeySetting.registerFileKeys(registry.fileKeys)
+		}
 	}
 	registerSubagentFileKeys(registry.fileKeys, registry.settings)
 	return registry
@@ -629,7 +647,9 @@ func (r settingsRegistry) defaultState() settingsState {
 func (r settingsRegistry) defaultSourceMap() map[string]string {
 	sources := map[string]string{}
 	for _, setting := range r.settings {
-		setting.initSources(sources)
+		if sourceSetting, ok := setting.(sourceInitializingSetting); ok {
+			sourceSetting.initSources(sources)
+		}
 	}
 	return sources
 }
@@ -648,7 +668,11 @@ func (r settingsRegistry) applyFile(raw settingsFile, settingsPath string, state
 
 func (r settingsRegistry) applyEnv(lookup envLookup, state *settingsState, sources map[string]string) error {
 	for _, setting := range r.settings {
-		if err := setting.applyEnv(lookup, state, sources); err != nil {
+		envSetting, ok := setting.(envApplyingSetting)
+		if !ok {
+			continue
+		}
+		if err := envSetting.applyEnv(lookup, state, sources); err != nil {
 			return err
 		}
 	}
@@ -657,7 +681,11 @@ func (r settingsRegistry) applyEnv(lookup envLookup, state *settingsState, sourc
 
 func (r settingsRegistry) applyCLI(opts LoadOptions, state *settingsState, sources map[string]string) error {
 	for _, setting := range r.settings {
-		if err := setting.applyCLI(opts, state, sources); err != nil {
+		cliSetting, ok := setting.(cliApplyingSetting)
+		if !ok {
+			continue
+		}
+		if err := cliSetting.applyCLI(opts, state, sources); err != nil {
 			return err
 		}
 	}
@@ -676,7 +704,9 @@ func (r settingsRegistry) validate(state settingsState, sources map[string]strin
 func (r settingsRegistry) defaultLines(state settingsState) []defaultConfigLine {
 	lines := []defaultConfigLine{}
 	for _, setting := range r.settings {
-		setting.appendDefaultLines(&lines, state)
+		if lineSetting, ok := setting.(defaultLineAppendingSetting); ok {
+			lineSetting.appendDefaultLines(&lines, state)
+		}
 	}
 	return lines
 }
@@ -801,7 +831,7 @@ func (s scalarSetting[T]) initSources(sources map[string]string) {
 }
 
 func (s scalarSetting[T]) applyFile(raw settingsFile, settingsPath string, state *settingsState, sources map[string]string) error {
-	value, ok, err := s.decodeFile(raw, splitSettingKey(s.key))
+	value, ok, err := s.decodeFile(raw, strings.Split(s.key, "."))
 	if err != nil {
 		return err
 	}
@@ -872,7 +902,7 @@ func (s scalarSetting[T]) applyCLI(opts LoadOptions, state *settingsState, sourc
 }
 
 func (s scalarSetting[T]) registerFileKeys(tree *fileKeyTree) {
-	tree.allowPath(splitSettingKey(s.key))
+	tree.allowPath(strings.Split(s.key, "."))
 }
 
 func (s scalarSetting[T]) appendDefaultLines(lines *[]defaultConfigLine, state settingsState) {
@@ -880,7 +910,7 @@ func (s scalarSetting[T]) appendDefaultLines(lines *[]defaultConfigLine, state s
 		return
 	}
 	*lines = append(*lines, defaultConfigLine{
-		Path:      splitSettingKey(s.key),
+		Path:      strings.Split(s.key, "."),
 		Value:     s.defaultDocValue(state),
 		Commented: s.doc.commented,
 	})
@@ -915,7 +945,7 @@ func (toolsSetting) applyFile(raw settingsFile, settingsPath string, state *sett
 		}
 		enabled, ok := rawValue.(bool)
 		if !ok {
-			return invalidSettingsTypeError(append([]string{"tools"}, key), "boolean")
+			return fmt.Errorf("invalid settings key %s: expected %s", strings.Join(append([]string{"tools"}, key), "."), "boolean")
 		}
 		state.Settings.EnabledTools[id] = enabled
 		sources[toolSourceKey(id)] = "file"
@@ -975,8 +1005,6 @@ func (skillsSetting) applyDefault(state *settingsState) {
 	state.Settings.SkillToggles = map[string]bool{}
 }
 
-func (skillsSetting) initSources(map[string]string) {}
-
 func (skillsSetting) applyFile(raw settingsFile, settingsPath string, state *settingsState, sources map[string]string) error {
 	table, ok, err := lookupFileTable(raw, []string{"skills"})
 	if err != nil || !ok {
@@ -990,7 +1018,7 @@ func (skillsSetting) applyFile(raw settingsFile, settingsPath string, state *set
 	seenNormalized := make(map[string]string, len(keys))
 	for _, key := range keys {
 		rawValue := table[key]
-		normalized := normalizeSkillToggleKey(key)
+		normalized := strings.ToLower(strings.Join(strings.Fields(key), " "))
 		if normalized == "" {
 			return fmt.Errorf("invalid skills key in %s: %q", settingsPath, key)
 		}
@@ -999,7 +1027,7 @@ func (skillsSetting) applyFile(raw settingsFile, settingsPath string, state *set
 		}
 		enabled, ok := rawValue.(bool)
 		if !ok {
-			return invalidSettingsTypeError(append([]string{"skills"}, key), "boolean")
+			return fmt.Errorf("invalid settings key %s: expected %s", strings.Join(append([]string{"skills"}, key), "."), "boolean")
 		}
 		seenNormalized[normalized] = key
 		state.Settings.SkillToggles[normalized] = enabled
@@ -1008,27 +1036,15 @@ func (skillsSetting) applyFile(raw settingsFile, settingsPath string, state *set
 	return nil
 }
 
-func (skillsSetting) applyEnv(envLookup, *settingsState, map[string]string) error {
-	return nil
-}
-
-func (skillsSetting) applyCLI(LoadOptions, *settingsState, map[string]string) error {
-	return nil
-}
-
 func (skillsSetting) registerFileKeys(tree *fileKeyTree) {
 	tree.allowDynamicChildren([]string{"skills"}, func(key string) bool {
-		return normalizeSkillToggleKey(key) != ""
+		return strings.ToLower(strings.Join(strings.Fields(key), " ")) != ""
 	}, nil)
 }
-
-func (skillsSetting) appendDefaultLines(*[]defaultConfigLine, settingsState) {}
 
 func (subagentsSetting) applyDefault(state *settingsState) {
 	state.Settings.Subagents = map[string]SubagentRole{}
 }
-
-func (subagentsSetting) initSources(map[string]string) {}
 
 func (subagentsSetting) applyFile(raw settingsFile, settingsPath string, state *settingsState, _ map[string]string) error {
 	table, ok, err := lookupFileTable(raw, []string{"subagents"})
@@ -1043,7 +1059,7 @@ func (subagentsSetting) applyFile(raw settingsFile, settingsPath string, state *
 	seen := make(map[string]string, len(keys))
 	for _, key := range keys {
 		rawValue := table[key]
-		normalized := normalizeSubagentRoleKey(key)
+		normalized := NormalizeSubagentRole(key)
 		if normalized == "" {
 			return fmt.Errorf("invalid subagents key in %s: %q", settingsPath, key)
 		}
@@ -1052,7 +1068,7 @@ func (subagentsSetting) applyFile(raw settingsFile, settingsPath string, state *
 		}
 		roleTable, ok := asSettingsFile(rawValue)
 		if !ok {
-			return invalidSettingsTypeError([]string{"subagents", key}, "table")
+			return fmt.Errorf("invalid settings key %s: expected %s", strings.Join([]string{"subagents", key}, "."), "table")
 		}
 		role, err := parseSubagentRole(roleTable, settingsPath, key)
 		if err != nil {
@@ -1063,18 +1079,6 @@ func (subagentsSetting) applyFile(raw settingsFile, settingsPath string, state *
 	}
 	return nil
 }
-
-func (subagentsSetting) applyEnv(envLookup, *settingsState, map[string]string) error {
-	return nil
-}
-
-func (subagentsSetting) applyCLI(LoadOptions, *settingsState, map[string]string) error {
-	return nil
-}
-
-func (subagentsSetting) registerFileKeys(*fileKeyTree) {}
-
-func (subagentsSetting) appendDefaultLines(*[]defaultConfigLine, settingsState) {}
 
 func registerSubagentFileKeys(tree *fileKeyTree, settings []registrySetting) {
 	if tree == nil {
@@ -1087,7 +1091,9 @@ func registerSubagentFileKeys(tree *fileKeyTree, settings []registrySetting) {
 		if _, ok := setting.(subagentsSetting); ok {
 			continue
 		}
-		setting.registerFileKeys(template)
+		if fileKeySetting, ok := setting.(fileKeyRegisteringSetting); ok {
+			fileKeySetting.registerFileKeys(template)
+		}
 	}
 	tree.allowDynamicChildren([]string{"subagents"}, func(key string) bool {
 		return IsSubagentRoleNameShape(key)
@@ -1164,7 +1170,9 @@ func subagentRoleKeyTree(settings []registrySetting) *fileKeyTree {
 		if _, ok := setting.(subagentsSetting); ok {
 			continue
 		}
-		setting.registerFileKeys(tree)
+		if fileKeySetting, ok := setting.(fileKeyRegisteringSetting); ok {
+			fileKeySetting.registerFileKeys(tree)
+		}
 	}
 	return tree
 }
@@ -1176,7 +1184,7 @@ func parseSubagentDescription(raw settingsFile) (string, error) {
 	}
 	text, ok := value.(string)
 	if !ok {
-		return "", invalidSettingsTypeError([]string{"description"}, "string")
+		return "", fmt.Errorf("invalid settings key %s: expected %s", strings.Join([]string{"description"}, "."), "string")
 	}
 	description := SanitizeSubagentDescription(text)
 	if len([]rune(description)) > MaxSubagentDescriptionChars {
@@ -1276,7 +1284,7 @@ func lookupFileValue(raw settingsFile, path []string) (any, bool, error) {
 		}
 		nested, ok := asSettingsFile(value)
 		if !ok {
-			return nil, false, invalidSettingsTypeError(path[:index+1], "table")
+			return nil, false, fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path[:index+1], "."), "table")
 		}
 		current = nested
 	}
@@ -1290,7 +1298,7 @@ func lookupFileString(raw settingsFile, path []string) (string, bool, error) {
 	}
 	text, ok := value.(string)
 	if !ok {
-		return "", false, invalidSettingsTypeError(path, "string")
+		return "", false, fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path, "."), "string")
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -1306,7 +1314,7 @@ func lookupFileBool(raw settingsFile, path []string) (bool, bool, error) {
 	}
 	parsed, ok := value.(bool)
 	if !ok {
-		return false, false, invalidSettingsTypeError(path, "boolean")
+		return false, false, fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path, "."), "boolean")
 	}
 	return parsed, true, nil
 }
@@ -1318,7 +1326,7 @@ func lookupFileInt(raw settingsFile, path []string) (int, bool, error) {
 	}
 	parsed, ok := coerceTOMLInt(value)
 	if !ok {
-		return 0, false, invalidSettingsTypeError(path, "integer")
+		return 0, false, fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path, "."), "integer")
 	}
 	return parsed, true, nil
 }
@@ -1330,7 +1338,7 @@ func lookupFileTable(raw settingsFile, path []string) (settingsFile, bool, error
 	}
 	table, ok := asSettingsFile(value)
 	if !ok {
-		return nil, false, invalidSettingsTypeError(path, "table")
+		return nil, false, fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path, "."), "table")
 	}
 	return table, true, nil
 }
@@ -1364,20 +1372,12 @@ func coerceTOMLInt(value any) (int, bool) {
 	}
 }
 
-func splitSettingKey(key string) []string {
-	return strings.Split(key, ".")
-}
-
 func toolSourceKey(id toolspec.ID) string {
 	return "tools." + toolspec.ConfigName(id)
 }
 
 func skillSourceKey(name string) string {
-	return "skills." + normalizeSkillToggleKey(name)
-}
-
-func normalizeSkillToggleKey(raw string) string {
-	return strings.ToLower(strings.Join(strings.Fields(raw), " "))
+	return "skills." + strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
 func defaultEnabledToolMap() map[toolspec.ID]bool {
@@ -1406,10 +1406,6 @@ func positiveCLIInt(raw int) (int, bool, error) {
 	return raw, true, nil
 }
 
-func invalidSettingsTypeError(path []string, want string) error {
-	return fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path, "."), want)
-}
-
 func renderTOMLValue(value any) string {
 	switch v := value.(type) {
 	case string:
@@ -1435,7 +1431,7 @@ func renderTOMLValue(value any) string {
 
 func filterDefaultLines(lines []defaultConfigLine, section string) []defaultConfigLine {
 	filtered := []defaultConfigLine{}
-	sectionPath := splitSettingKey(section)
+	sectionPath := strings.Split(section, ".")
 	for _, line := range lines {
 		if section == "" {
 			if len(line.Path) == 1 {
@@ -1452,7 +1448,7 @@ func filterDefaultLines(lines []defaultConfigLine, section string) []defaultConf
 
 func filterExactSectionLines(lines []defaultConfigLine, section string) []defaultConfigLine {
 	filtered := []defaultConfigLine{}
-	sectionPath := splitSettingKey(section)
+	sectionPath := strings.Split(section, ".")
 	for _, line := range lines {
 		if len(line.Path) == len(sectionPath)+1 && hasPathPrefix(line.Path, sectionPath) {
 			filtered = append(filtered, line)

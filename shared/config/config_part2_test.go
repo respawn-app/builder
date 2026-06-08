@@ -239,13 +239,13 @@ supports_vision_inputs = false
 }
 
 func TestSettingsTOMLPreservesReviewerModelCapabilityFalseOverride(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.ModelCapabilities.SupportsReasoningEffort = true
 	settings.ModelCapabilities.SupportsVisionInputs = true
 	settings.Reviewer.ModelCapabilities.SupportsReasoningEffort = false
 	settings.Reviewer.ModelCapabilities.SupportsVisionInputs = false
 
-	rendered := settingsTOML(settings)
+	rendered := settingsTOMLWithRenderingOptions(settings, true, nil, nil)
 	if !strings.Contains(rendered, "[reviewer.model_capabilities]") {
 		t.Fatalf("expected reviewer model capabilities section, got:\n%s", rendered)
 	}
@@ -258,7 +258,7 @@ func TestSettingsTOMLPreservesReviewerModelCapabilityFalseOverride(t *testing.T)
 }
 
 func TestSettingsTOMLPreservesReviewerProviderCapabilityFalseOverride(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
 		ProviderID:                     "main-provider",
 		SupportsResponsesAPI:           true,
@@ -272,7 +272,7 @@ func TestSettingsTOMLPreservesReviewerProviderCapabilityFalseOverride(t *testing
 		SupportsPromptCacheKey:         false,
 	}
 
-	rendered := settingsTOML(settings)
+	rendered := settingsTOMLWithRenderingOptions(settings, true, nil, nil)
 	if !strings.Contains(rendered, "[reviewer.provider_capabilities]") {
 		t.Fatalf("expected reviewer provider capabilities section, got:\n%s", rendered)
 	}
@@ -288,7 +288,7 @@ func TestSettingsTOMLPreservesReviewerProviderCapabilityFalseOverride(t *testing
 }
 
 func TestNormalizeSettingsForPersistenceWithSourcesPreservesReviewerCapabilityFalse(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.ModelCapabilities.SupportsReasoningEffort = true
 	settings.ModelCapabilities.SupportsVisionInputs = true
 	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
@@ -322,7 +322,7 @@ func TestNormalizeSettingsForPersistenceWithSourcesPreservesReviewerCapabilityFa
 }
 
 func TestNormalizeSettingsForPersistencePreservesReviewerCapabilityFalseWithoutSources(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.ModelCapabilities.SupportsReasoningEffort = true
 	settings.ModelCapabilities.SupportsVisionInputs = true
 	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
@@ -349,7 +349,7 @@ func TestNormalizeSettingsForPersistencePreservesReviewerCapabilityFalseWithoutS
 }
 
 func TestValidateSettingsWithSourcesAllowsSubagentReviewerAnthropicOverride(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.Reviewer.Model = settings.Model
 	settings.Reviewer.ProviderOverride = "anthropic"
 

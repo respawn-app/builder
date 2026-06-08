@@ -62,7 +62,7 @@ func publishProjectedRuntimeEvent(stop <-chan struct{}, out chan<- clientui.Even
 }
 
 func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
-	return a.handleProjectedRuntimeEvent(projectRuntimeEvent(evt))
+	return a.applyProjectedRuntimeEvent(projectRuntimeEvent(evt), true).cmd
 }
 
 func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.Cmd {

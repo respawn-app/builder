@@ -36,8 +36,12 @@ type Definition struct {
 }
 
 type Handler interface {
-	Name() toolspec.ID
 	Call(ctx context.Context, c Call) (Result, error)
+}
+
+type HandlerRegistration struct {
+	ID      toolspec.ID
+	Handler Handler
 }
 
 type Registry struct {
@@ -46,7 +50,7 @@ type Registry struct {
 	order  []toolspec.ID
 }
 
-func NewRegistry(handlers ...Handler) *Registry {
+func NewRegistry(handlers ...HandlerRegistration) *Registry {
 	r := &Registry{}
 	r.mustReplaceLocked(handlers)
 	return r
@@ -70,7 +74,7 @@ func (r *Registry) Definitions() []Definition {
 	return out
 }
 
-func (r *Registry) ReplaceHandlers(handlers ...Handler) {
+func (r *Registry) ReplaceHandlers(handlers ...HandlerRegistration) {
 	if r == nil {
 		panic("tool registry is required")
 	}
@@ -79,18 +83,21 @@ func (r *Registry) ReplaceHandlers(handlers ...Handler) {
 	r.mustReplaceLocked(handlers)
 }
 
-func (r *Registry) mustReplaceLocked(handlers []Handler) {
+func (r *Registry) mustReplaceLocked(handlers []HandlerRegistration) {
 	m := make(map[toolspec.ID]Handler, len(handlers))
 	order := make([]toolspec.ID, 0, len(handlers))
 	for _, h := range handlers {
-		id := h.Name()
+		id := h.ID
 		if _, ok := definitionFor(id); !ok {
 			panic(fmt.Sprintf("tool %q is missing centralized definition", id))
+		}
+		if h.Handler == nil {
+			panic(fmt.Sprintf("tool %q handler is required", id))
 		}
 		if _, exists := m[id]; exists {
 			panic(fmt.Sprintf("duplicate tool handler registration for %q", id))
 		}
-		m[id] = h
+		m[id] = h.Handler
 		order = append(order, id)
 	}
 	r.byName = m

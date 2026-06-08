@@ -14,6 +14,7 @@ import (
 	"builder/server/metadata/sqlitegen"
 	"builder/server/session"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 	"builder/shared/config"
 )
 
@@ -736,7 +737,7 @@ func TestCompleteRunCreatesTargetRunForContinueSessionContextMode(t *testing.T) 
 		SourceRunID     string `json:"source_run_id"`
 		SourceSessionID string `json:"source_session_id"`
 	}{}
-	if err := unmarshalJSON(runMetadataJSON, &runMetadata); err != nil {
+	if err := workflowjson.UnmarshalString(runMetadataJSON, &runMetadata); err != nil {
 		t.Fatalf("unmarshal target run metadata: %v", err)
 	}
 	if runMetadata.ContextMode != string(workflow.ContextModeContinueSession) || runMetadata.SourceRunID != string(started.RunID) {
@@ -766,7 +767,7 @@ func TestRunStartContextResolvesPriorTransitionParameters(t *testing.T) {
 	if input.PriorParameterValues["next"]["summary"] != "plan summary" {
 		t.Fatalf("prior parameter values = %+v, want next.summary", input.PriorParameterValues)
 	}
-	mutatedOutputs, err := marshalJSON(map[string]string{"summary": "mutated later"})
+	mutatedOutputs, err := workflowjson.MarshalString(map[string]string{"summary": "mutated later"})
 	if err != nil {
 		t.Fatalf("marshal mutated outputs: %v", err)
 	}
@@ -858,7 +859,7 @@ func TestPriorTransitionParameterApprovalFreezesOutputValue(t *testing.T) {
 	if !pending.RequiresApproval {
 		t.Fatalf("completion result = %+v, want pending approval", pending)
 	}
-	mutatedOutputs, err := marshalJSON(map[string]string{"summary": "mutated before approval"})
+	mutatedOutputs, err := workflowjson.MarshalString(map[string]string{"summary": "mutated before approval"})
 	if err != nil {
 		t.Fatalf("marshal mutated outputs: %v", err)
 	}
@@ -1773,11 +1774,11 @@ func TestJoinArrivalsKeepMultipleJoinEdgesForOneBranchPlacement(t *testing.T) {
 	if len(first.PlacementIDs) != 0 || len(first.RunIDs) != 0 {
 		t.Fatalf("first branch result = %+v, want join waiting for missing branch", first)
 	}
-	if err := insertTransitionEdgeSnapshot(ctx, store.queries, string(first.TransitionID), edgeContractSnapshot{
+	if err := insertTransitionEdgeSnapshotWithMetadata(ctx, store.queries, string(first.TransitionID), edgeContractSnapshot{
 		ID:         alternateProviderEdgeID,
 		Key:        "join_a_alt",
 		TargetNode: nodeSnapshot(join),
-	}, "", "applied", resolvedContextSourceRun{}); err != nil {
+	}, "", "applied", workflowRunMetadata{}); err != nil {
 		t.Fatalf("insert alternate transition edge snapshot: %v", err)
 	}
 	var batchID string
@@ -2172,11 +2173,11 @@ LIMIT 1`, string(transitions[0].ID)).Scan(&inputBindingsJSON, &outputRequirement
 		t.Fatalf("select transition edge snapshot: %v", err)
 	}
 	inputBindings := []workflow.InputBinding{}
-	if err := unmarshalJSON(inputBindingsJSON, &inputBindings); err != nil {
+	if err := workflowjson.UnmarshalString(inputBindingsJSON, &inputBindings); err != nil {
 		t.Fatalf("unmarshal input bindings: %v", err)
 	}
 	outputRequirements := []workflow.OutputRequirement{}
-	if err := unmarshalJSON(outputRequirementsJSON, &outputRequirements); err != nil {
+	if err := workflowjson.UnmarshalString(outputRequirementsJSON, &outputRequirements); err != nil {
 		t.Fatalf("unmarshal output requirements: %v", err)
 	}
 	if len(inputBindings) != 0 {
@@ -2428,7 +2429,7 @@ func mutateRunStartSnapshot(t *testing.T, ctx context.Context, store *Store, run
 		t.Fatalf("GetTaskRun: %v", err)
 	}
 	snapshot := runStartSnapshot{}
-	if err := unmarshalJSON(row.RunStartSnapshotJson, &snapshot); err != nil {
+	if err := workflowjson.UnmarshalString(row.RunStartSnapshotJson, &snapshot); err != nil {
 		t.Fatalf("unmarshal snapshot: %v", err)
 	}
 	mutate(t, &snapshot)
@@ -2448,7 +2449,7 @@ func nodeSnapshotByID(t *testing.T, snapshot runStartSnapshot, nodeID workflow.N
 
 func updateRunStartSnapshot(t *testing.T, ctx context.Context, store *Store, runID workflow.RunID, snapshot runStartSnapshot) {
 	t.Helper()
-	snapshotJSON, err := marshalJSON(snapshot)
+	snapshotJSON, err := workflowjson.MarshalString(snapshot)
 	if err != nil {
 		t.Fatalf("marshal snapshot: %v", err)
 	}
@@ -2669,7 +2670,7 @@ func TestRunStartContextHandlesMissingInputEdgeAndRejectsNonArrayInputJSON(t *te
 	if err != nil {
 		t.Fatalf("StartTask join inputs: %v", err)
 	}
-	joinInputsJSON, err := marshalJSON([]workflow.InputBinding{{Name: "joined", Source: workflow.BindingSourceJoin, Field: "aggregate"}})
+	joinInputsJSON, err := workflowjson.MarshalString([]workflow.InputBinding{{Name: "joined", Source: workflow.BindingSourceJoin, Field: "aggregate"}})
 	if err != nil {
 		t.Fatalf("marshal join inputs: %v", err)
 	}

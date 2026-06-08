@@ -138,7 +138,7 @@ func TestCurrentInputTokensPreciselyRechecksAfterTranscriptMutation(t *testing.T
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 240, contextWindow: 400000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestContextUsagePrefersFreshPreciseCurrentTokens(t *testing.T) {
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 180, contextWindow: 400000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	eng.setLastUsage(llm.Usage{InputTokens: 900, OutputTokens: 100, WindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "precise me"}); err != nil {
 		t.Fatalf("append message: %v", err)
@@ -191,7 +191,7 @@ func TestCurrentInputTokensPreciselyRechecksAfterFastModeToggle(t *testing.T) {
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 180, contextWindow: 400000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestCurrentInputTokensPreciselyIfDueSkipsBackendFarBelowCheckpoint(t *testi
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 999, contextWindow: 400000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestCurrentInputTokensPreciselyIfCriticalForcesRefreshAfterSignificantMutat
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 180, contextWindow: 400000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnceOnCountFailure(t 
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{countErr: errors.New("chatgpt-codex status 404"), contextWindow: 400000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnceOnCountFailure(t 
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	reopened, err := New(reopenedStore, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	reopened, err := New(reopenedStore, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("reopen engine: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestCurrentInputTokensPreciselySkipsUnsupportedCountClient(t *testing.T) {
 
 	supported := false
 	client := &preciseCompactionClient{inputTokenCount: 123, contextWindow: 400000, countSupported: &supported}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnSupportProbeFailure
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 123, contextWindow: 400000, supportErr: errors.New("oauth metadata unavailable")}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}

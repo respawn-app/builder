@@ -18,7 +18,7 @@ import (
 
 func refreshSlashCommandFilterForTest(t *testing.T, m *uiModel) {
 	t.Helper()
-	cmd := m.refreshSlashCommandFilterFromInput()
+	cmd := m.refreshSlashCommandFilterFromInputWithAuth(true)
 	for _, msg := range collectCmdMessages(t, cmd) {
 		next, _ := m.Update(msg)
 		m = next.(*uiModel)
@@ -150,7 +150,7 @@ func newSlashPickerScrollTestModel() *uiModel {
 	}
 	m := newProjectedStaticUIModel(WithUICommandRegistry(r))
 	m.input = "/"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 	return m
 }
 
@@ -291,7 +291,7 @@ func TestBusyEnterRunsExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
 	if !client.setFastModeArg {
 		t.Fatal("expected runtime client fast mode setter to receive true")
 	}
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Fast mode enabled") {
 		t.Fatalf("expected busy /fast success in status line, got %q", status)
 	}
@@ -320,7 +320,7 @@ func TestBusyTabBackWithoutParentShowsLocalErrorAndDoesNotQueue(t *testing.T) {
 	if !strings.Contains(updated.transientStatus, "No parent session available") {
 		t.Fatalf("expected transient error for rejected queued /back, got %q", updated.transientStatus)
 	}
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "No parent session available") {
 		t.Fatalf("expected queued /back error in status line, got %q", status)
 	}
@@ -366,7 +366,7 @@ func TestResumeSlashCommandShowsErrorWithoutOtherSessions(t *testing.T) {
 	if !strings.Contains(updated.transientStatus, resumeCommandUnavailableMessage) {
 		t.Fatalf("expected unavailable /resume status, got %q", updated.transientStatus)
 	}
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, resumeCommandUnavailableMessage) {
 		t.Fatalf("expected unavailable /resume status line, got %q", status)
 	}
@@ -576,7 +576,7 @@ func TestSlashCommandPickerLoadsAuthStateOncePerSlashSession(t *testing.T) {
 	}
 
 	m.input = "ordinary prompt"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 	m.input = "/"
 	refreshSlashCommandFilterForTest(t, m)
 	if got := store.loads - loadsAfterInit; got != 2 {
@@ -637,7 +637,7 @@ func TestSlashCommandPickerAuthRefreshSingleFlightsAfterScheduledCommand(t *test
 		t.Fatal("replaceMainInput must not mark an unscheduled auth refresh in flight")
 	}
 
-	cmd := m.refreshSlashCommandFilterFromInput()
+	cmd := m.refreshSlashCommandFilterFromInputWithAuth(true)
 	if cmd == nil {
 		t.Fatal("expected auth slash refresh command after state-only input replacement")
 	}
@@ -645,7 +645,7 @@ func TestSlashCommandPickerAuthRefreshSingleFlightsAfterScheduledCommand(t *test
 		t.Fatal("expected scheduled auth slash refresh to be marked loading")
 	}
 	m.input = "/lo"
-	secondCmd := m.refreshSlashCommandFilterFromInput()
+	secondCmd := m.refreshSlashCommandFilterFromInputWithAuth(true)
 	if secondCmd != nil {
 		t.Fatal("did not expect concurrent auth slash refresh while first is loading")
 	}
@@ -694,7 +694,7 @@ func (s *countingAuthStore) Save(_ context.Context, state auth.State) error {
 func TestSlashCommandPickerShowsCopyOnlyWhenFinalAnswerIsAvailable(t *testing.T) {
 	hidden := newProjectedStaticUIModel()
 	hidden.input = "/co"
-	hidden.refreshSlashCommandFilterFromInput()
+	hidden.refreshSlashCommandFilterFromInputWithAuth(true)
 	if state := hidden.slashCommandPicker(); slashPickerContainsCommand(state, "copy") {
 		t.Fatalf("did not expect /copy without a final answer, got %+v", slashPickerCommandNames(state))
 	}
@@ -702,7 +702,7 @@ func TestSlashCommandPickerShowsCopyOnlyWhenFinalAnswerIsAvailable(t *testing.T)
 	visible := newProjectedStaticUIModel()
 	visible.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "done", Phase: llm.MessagePhaseFinal}}
 	visible.input = "/co"
-	visible.refreshSlashCommandFilterFromInput()
+	visible.refreshSlashCommandFilterFromInputWithAuth(true)
 	state := visible.slashCommandPicker()
 	if !state.visible {
 		t.Fatal("expected slash picker visible")
@@ -718,7 +718,7 @@ func TestSlashCommandPickerUsesCachedRuntimeStatusForCopy(t *testing.T) {
 	}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.input = "/co"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	state := m.slashCommandPicker()
 	if !slashPickerContainsCommand(state, "copy") {
@@ -733,7 +733,7 @@ func TestRollbackEditHidesSlashCommandPicker(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	testSetRollbackEditing(m, 0, 1)
 	m.input = "/sta"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	state := m.slashCommandPicker()
 	if state.visible {
@@ -754,7 +754,7 @@ func TestRollbackEditRejectsSlashCommandSubmitAndAutocomplete(t *testing.T) {
 	if updated.isBusy() {
 		t.Fatal("did not expect slash command to submit while editing")
 	}
-	if updated.status.isOpen() {
+	if updated.status.open {
 		t.Fatal("did not expect /status to open while editing")
 	}
 	if updated.input != "/status" {
@@ -773,7 +773,7 @@ func TestRollbackEditRejectsSlashCommandSubmitAndAutocomplete(t *testing.T) {
 	if updated.transientStatus != slashCommandEditModeError {
 		t.Fatalf("expected edit-mode slash autocomplete error, got %q", updated.transientStatus)
 	}
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, slashCommandEditModeError) {
 		t.Fatalf("expected edit-mode slash error in status line, got %q", status)
 	}

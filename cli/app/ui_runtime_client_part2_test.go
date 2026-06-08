@@ -11,12 +11,13 @@ import (
 	"builder/shared/serverapi"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestRuntimeClientMainViewDoesNotRefreshCachedSnapshotBehindUIBack(t *testing.T) {
@@ -403,7 +404,7 @@ func TestRuntimeClientSubmitTurnRecoveryContinuesFirstPrompt(t *testing.T) {
 	model := newProjectedClosedUIModel(runtimeClient)
 	model.startupCmds = nil
 
-	submitCmd := model.inputController().startSubmissionWithPromptHistory("hello after restart")
+	submitCmd := model.inputController().startSubmissionWithPromptHistoryAndQueuePositionAndID("hello after restart", preSubmitQueueBack, "")
 	if submitCmd == nil {
 		t.Fatal("expected submit command")
 	}
@@ -535,12 +536,7 @@ func TestRuntimeUnavailableHydrationRecoveryResumesOngoingEventFence(t *testing.
 	model.startupCmds = nil
 	model.waitRuntimeEventAfterHydration = true
 
-	cmd := model.startRuntimeTranscriptPageRequest(
-		clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail},
-		false,
-		runtimeTranscriptSyncCauseContinuityRecovery,
-		clientui.TranscriptRecoveryCauseStreamGap,
-	)
+	cmd := model.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, false, runtimeTranscriptSyncCauseContinuityRecovery, clientui.TranscriptRecoveryCauseStreamGap)).cmd
 	if cmd == nil {
 		t.Fatal("expected hydration command")
 	}

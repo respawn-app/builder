@@ -10,14 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
-	return c.applyCommandResultWithPreSubmitQueuePosition(commandResult, preSubmitQueueBack)
-}
-
-func (c uiInputController) applyQueuedCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
-	return c.applyCommandResultWithPreSubmitQueuePosition(commandResult, preSubmitQueueFront)
-}
-
 func (c uiInputController) applyCommandResultWithPreSubmitQueuePosition(commandResult commands.Result, queuePosition preSubmitQueuePosition) (tea.Model, tea.Cmd) {
 	m := c.model
 	if commandResult.SubmitUser {
@@ -36,7 +28,7 @@ func (c uiInputController) applyCommandResultWithPreSubmitQueuePosition(commandR
 	}
 	prefixCmd := tea.Cmd(nil)
 	if commandResult.Text != "" {
-		prefixCmd = c.appendSystemFeedback(commandResult.Text)
+		prefixCmd = c.model.appendLocalEntryWithNoticeID("system", commandResult.Text, "")
 	}
 
 	switch commandResult.Action {
@@ -72,7 +64,7 @@ func (c uiInputController) applyCommandResultWithPreSubmitQueuePosition(commandR
 		next, cmd := c.handleAutoCompactionCommand(commandResult.AutoCompactionMode)
 		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionCompact:
-		return m, sequenceCmds(prefixCmd, c.startCompaction(commandResult.Args))
+		return m, sequenceCmds(prefixCmd, c.startCompactionWithOrigin(commandResult.Args, uiCompactionOriginManual))
 	case commands.ActionStatus:
 		return m, sequenceCmds(prefixCmd, c.startStatusFlowCmd())
 	case commands.ActionGoal:
@@ -105,7 +97,10 @@ const resumeCommandUnavailableMessage = "No other sessions available"
 func (c uiInputController) handleResumeCommand() (tea.Model, tea.Cmd) {
 	m := c.model
 	if !m.resumeCommandAvailable() {
-		return m, c.appendErrorFeedbackWithStatus(resumeCommandUnavailableMessage, c.showErrorStatus(resumeCommandUnavailableMessage))
+		return m, sequenceCmds(
+			c.model.appendLocalEntryWithNoticeID("error", resumeCommandUnavailableMessage, ""),
+			c.model.sendTransientStatusWithNoticeID(resumeCommandUnavailableMessage, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""),
+		)
 	}
 	m.exitAction = UIActionResume
 	return m, tea.Quit
@@ -115,24 +110,12 @@ func (c uiInputController) handleBackCommand() (tea.Model, tea.Cmd) {
 	m := c.model
 	status := m.cachedRuntimeStatus()
 	if strings.TrimSpace(status.ParentSessionID) == "" {
-		return m, c.appendSystemFeedback("No parent session available")
+		return m, c.model.appendLocalEntryWithNoticeID("system", "No parent session available", "")
 	}
-	m.nextSessionInitialInput = m.backTeleportInput()
+	m.nextSessionInitialInput = m.latestAssistantFinalAnswerFromStatus()
 	m.nextSessionID = strings.TrimSpace(status.ParentSessionID)
 	m.exitAction = UIActionOpenSession
 	return m, tea.Quit
-}
-
-func (m *uiModel) backTeleportInput() string {
-	return m.latestAssistantFinalAnswer()
-}
-
-func (m *uiModel) latestAssistantFinalAnswer() string {
-	return m.latestAssistantFinalAnswerFromStatus()
-}
-
-func (m *uiModel) cachedLatestAssistantFinalAnswer() string {
-	return m.latestAssistantFinalAnswerFromStatus()
 }
 
 func (m *uiModel) latestAssistantFinalAnswerFromStatus() string {
@@ -147,14 +130,14 @@ func (m *uiModel) latestAssistantFinalAnswerFromStatus() string {
 }
 
 func (m *uiModel) hasAssistantFinalAnswerToCopy() bool {
-	return strings.TrimSpace(m.cachedLatestAssistantFinalAnswer()) != ""
+	return strings.TrimSpace(m.latestAssistantFinalAnswerFromStatus()) != ""
 }
 
 func (c uiInputController) handleCopyCommand() (tea.Model, tea.Cmd) {
 	m := c.model
-	text := m.latestAssistantFinalAnswer()
+	text := m.latestAssistantFinalAnswerFromStatus()
 	if strings.TrimSpace(text) == "" {
-		return m, c.showErrorStatus("No final answer available to copy")
+		return m, c.model.sendTransientStatusWithNoticeID("No final answer available to copy", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	return m, m.copyClipboardTextCmd(text)
 }
@@ -166,7 +149,7 @@ func (c uiInputController) handleSessionNameCommand(sessionName string) (tea.Mod
 		return m, m.runtimeControlCommand(runtimeControlSetSessionName, sessionName, false, "")
 	}
 	m.sessionName = sessionName
-	return m, tea.SetWindowTitle(m.windowTitle())
+	return m, tea.SetWindowTitle(sessionTitle(m.sessionName))
 }
 
 func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Model, tea.Cmd) {
@@ -180,19 +163,19 @@ func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Mod
 		if current == "" {
 			current = "unknown"
 		}
-		return m, c.appendSystemFeedback("Thinking level is " + current)
+		return m, c.model.appendLocalEntryWithNoticeID("system", "Thinking level is "+current, "")
 	}
 
 	normalized, ok := clientui.NormalizeThinkingLevel(requested)
 	if !ok {
 		errText := "invalid thinking level " + strconv.Quote(requested) + " (expected low|medium|high|xhigh)"
-		return m, c.appendErrorFeedback(errText)
+		return m, c.model.appendLocalEntryWithNoticeID("error", errText, "")
 	}
 	if m.hasRuntimeClient() {
 		return m, m.runtimeControlCommand(runtimeControlSetThinkingLevel, normalized, false, "")
 	}
 	m.thinkingLevel = normalized
-	return m, c.appendSystemFeedback("Thinking level set to " + m.thinkingLevel)
+	return m, c.model.appendLocalEntryWithNoticeID("system", "Thinking level set to "+m.thinkingLevel, "")
 }
 
 func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, tea.Cmd) {
@@ -201,7 +184,7 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 	currentEnabled = m.runtimeControlPendingEnabled(runtimeControlSetFastMode, m.sessionID, currentEnabled)
 	if !available {
 		errText := "Fast mode is only available for OpenAI-based Responses providers"
-		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+		return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", errText, ""), c.model.sendTransientStatusWithNoticeID(errText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 
 	requested = strings.ToLower(strings.TrimSpace(requested))
@@ -211,12 +194,12 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 		if currentEnabled {
 			status = "on"
 		}
-		return m, c.appendSystemFeedback("Fast mode is " + status)
+		return m, c.model.appendLocalEntryWithNoticeID("system", "Fast mode is "+status, "")
 	case "", "on", "off":
 		// supported
 	default:
 		errText := "Usage: /fast [on|off|status]"
-		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+		return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", errText, ""), c.model.sendTransientStatusWithNoticeID(errText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 
 	targetEnabled := currentEnabled
@@ -255,7 +238,7 @@ func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Mo
 		targetEnabled = false
 	default:
 		errText := "invalid supervisor mode " + strconv.Quote(requested) + " (expected on|off)"
-		return m, c.appendErrorFeedback(errText)
+		return m, c.model.appendLocalEntryWithNoticeID("error", errText, "")
 	}
 
 	changed := false
@@ -278,7 +261,7 @@ func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Mo
 func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Model, tea.Cmd) {
 	m := c.model
 	requested = strings.ToLower(strings.TrimSpace(requested))
-	currentEnabled := m.autoCompactionState()
+	currentEnabled := m.cachedRuntimeStatus().AutoCompactionEnabled
 	currentEnabled = m.runtimeControlPendingEnabled(runtimeControlSetAutoCompaction, m.sessionID, currentEnabled)
 	currentCompactionMode := "native"
 	if m.hasRuntimeClient() {
@@ -294,7 +277,7 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 		targetEnabled = false
 	default:
 		errText := "invalid autocompaction mode " + strconv.Quote(requested) + " (expected on|off)"
-		return m, c.appendErrorFeedback(errText)
+		return m, c.model.appendLocalEntryWithNoticeID("error", errText, "")
 	}
 
 	changed := false

@@ -10,15 +10,15 @@ import (
 )
 
 type PromptAssistantMessage struct {
-	Content string
+	SessionID     string
+	SessionName   string
+	Content       string
+	Warnings      []string
+	DroppedEvents uint64
 }
 
 type PromptSessionRuntime interface {
 	SubmitUserMessage(ctx context.Context, prompt string) (PromptAssistantMessage, error)
-	SessionID() string
-	SessionName() string
-	DroppedEvents() uint64
-	Warnings() []string
 	Logf(format string, args ...any)
 	Close() error
 }
@@ -69,13 +69,13 @@ func (s *PromptService) RunPrompt(ctx context.Context, req serverapi.RunPromptRe
 	assistant, runErr := runtimeHandle.SubmitUserMessage(runCtx, req.Prompt)
 	duration := time.Since(startedAt)
 	result := serverapi.RunPromptResponse{
-		SessionID:   runtimeHandle.SessionID(),
-		SessionName: runtimeHandle.SessionName(),
+		SessionID:   assistant.SessionID,
+		SessionName: assistant.SessionName,
 		Result:      assistant.Content,
 		Duration:    duration,
-		Warnings:    append([]string(nil), runtimeHandle.Warnings()...),
+		Warnings:    append([]string(nil), assistant.Warnings...),
 	}
-	if dropped := runtimeHandle.DroppedEvents(); dropped > 0 {
+	if dropped := assistant.DroppedEvents; dropped > 0 {
 		runtimeHandle.Logf("runtime.event.drop.total=%d", dropped)
 	}
 	if runErr != nil {

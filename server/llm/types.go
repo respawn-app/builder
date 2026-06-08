@@ -34,10 +34,6 @@ const (
 	MessagePhaseFinal      = clientui.MessagePhaseFinal
 )
 
-func normalizeMessagePhase(raw string) MessagePhase {
-	return clientui.NormalizeMessagePhase(raw)
-}
-
 type MessageType = clientui.MessageType
 
 const (

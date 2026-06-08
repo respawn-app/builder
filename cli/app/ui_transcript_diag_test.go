@@ -111,7 +111,7 @@ func TestProjectedRuntimeEventLogsTranscriptDiagnostics(t *testing.T) {
 		WithUISessionID("session-1"),
 	)
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:           clientui.EventAssistantDelta,
 		StepID:         "step-1",
 		AssistantDelta: "working",
@@ -119,7 +119,7 @@ func TestProjectedRuntimeEventLogsTranscriptDiagnostics(t *testing.T) {
 			Role: "assistant",
 			Text: "working",
 		}},
-	})
+	}, true).cmd
 
 	joined := strings.Join(logger.lines, "\n")
 	if !strings.Contains(joined, "transcript.diag.client.apply_event") {
@@ -141,7 +141,7 @@ func TestProjectedRuntimeEventLogsTranscriptDiagnosticsInDebugMode(t *testing.T)
 		WithUISessionID("session-1"),
 	)
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                clientui.EventToolCallStarted,
 		StepID:              "step-1",
 		TranscriptRevision:  7,
@@ -151,7 +151,7 @@ func TestProjectedRuntimeEventLogsTranscriptDiagnosticsInDebugMode(t *testing.T)
 			ToolCallID: "call-1",
 			Text:       "shell",
 		}},
-	})
+	}, true).cmd
 
 	joined := strings.Join(logger.lines, "\n")
 	if !strings.Contains(joined, "transcript.diag.client.projected_plan") {
@@ -175,12 +175,12 @@ func TestRuntimeTranscriptPageLogsRejectReason(t *testing.T) {
 	m.transcriptTotalEntries = 1
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
-	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, clientui.TranscriptPage{
+	_ = m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     10,
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
-	})
+	}, clientui.TranscriptRecoveryCauseNone)
 
 	joined := strings.Join(logger.lines, "\n")
 	if !strings.Contains(joined, "transcript.diag.client.apply_page_reject") {
@@ -211,9 +211,9 @@ func TestDeferredCommittedTailLifecycleLogsDiagnostics(t *testing.T) {
 	m.transcriptRevision = 6
 	m.transcriptTotalEntries = 1
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}, true).cmd
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		StepID:                       "step-1",
 		CommittedTranscriptChanged:   true,
@@ -222,15 +222,15 @@ func TestDeferredCommittedTailLifecycleLogsDiagnostics(t *testing.T) {
 		UserMessage:                  "steered message",
 		UserMessageBatchQueueItemIDs: []string{"queue-test-0"},
 		TranscriptEntries:            []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
-	})
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	}, true).cmd
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         8,
 		CommittedEntryCount:        3,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "foreground done"}},
-	})
+	}, true).cmd
 
 	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{
 		rangeStart: 1,
@@ -239,7 +239,7 @@ func TestDeferredCommittedTailLifecycleLogsDiagnostics(t *testing.T) {
 		entries:    []clientui.ChatEntry{{Role: "user", Text: "queued user"}},
 		pending:    []string{"queued user"},
 	}}
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-2",
 		CommittedTranscriptChanged: true,
@@ -248,7 +248,7 @@ func TestDeferredCommittedTailLifecycleLogsDiagnostics(t *testing.T) {
 		CommittedEntryStart:        4,
 		CommittedEntryStartSet:     true,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "authoritative tail"}},
-	})
+	}, true).cmd
 
 	joined := strings.Join(logger.lines, "\n")
 	for _, want := range []string{

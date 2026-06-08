@@ -13,7 +13,7 @@ import (
 func TestExecuteToolCallsCanonicalizesEditAliases(t *testing.T) {
 	store := mustCreateTestSession(t)
 	var events []Event
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(capturingTool{name: toolspec.ToolEdit}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolEdit, Handler: capturingTool{name: toolspec.ToolEdit}}), Config{
 		Model:        "claude",
 		EnabledTools: []toolspec.ID{toolspec.ToolEdit},
 		OnEvent: func(evt Event) {
@@ -52,7 +52,7 @@ func TestExecuteToolCallsCanonicalizesEditAliases(t *testing.T) {
 
 func TestExecuteToolCallsAcceptsCustomEditJSONAndRejectsPlainText(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(capturingTool{name: toolspec.ToolEdit}), Config{Model: "claude", EnabledTools: []toolspec.ID{toolspec.ToolEdit}})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolEdit, Handler: capturingTool{name: toolspec.ToolEdit}}), Config{Model: "claude", EnabledTools: []toolspec.ID{toolspec.ToolEdit}})
 
 	okResults, err := eng.executeToolCalls(context.Background(), "step-json", []llm.ToolCall{{
 		ID:          "call-json",
@@ -84,8 +84,6 @@ func TestExecuteToolCallsAcceptsCustomEditJSONAndRejectsPlainText(t *testing.T) 
 type capturingTool struct {
 	name toolspec.ID
 }
-
-func (t capturingTool) Name() toolspec.ID { return t.name }
 
 func (t capturingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	var payload map[string]any

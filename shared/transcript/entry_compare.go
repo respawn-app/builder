@@ -111,26 +111,23 @@ func renderedPatchesEqual(left, right *patchformat.RenderedPatch) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
-	return renderedFilesEqual(left.Files, right.Files) &&
-		renderedLinesEqual(left.SummaryLines, right.SummaryLines) &&
-		renderedLinesEqual(left.DetailLines, right.DetailLines)
-}
-
-func renderedFilesEqual(left, right []patchformat.RenderedFile) bool {
-	return slices.EqualFunc(left, right, func(a, b patchformat.RenderedFile) bool {
+	return slices.EqualFunc(left.Files, right.Files, func(a, b patchformat.RenderedFile) bool {
 		return a.AbsPath == b.AbsPath &&
 			a.RelPath == b.RelPath &&
 			a.Added == b.Added &&
 			a.Removed == b.Removed &&
 			slices.Equal(a.Diff, b.Diff)
-	})
-}
-
-func renderedLinesEqual(left, right []patchformat.RenderedLine) bool {
-	return slices.EqualFunc(left, right, func(a, b patchformat.RenderedLine) bool {
-		return a.Kind == b.Kind &&
-			a.Text == b.Text &&
-			a.FileIndex == b.FileIndex &&
-			a.Path == b.Path
-	})
+	}) &&
+		slices.EqualFunc(left.SummaryLines, right.SummaryLines, func(a, b patchformat.RenderedLine) bool {
+			return a.Kind == b.Kind &&
+				a.Text == b.Text &&
+				a.FileIndex == b.FileIndex &&
+				a.Path == b.Path
+		}) &&
+		slices.EqualFunc(left.DetailLines, right.DetailLines, func(a, b patchformat.RenderedLine) bool {
+			return a.Kind == b.Kind &&
+				a.Text == b.Text &&
+				a.FileIndex == b.FileIndex &&
+				a.Path == b.Path
+		})
 }

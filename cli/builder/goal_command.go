@@ -40,7 +40,7 @@ func goalSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		stderr = io.Discard
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fs := newCommandFlagSet("builder goal", stderr, writeGoalUsage)
+		fs := newCommandFlagSet("builder goal", stderr, goalUsage)
 		fs.Usage()
 		if len(args) == 0 {
 			return 2
@@ -63,14 +63,14 @@ func goalSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return goalClearSubcommand(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown goal command: %s\n\n", action)
-		fs := newCommandFlagSet("builder goal", stderr, writeGoalUsage)
-		writeGoalUsage(fs)
+		fs := newCommandFlagSet("builder goal", stderr, goalUsage)
+		goalUsage.write(fs)
 		return 2
 	}
 }
 
 func goalShowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder goal show", stderr, writeGoalCommandUsage)
+	fs := newCommandFlagSet("builder goal show", stderr, goalCommandUsage)
 	sessionFlag := fs.String("session", "", "target session id")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
@@ -110,7 +110,7 @@ func goalShowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func goalSetSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder goal set", stderr, writeGoalCommandUsage)
+	fs := newCommandFlagSet("builder goal set", stderr, goalCommandUsage)
 	sessionFlag := fs.String("session", "", "target session id")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -147,7 +147,7 @@ func goalSetSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func goalStatusSubcommand(action string, args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder goal "+action, stderr, writeGoalCommandUsage)
+	fs := newCommandFlagSet("builder goal "+action, stderr, goalCommandUsage)
 	sessionFlag := fs.String("session", "", "target session id")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -189,7 +189,7 @@ func goalStatusSubcommand(action string, args []string, stdout io.Writer, stderr
 }
 
 func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder goal complete", stderr, writeGoalCommandUsage)
+	fs := newCommandFlagSet("builder goal complete", stderr, goalCommandUsage)
 	sessionFlag := fs.String("session", "", "target session id")
 	confirmed := fs.Bool("confirm", false, "confirm goal completion")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
@@ -245,7 +245,7 @@ func goalAlreadyComplete(goal *serverapi.RuntimeGoal) bool {
 }
 
 func goalClearSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder goal clear", stderr, writeGoalCommandUsage)
+	fs := newCommandFlagSet("builder goal clear", stderr, goalCommandUsage)
 	sessionFlag := fs.String("session", "", "target session id")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode

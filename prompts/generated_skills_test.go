@@ -44,14 +44,14 @@ func TestGeneratedSkillsAreValid(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(frontmatter), &parsed); err != nil {
 			t.Fatalf("%s frontmatter YAML: %v", skillPath, err)
 		}
-		name := normalizeGeneratedSkillField(parsed.Name)
+		name := strings.Join(strings.Fields(parsed.Name), " ")
 		if name == "" {
 			t.Fatalf("%s frontmatter name must not be empty", skillPath)
 		}
-		if normalizeGeneratedSkillField(parsed.Description) == "" {
+		if strings.Join(strings.Fields(parsed.Description), " ") == "" {
 			t.Fatalf("%s frontmatter description must not be empty", skillPath)
 		}
-		if normalizeGeneratedSkillField(body) == "" {
+		if strings.Join(strings.Fields(body), " ") == "" {
 			t.Fatalf("%s body must not be empty", skillPath)
 		}
 		if previous, ok := seenNames[strings.ToLower(name)]; ok {
@@ -94,8 +94,4 @@ func splitGeneratedSkillFrontmatter(contents string) (string, string, bool) {
 		}
 	}
 	return "", "", false
-}
-
-func normalizeGeneratedSkillField(raw string) string {
-	return strings.Join(strings.Fields(raw), " ")
 }

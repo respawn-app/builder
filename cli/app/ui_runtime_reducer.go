@@ -45,7 +45,7 @@ func (r uiRuntimeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents))
 	case runtimeLeaseRecoveryWarningMsg:
-		cmd := m.appendLocalEntryFallbackWithVisibility("warning", msg.text, msg.visibility)
+		cmd := m.appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient("warning", msg.text, "", msg.visibility, false)
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, sequenceCmds(cmd, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning)))
 	case runtimeMainViewRefreshedMsg:
@@ -73,7 +73,7 @@ func (r uiRuntimeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, cmd)
 	case detailTranscriptLoadMsg:
-		cmd := m.requestRuntimeTranscriptPage(m.transcriptRequestForCurrentMode())
+		cmd := m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)).cmd
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, cmd)
 	}

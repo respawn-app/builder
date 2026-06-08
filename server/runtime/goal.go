@@ -54,7 +54,12 @@ func (e *Engine) SetGoalStatus(status session.GoalStatus, actor session.GoalActo
 	transcriptWorkingDir := e.transcriptWorkingDir()
 	var msg llm.Message
 	goal, err := e.store.SetGoalStatusWithEventBuilder(status, actor, func(goal session.GoalState) ([]session.EventInput, error) {
-		msg = goalDeveloperMessageForWorkingDir(goalStatusPrompt(goal), goalStatusCompactText(goal), transcriptWorkingDir)
+		msg = normalizeMessageForTranscript(llm.Message{
+			Role:           llm.RoleDeveloper,
+			MessageType:    llm.MessageTypeGoal,
+			Content:        goalStatusPrompt(goal),
+			CompactContent: goalStatusCompactText(goal),
+		}, transcriptWorkingDir)
 		return []session.EventInput{{Kind: "message", Payload: msg}}, nil
 	})
 	if err != nil {
@@ -222,16 +227,12 @@ func (e *Engine) appendGoalDeveloperMessage(stepID string, content string, compa
 }
 
 func (e *Engine) goalDeveloperMessage(content string, compact string) llm.Message {
-	return goalDeveloperMessageForWorkingDir(content, compact, e.transcriptWorkingDir())
-}
-
-func goalDeveloperMessageForWorkingDir(content string, compact string, workingDir string) llm.Message {
 	return normalizeMessageForTranscript(llm.Message{
 		Role:           llm.RoleDeveloper,
 		MessageType:    llm.MessageTypeGoal,
 		Content:        content,
 		CompactContent: compact,
-	}, workingDir)
+	}, e.transcriptWorkingDir())
 }
 
 func (e *Engine) appendPersistedGoalDeveloperMessage(stepID string, msg llm.Message) {

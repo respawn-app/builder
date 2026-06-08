@@ -23,7 +23,7 @@ func taskSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		stderr = io.Discard
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fs := newCommandFlagSet("builder task", stderr, writeTaskUsage)
+		fs := newCommandFlagSet("builder task", stderr, taskUsage)
 		fs.Usage()
 		if len(args) == 0 {
 			return 2
@@ -51,14 +51,14 @@ func taskSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return taskCommentSubcommand(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown task command: %s\n\n", args[0])
-		fs := newCommandFlagSet("builder task", stderr, writeTaskUsage)
-		writeTaskUsage(fs)
+		fs := newCommandFlagSet("builder task", stderr, taskUsage)
+		taskUsage.write(fs)
 		return 2
 	}
 }
 
 func taskCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task create", stderr, writeTaskCreateUsage)
+	fs := newCommandFlagSet("builder task create", stderr, taskCommandUsage)
 	title := fs.String("title", "", "task title")
 	body := fs.String("body", "", "task body")
 	workflowRef := fs.String("workflow", "", "workflow id or exact workflow name")
@@ -70,7 +70,7 @@ func taskCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintln(stderr, "task create does not accept positional arguments")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -89,7 +89,7 @@ func taskCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 			return 1
 		}
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: projectID, WorkflowID: workflowID, Title: *title, Body: *body})
 	if err != nil {
@@ -101,7 +101,7 @@ func taskCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 }
 
 func taskStartSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task start", stderr, writeTaskStartUsage)
+	fs := newCommandFlagSet("builder task start", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path for short ids")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
@@ -115,7 +115,7 @@ func taskStartSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 	if denyAgentHumanOnlyTaskAction(stderr) {
 		return 1
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -126,7 +126,7 @@ func taskStartSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: taskID})
 	if err != nil {
@@ -138,7 +138,7 @@ func taskStartSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 }
 
 func taskListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task list", stderr, writeTaskListUsage)
+	fs := newCommandFlagSet("builder task list", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -147,7 +147,7 @@ func taskListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "task list does not accept positional arguments")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -165,7 +165,7 @@ func taskListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func taskShowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task show", stderr, writeTaskShowUsage)
+	fs := newCommandFlagSet("builder task show", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path for short ids")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
@@ -176,7 +176,7 @@ func taskShowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "task show requires <short-id-or-task-id>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -195,7 +195,7 @@ func taskShowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func taskCancelSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task cancel", stderr, writeTaskCancelUsage)
+	fs := newCommandFlagSet("builder task cancel", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path for short ids")
 	reason := fs.String("reason", "", "cancel reason")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
@@ -210,7 +210,7 @@ func taskCancelSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 	if denyAgentHumanOnlyTaskAction(stderr) {
 		return 1
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -221,7 +221,7 @@ func taskCancelSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	if err := remote.CancelWorkflowTask(ctx, serverapi.WorkflowTaskCancelRequest{TaskID: taskID, Reason: *reason}); err != nil {
 		fmt.Fprintln(stderr, err)
@@ -232,7 +232,7 @@ func taskCancelSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 }
 
 func taskResumeSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task resume", stderr, writeTaskResumeUsage)
+	fs := newCommandFlagSet("builder task resume", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path for short ids")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
@@ -246,7 +246,7 @@ func taskResumeSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 	if denyAgentHumanOnlyTaskAction(stderr) {
 		return 1
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -257,7 +257,7 @@ func taskResumeSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.ResumeWorkflowTask(ctx, serverapi.WorkflowTaskResumeRequest{TaskID: taskID})
 	if err != nil {
@@ -272,7 +272,7 @@ func taskResumeSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 }
 
 func taskApproveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task approve", stderr, writeTaskApproveUsage)
+	fs := newCommandFlagSet("builder task approve", stderr, taskCommandUsage)
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
 		return exitCode
@@ -285,13 +285,13 @@ func taskApproveSubcommand(args []string, stdout io.Writer, stderr io.Writer) in
 	if denyAgentHumanOnlyTaskAction(stderr) {
 		return 1
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	defer func() { _ = remote.Close() }()
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.ApproveWorkflowTask(ctx, serverapi.WorkflowTaskApproveRequest{TransitionID: positionals[0]})
 	if err != nil {
@@ -309,7 +309,7 @@ func taskApproveSubcommand(args []string, stdout io.Writer, stderr io.Writer) in
 }
 
 func taskMoveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task move", stderr, writeTaskMoveUsage)
+	fs := newCommandFlagSet("builder task move", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path for short ids")
 	commentary := fs.String("commentary", "", "transition commentary")
 	outputs := stringMapFlag{}
@@ -326,7 +326,7 @@ func taskMoveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if denyAgentHumanOnlyTaskAction(stderr) {
 		return 1
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -337,7 +337,7 @@ func taskMoveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.MoveWorkflowTask(ctx, serverapi.WorkflowTaskMoveRequest{TaskID: taskID, TargetNodeID: positionals[1], OutputValues: outputs.values, Commentary: *commentary})
 	if err != nil {
@@ -380,7 +380,7 @@ func (f *stringMapFlag) Set(raw string) error {
 
 func taskCommentSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fs := newCommandFlagSet("builder task comment", stderr, writeTaskCommentUsage)
+		fs := newCommandFlagSet("builder task comment", stderr, taskUsage)
 		fs.Usage()
 		if len(args) == 0 {
 			return 2
@@ -398,14 +398,14 @@ func taskCommentSubcommand(args []string, stdout io.Writer, stderr io.Writer) in
 		return taskCommentDeleteSubcommand(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown task comment command: %s\n\n", args[0])
-		fs := newCommandFlagSet("builder task comment", stderr, writeTaskCommentUsage)
-		writeTaskCommentUsage(fs)
+		fs := newCommandFlagSet("builder task comment", stderr, taskUsage)
+		taskUsage.write(fs)
 		return 2
 	}
 }
 
 func taskCommentAddSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task comment add", stderr, writeTaskCommentAddUsage)
+	fs := newCommandFlagSet("builder task comment add", stderr, taskCommandUsage)
 	body := fs.String("body", "", "comment body")
 	author := fs.String("author", "user", "comment author")
 	projectRef := fs.String("project", ".", "project id or path for short ids")
@@ -418,7 +418,7 @@ func taskCommentAddSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintln(stderr, "task comment add requires <short-id-or-task-id>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -429,7 +429,7 @@ func taskCommentAddSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.AddWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentAddRequest{TaskID: taskID, Body: *body, Author: *author})
 	if err != nil {
@@ -441,7 +441,7 @@ func taskCommentAddSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 }
 
 func taskCommentListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task comment list", stderr, writeTaskCommentListUsage)
+	fs := newCommandFlagSet("builder task comment list", stderr, taskCommandUsage)
 	projectRef := fs.String("project", ".", "project id or path for short ids")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
@@ -452,7 +452,7 @@ func taskCommentListSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, "task comment list requires <short-id-or-task-id>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -463,7 +463,7 @@ func taskCommentListSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.ListWorkflowTaskComments(ctx, serverapi.WorkflowTaskCommentListRequest{TaskID: taskID})
 	if err != nil {
@@ -477,7 +477,7 @@ func taskCommentListSubcommand(args []string, stdout io.Writer, stderr io.Writer
 }
 
 func taskCommentReplaceSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task comment replace", stderr, writeTaskCommentReplaceUsage)
+	fs := newCommandFlagSet("builder task comment replace", stderr, taskCommandUsage)
 	body := fs.String("body", "", "replacement comment body")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
@@ -488,13 +488,13 @@ func taskCommentReplaceSubcommand(args []string, stdout io.Writer, stderr io.Wri
 		fmt.Fprintln(stderr, "task comment replace requires <comment-id>")
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	defer func() { _ = remote.Close() }()
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	if err := remote.ReplaceWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentReplaceRequest{CommentID: positionals[0], Body: *body}); err != nil {
 		fmt.Fprintln(stderr, err)
@@ -505,7 +505,7 @@ func taskCommentReplaceSubcommand(args []string, stdout io.Writer, stderr io.Wri
 }
 
 func taskCommentDeleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder task comment delete", stderr, writeTaskCommentDeleteUsage)
+	fs := newCommandFlagSet("builder task comment delete", stderr, taskUsage)
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
 		return exitCode
@@ -518,13 +518,13 @@ func taskCommentDeleteSubcommand(args []string, stdout io.Writer, stderr io.Writ
 	if denyAgentHumanOnlyTaskAction(stderr) {
 		return 1
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	defer func() { _ = remote.Close() }()
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	if err := remote.DeleteWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentDeleteRequest{CommentID: positionals[0]}); err != nil {
 		fmt.Fprintln(stderr, err)
@@ -547,7 +547,7 @@ func workflowBoardForProject(ctx context.Context, cfg config.App, remote workflo
 	if err != nil {
 		return serverapi.WorkflowBoard{}, err
 	}
-	rpcCtx, cancel := workflowRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.GetWorkflowBoard(rpcCtx, serverapi.WorkflowBoardRequest{ProjectID: projectID})
 	if err != nil {
@@ -562,7 +562,7 @@ func resolveWorkflowTaskID(ctx context.Context, cfg config.App, remote workflowC
 		return "", errors.New("task id is required")
 	}
 	if strings.HasPrefix(trimmed, "task-") {
-		rpcCtx, cancel := workflowRPCContext(ctx)
+		rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 		defer cancel()
 		resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{TaskID: trimmed})
 		if err != nil {
@@ -633,7 +633,7 @@ func isWorkflowTaskNotFound(err error) bool {
 }
 
 func getWorkflowTaskByID(ctx context.Context, remote workflowCommandRemote, taskID string) (serverapi.WorkflowTaskDetail, error) {
-	rpcCtx, cancel := workflowRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{TaskID: taskID})
 	if err != nil {
@@ -643,7 +643,7 @@ func getWorkflowTaskByID(ctx context.Context, remote workflowCommandRemote, task
 }
 
 func getWorkflowTaskByProjectShortID(ctx context.Context, remote workflowCommandRemote, projectID string, shortID string) (serverapi.WorkflowTaskDetail, error) {
-	rpcCtx, cancel := workflowRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{ProjectID: projectID, ShortID: shortID})
 	if err != nil {
@@ -653,7 +653,7 @@ func getWorkflowTaskByProjectShortID(ctx context.Context, remote workflowCommand
 }
 
 func getWorkflowTaskByShortID(ctx context.Context, remote workflowCommandRemote, shortID string) (serverapi.WorkflowTaskDetail, error) {
-	rpcCtx, cancel := workflowRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{ShortID: shortID})
 	if err != nil {

@@ -99,20 +99,20 @@ func MoveCursor(cursor int, delta int, itemCount int) int {
 	return cursor
 }
 
-func EnsureCursorVisible(cursor int, offset int, itemCount int, visibleRows func(offset int) []VisibleRow) int {
+func EnsureCursorVisible(cursor int, offset int, req VisibleRowsRequest) int {
 	if cursor < offset {
 		offset = cursor
 	}
-	for offset < cursor && !rowVisible(visibleRows(offset), cursor) {
+	for offset < cursor && !rowVisible(visibleRowsAtOffset(req, offset), cursor) {
 		offset++
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	for offset > 0 && rowVisible(visibleRows(offset-1), cursor) {
+	for offset > 0 && rowVisible(visibleRowsAtOffset(req, offset-1), cursor) {
 		offset--
 	}
-	maxOffset := itemCount - 1
+	maxOffset := req.ItemCount - 1
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
@@ -120,6 +120,11 @@ func EnsureCursorVisible(cursor int, offset int, itemCount int, visibleRows func
 		offset = maxOffset
 	}
 	return offset
+}
+
+func visibleRowsAtOffset(req VisibleRowsRequest, offset int) []VisibleRow {
+	req.Offset = offset
+	return VisibleRows(req)
 }
 
 func VisibleRows(req VisibleRowsRequest) []VisibleRow {

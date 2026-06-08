@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"builder/cli/app/internal/oauthadapter"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -19,30 +20,30 @@ type interactiveAuthOAuthPresenter struct {
 
 func (p interactiveAuthOAuthPresenter) ShowBrowserAuto(session oauthadapter.BrowserAuthSession, openErr error) {
 	lines := p.browserLines(session, openErr)
-	lines = append(lines, authMetaStyle(p.theme).Render("Waiting for browser callback..."))
+	lines = append(lines, lipgloss.NewStyle().Foreground(uiPalette(p.theme).muted).Faint(true).Render("Waiting for browser callback..."))
 	p.print(authMethodDisplayTitle(authMethodChoiceBrowserAuto), lines)
 }
 
 func (p interactiveAuthOAuthPresenter) ShowBrowserPaste(session oauthadapter.BrowserAuthSession, openErr error) {
 	lines := p.browserLines(session, openErr)
-	lines = append(lines, authMetaStyle(p.theme).Render("After sign-in, paste the full callback URL or just the code below."))
+	lines = append(lines, lipgloss.NewStyle().Foreground(uiPalette(p.theme).muted).Faint(true).Render("After sign-in, paste the full callback URL or just the code below."))
 	p.print(authMethodDisplayTitle(authMethodChoiceBrowserPaste), lines)
 }
 
 func (p interactiveAuthOAuthPresenter) ShowDeviceCode(code oauthadapter.DeviceCode) {
 	p.print(authMethodDisplayTitle(authMethodChoiceDevice), []string{
-		authURLStyle(p.theme).Render(code.VerificationURL),
-		authBodyStyle(p.theme).Render("Code: ") + authCodeStyle(p.theme).Render(code.UserCode),
-		authMetaStyle(p.theme).Render("Waiting for authorization..."),
+		lipgloss.NewStyle().Foreground(uiPalette(p.theme).primary).Underline(true).Render(code.VerificationURL),
+		lipgloss.NewStyle().Foreground(uiPalette(p.theme).foreground).Render("Code: ") + lipgloss.NewStyle().Foreground(uiPalette(p.theme).secondary).Bold(true).Render(code.UserCode),
+		lipgloss.NewStyle().Foreground(uiPalette(p.theme).muted).Faint(true).Render("Waiting for authorization..."),
 	})
 }
 
 func (p interactiveAuthOAuthPresenter) browserLines(session oauthadapter.BrowserAuthSession, openErr error) []string {
-	lines := []string{authURLStyle(p.theme).Render(session.AuthorizeURL)}
+	lines := []string{lipgloss.NewStyle().Foreground(uiPalette(p.theme).primary).Underline(true).Render(session.AuthorizeURL)}
 	if openErr != nil {
-		lines = append(lines, authMetaStyle(p.theme).Render(fmt.Sprintf("Builder could not open your browser automatically (%v). Open the URL manually.", openErr)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(uiPalette(p.theme).muted).Faint(true).Render(fmt.Sprintf("Builder could not open your browser automatically (%v). Open the URL manually.", openErr)))
 	} else {
-		lines = append(lines, authMetaStyle(p.theme).Render("Builder opened your default browser. If nothing appeared, open the URL manually."))
+		lines = append(lines, lipgloss.NewStyle().Foreground(uiPalette(p.theme).muted).Faint(true).Render("Builder opened your default browser. If nothing appeared, open the URL manually."))
 	}
 	return lines
 }
@@ -60,7 +61,7 @@ func (i *interactiveAuthInteractor) printAuthSection(theme, title string, lines 
 	}
 	var out strings.Builder
 	out.WriteByte('\n')
-	out.WriteString(authTitleStyle(theme).Render(title))
+	out.WriteString(lipgloss.NewStyle().Foreground(uiPalette(theme).primary).Bold(true).Render(title))
 	out.WriteByte('\n')
 	for idx, line := range lines {
 		if idx > 0 {
@@ -69,38 +70,14 @@ func (i *interactiveAuthInteractor) printAuthSection(theme, title string, lines 
 		out.WriteString(line)
 	}
 	out.WriteString("\n\n")
-	fprintf(i.stderrOrDiscard(), "%s", out.String())
-}
-
-func authTitleStyle(theme string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(uiPalette(theme).primary).Bold(true)
-}
-
-func authBodyStyle(theme string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(uiPalette(theme).foreground)
-}
-
-func authMetaStyle(theme string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(uiPalette(theme).muted).Faint(true)
-}
-
-func authPromptStyle(theme string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(uiPalette(theme).primary).Bold(true)
-}
-
-func authURLStyle(theme string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(uiPalette(theme).primary).Underline(true)
-}
-
-func authCodeStyle(theme string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(uiPalette(theme).secondary).Bold(true)
+	_, _ = fmt.Fprintf(i.stderrOrDiscard(), "%s", out.String())
 }
 
 func (i *interactiveAuthInteractor) prompt(label string) (string, error) {
 	if i.stdin == nil {
 		return "", errors.New("auth prompt input is required")
 	}
-	fprintf(i.stderrOrDiscard(), "%s", label)
+	_, _ = fmt.Fprintf(i.stderrOrDiscard(), "%s", label)
 	if i.promptReader == nil {
 		i.promptReader = bufio.NewReader(i.stdin)
 	}
@@ -121,8 +98,4 @@ func (i *interactiveAuthInteractor) stderrOrDiscard() io.Writer {
 		return io.Discard
 	}
 	return i.stderr
-}
-
-func fprintf(w io.Writer, format string, args ...any) {
-	_, _ = fmt.Fprintf(w, format, args...)
 }

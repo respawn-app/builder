@@ -38,7 +38,7 @@ func TestAutoCompactionDoesNotRetryNonOverflow400(t *testing.T) {
 		},
 	}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5.3-codex"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5.3-codex"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "run tools"); err == nil {
 		t.Fatal("expected compaction to fail on non-overflow 400")
@@ -81,7 +81,7 @@ func TestAutoCompactionRetries413ByCollapsingShellOutput(t *testing.T) {
 	}
 
 	largeOutput := json.RawMessage(`{"output":"` + strings.Repeat("x", 120_000) + `"}`)
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand, out: largeOutput}), Config{Model: "gpt-5.3-codex"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand, out: largeOutput}}), Config{Model: "gpt-5.3-codex"})
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
 	if err != nil {
@@ -139,7 +139,7 @@ func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
 		},
 	}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
 	if err == nil {

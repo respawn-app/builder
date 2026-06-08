@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/app/internal/statuscollect"
 	"builder/server/auth"
 	"builder/server/authstatus"
 	"builder/server/serve"
@@ -58,7 +59,7 @@ func TestStartEmbeddedServerUnknownWorkspaceCreateProjectFlowCanPlanSession(t *t
 	}
 
 	t.Log("starting embedded server")
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startEmbeddedServer: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, readyMemoryAuthHandler())
+	}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, readyMemoryAuthHandler())
+	}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, readyMemoryAuthHandler())
+	}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProjectAttachCapability
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, readyMemoryAuthHandler())
+	}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -323,7 +324,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, readyMemoryAuthHandler())
+	}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -373,7 +374,7 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 			},
 		},
 		UpdatedAt: time.Now().UTC(),
-	}}, autoOnboarding{})
+	}}, autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -396,7 +397,7 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 		t.Fatalf("save auth state: %v", err)
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 		PersistenceRoot:   plan.StatusConfig.PersistenceRoot,
 		Settings:          plan.StatusConfig.Settings,
 		Source:            plan.StatusConfig.Source,
-		AuthCacheIdentity: statusAuthCacheIdentity(plan.StatusConfig.AuthManager),
+		AuthCacheIdentity: statuscollect.AuthCacheIdentity(plan.StatusConfig.AuthManager),
 		AuthStatus:        plan.StatusConfig.AuthStatus,
 		AuthStatePath:     plan.StatusConfig.AuthStatePath,
 		OwnsServer:        plan.StatusConfig.OwnsServer,
@@ -463,7 +464,7 @@ func TestStartSessionServerRemoteReadyAuthDoesNotOpenStartupPicker(t *testing.T)
 			},
 		},
 		UpdatedAt: time.Now().UTC(),
-	}}, autoOnboarding{})
+	}}, autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -479,7 +480,7 @@ func TestStartSessionServerRemoteReadyAuthDoesNotOpenStartupPicker(t *testing.T)
 			return authMethodPickerResult{}, nil
 		},
 	}
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, interactor)
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, interactor, true)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -496,7 +497,7 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -527,7 +528,7 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 		}, true, nil
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -567,7 +568,7 @@ func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
 		return []string{"-test.run=^TestStartSessionServerHelperDaemonProcess$"}
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -603,7 +604,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         defaultResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -619,7 +620,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         overrideResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractor())
+	}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -651,7 +652,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5.4",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -666,7 +667,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5.3-codex",
 		Tools:                 "shell",
-	}, newHeadlessAuthInteractor())
+	}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -693,7 +694,7 @@ func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) 
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -703,7 +704,7 @@ func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) 
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}

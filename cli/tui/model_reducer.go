@@ -311,7 +311,7 @@ func detailExpansionEntryMatches(left TranscriptEntry, right TranscriptEntry) bo
 		left.CompactLabel == right.CompactLabel &&
 		left.ToolResultSummary == right.ToolResultSummary &&
 		left.ToolCallID == right.ToolCallID &&
-		toolCallMetaRenderEqual(left.ToolCall, right.ToolCall)
+		transcript.ToolCallMetaEqual(left.ToolCall, right.ToolCall)
 }
 
 func transcriptEntriesEqual(left []TranscriptEntry, right []TranscriptEntry) bool {
@@ -324,10 +324,6 @@ func transcriptEntriesEqual(left []TranscriptEntry, right []TranscriptEntry) boo
 		}
 	}
 	return true
-}
-
-func toolCallMetaRenderEqual(left *transcript.ToolCallMeta, right *transcript.ToolCallMeta) bool {
-	return transcript.ToolCallMetaEqual(left, right)
 }
 
 func (m *Model) navigateDetailSelection(delta int) {

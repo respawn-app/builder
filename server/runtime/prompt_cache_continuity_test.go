@@ -67,7 +67,7 @@ func TestHeadlessToInteractiveReopenPreservesPromptCachePrefix(t *testing.T) {
 	}()
 
 	store := mustCreateTestSession(t)
-	registry := tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand})
+	registry := tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}})
 	headlessResponse := finalOutputItemResponse("headless-ok")
 	headlessResponse.Usage.HasCachedInputTokens = true
 	headlessResponse.Usage.CachedInputTokens = 4096
@@ -119,7 +119,7 @@ func TestBuildRequest_ReopenPreservesShellStringToolOutputPayload(t *testing.T) 
 		},
 		finalOutputItemResponse("done"),
 	}}
-	registry := tools.NewRegistry(stringOutputTool{name: toolspec.ToolExecCommand})
+	registry := tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: stringOutputTool{name: toolspec.ToolExecCommand}})
 	engine := mustNewTestEngine(t, store, client, registry, Config{
 		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: false,
@@ -217,7 +217,7 @@ func newPromptCacheContinuityFixture(t *testing.T) *promptCacheContinuityFixture
 	}
 	client := &fakeClient{caps: clientCaps}
 	reviewerClient := &fakeClient{caps: clientCaps}
-	registry := tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}, fakeTool{name: toolspec.ToolAskQuestion})
+	registry := tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}, tools.HandlerRegistration{ID: toolspec.ToolAskQuestion, Handler: fakeTool{name: toolspec.ToolAskQuestion}})
 	cfg := Config{
 		Model:         "gpt-5",
 		ThinkingLevel: "medium",
@@ -565,8 +565,6 @@ func seq21To28ShapeRequest(thirdCallInput json.RawMessage) llm.Request {
 type stringOutputTool struct {
 	name toolspec.ID
 }
-
-func (t stringOutputTool) Name() toolspec.ID { return t.name }
 
 func (t stringOutputTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	output, _ := json.Marshal("output for " + c.ID)

@@ -9,6 +9,7 @@ import (
 	appprocessview "builder/cli/app/internal/processview"
 	"builder/shared/clientui"
 	"builder/shared/textutil"
+	sharedtheme "builder/shared/theme"
 	"builder/shared/uiglyphs"
 
 	"github.com/charmbracelet/lipgloss"
@@ -208,9 +209,9 @@ func processStateColor(entry clientui.BackgroundProcess, palette uiColors) lipgl
 	state := strings.TrimSpace(entry.State)
 	switch state {
 	case "completed":
-		return statusGreenColor()
+		return sharedtheme.DefaultPalette().Status.Success.Adaptive()
 	case "failed", "killed":
-		return statusRedColor()
+		return sharedtheme.DefaultPalette().Status.Error.Adaptive()
 	case "starting", "running":
 		return palette.primary
 	default:
@@ -218,10 +219,10 @@ func processStateColor(entry clientui.BackgroundProcess, palette uiColors) lipgl
 			return palette.primary
 		}
 		if entry.ExitCode != nil && *entry.ExitCode == 0 {
-			return statusGreenColor()
+			return sharedtheme.DefaultPalette().Status.Success.Adaptive()
 		}
 		if entry.ExitCode != nil {
-			return statusRedColor()
+			return sharedtheme.DefaultPalette().Status.Error.Adaptive()
 		}
 		return palette.muted
 	}

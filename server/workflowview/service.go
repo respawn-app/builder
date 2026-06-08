@@ -171,7 +171,7 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 			Version:              def.Workflow.Version,
 			IsProjectDefault:     link.ID != "" && link.IsDefault != 0,
 			ValidForTaskCreation: validation.Valid() && link.ID != "",
-			ValidationErrors:     validationErrors(def.Workflow.ID, validation.Errors),
+			ValidationErrors:     workflowapi.ValidationErrors(def.Workflow.ID, validation.Errors),
 		})
 	}
 	sort.SliceStable(picker, func(i, j int) bool {
@@ -750,7 +750,7 @@ func workflowPickerItem(def serverapi.WorkflowDefinition, link sqlitegen.Project
 	item := serverapi.WorkflowPickerItem{WorkflowID: def.Workflow.ID, DisplayName: def.Workflow.Name, Description: def.Workflow.Description, Version: def.Workflow.Version, IsProjectDefault: link.ID != "" && link.IsDefault != 0, ValidForTaskCreation: link.ID != ""}
 	if validation != nil {
 		item.ValidForTaskCreation = link.ID != "" && validation.Valid()
-		item.ValidationErrors = validationErrors(def.Workflow.ID, validation.Errors)
+		item.ValidationErrors = workflowapi.ValidationErrors(def.Workflow.ID, validation.Errors)
 	}
 	return item
 }
@@ -809,7 +809,7 @@ func (s *Service) taskActivityRows(ctx context.Context, taskID string, cursor ac
 	if cursor.hasValue {
 		cursorActive = 1
 	}
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQuery(taskActivityRowsQuery), taskID, taskID, taskID, taskID, taskID, taskID, cursorActive, cursor.occurredAtUnixMs, cursor.occurredAtUnixMs, cursor.activityID, limit)
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.TrimSuffix(taskActivityRowsQuery, "\n"), taskID, taskID, taskID, taskID, taskID, taskID, cursorActive, cursor.occurredAtUnixMs, cursor.occurredAtUnixMs, cursor.activityID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1008,7 +1008,7 @@ func (s *Service) transitionEdgesByTransitionID(ctx context.Context, transitions
 	if len(args) == 0 {
 		return out, nil
 	}
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQueryWithPlaceholders(transitionEdgesByTransitionIDQuery, strings.Join(transitionIDs, ",")), args...)
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.Replace(strings.TrimSuffix(transitionEdgesByTransitionIDQuery, "\n"), "{{placeholders}}", strings.Join(transitionIDs, ","), 1), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1046,7 +1046,7 @@ func (s *Service) commentsByID(ctx context.Context, ids []string) (map[string]sq
 		return out, nil
 	}
 	placeholders, args := placeholdersAndArgs(ids)
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQueryWithPlaceholders(commentsByIDQuery, placeholders), args...)
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.Replace(strings.TrimSuffix(commentsByIDQuery, "\n"), "{{placeholders}}", placeholders, 1), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,7 +1066,7 @@ func (s *Service) transitionsByID(ctx context.Context, ids []string) ([]sqlitege
 		return []sqlitegen.TaskTransitionRecord{}, nil
 	}
 	placeholders, args := placeholdersAndArgs(ids)
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQueryWithPlaceholders(transitionsByIDQuery, placeholders), args...)
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.Replace(strings.TrimSuffix(transitionsByIDQuery, "\n"), "{{placeholders}}", placeholders, 1), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1105,7 +1105,7 @@ func (s *Service) runsByID(ctx context.Context, ids []string) ([]sqlitegen.TaskR
 		return []sqlitegen.TaskRunRecord{}, nil
 	}
 	placeholders, args := placeholdersAndArgs(ids)
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQueryWithPlaceholders(runsByIDQuery, placeholders), args...)
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.Replace(strings.TrimSuffix(runsByIDQuery, "\n"), "{{placeholders}}", placeholders, 1), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1150,14 +1150,6 @@ func placeholdersAndArgs(ids []string) (string, []any) {
 		args = append(args, id)
 	}
 	return strings.Join(placeholders, ","), args
-}
-
-func workflowViewQueryWithPlaceholders(query string, placeholders string) string {
-	return strings.Replace(workflowViewQuery(query), "{{placeholders}}", placeholders, 1)
-}
-
-func workflowViewQuery(query string) string {
-	return strings.TrimSuffix(query, "\n")
 }
 
 func sourceIDsByType(rows []taskActivityRow, kind string) []string {
@@ -1237,7 +1229,7 @@ func activityPageToken(item serverapi.WorkflowTaskActivityItem) string {
 }
 
 func (s *Service) approvalAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQuery(approvalAttentionItemsQuery), strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.TrimSuffix(approvalAttentionItemsQuery, "\n"), strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
 	if err != nil {
 		return nil, err
 	}
@@ -1255,7 +1247,7 @@ func (s *Service) approvalAttentionItems(ctx context.Context, projectID string, 
 }
 
 func (s *Service) questionAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQuery(questionAttentionItemsQuery), strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.TrimSuffix(questionAttentionItemsQuery, "\n"), strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
 	if err != nil {
 		return nil, err
 	}
@@ -1370,7 +1362,7 @@ func askQuestionFromTranscriptEntries(entries []clientui.ChatEntry, askID string
 }
 
 func (s *Service) interruptedRunAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQuery(interruptedRunAttentionItemsQuery), strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.TrimSuffix(interruptedRunAttentionItemsQuery, "\n"), strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
 	if err != nil {
 		return nil, err
 	}
@@ -1392,7 +1384,7 @@ func (s *Service) interruptedRunAttentionItems(ctx context.Context, projectID st
 }
 
 func (s *Service) validationAttentionItems(ctx context.Context, projectID string, roleResolver workflow.RoleResolver) ([]serverapi.WorkflowAttentionItem, error) {
-	rows, err := s.metadata.DB().QueryContext(ctx, workflowViewQuery(validationAttentionItemsQuery), strings.TrimSpace(projectID), strings.TrimSpace(projectID))
+	rows, err := s.metadata.DB().QueryContext(ctx, strings.TrimSuffix(validationAttentionItemsQuery, "\n"), strings.TrimSpace(projectID), strings.TrimSpace(projectID))
 	if err != nil {
 		return nil, err
 	}
@@ -1570,10 +1562,6 @@ func definitionForValidation(def serverapi.WorkflowDefinition) workflow.Definiti
 		out.Edges = append(out.Edges, workflow.Edge{WorkflowID: workflow.WorkflowID(edge.WorkflowID), ID: workflow.EdgeID(edge.ID), Key: workflow.ModelKey(edge.Key), TransitionGroupID: workflow.TransitionGroupID(edge.TransitionGroupID), TargetNodeID: workflow.NodeID(edge.TargetNodeID), RequiresApproval: edge.RequiresApproval, ContextMode: workflow.ContextMode(edge.ContextMode), ContextSource: workflow.CanonicalContextSource(workflow.ContextSource{Kind: workflow.ContextSourceKind(edge.ContextSource.Kind), NodeKey: workflow.ModelKey(edge.ContextSource.NodeKey)}), PromptTemplate: edge.PromptTemplate, Parameters: parameters, InputBindings: inputs, OutputRequirements: requirements})
 	}
 	return out
-}
-
-func validationErrors(workflowID string, errs []workflow.ValidationError) []serverapi.WorkflowValidationError {
-	return workflowapi.ValidationErrors(workflowID, errs)
 }
 
 func selectWorkflow(picker []serverapi.WorkflowPickerItem, requested string) serverapi.WorkflowPickerItem {

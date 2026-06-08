@@ -16,7 +16,7 @@ func (m *uiModel) invalidateTransientTranscriptState() {
 	hadTransient := false
 	committed := make([]tui.TranscriptEntry, 0, len(m.transcriptEntries))
 	for _, entry := range m.transcriptEntries {
-		if !transcriptEntryCommittedForApp(entry) {
+		if entry.Transient && !entry.Committed {
 			hadTransient = true
 			continue
 		}
@@ -69,16 +69,12 @@ func shouldReplaceLoadedTransientEntriesWithCommittedAppend(m *uiModel, entries 
 			if committedEntry.Transient || !committedEntry.Committed {
 				continue
 			}
-			if transcriptEntryPayloadsEqual(loadedEntry, committedEntry) {
+			if transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(loadedEntry), transcriptPayloadFromTUIEntry(committedEntry)) {
 				return true
 			}
 		}
 	}
 	return false
-}
-
-func transcriptEntryPayloadsEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool {
-	return transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(left), transcriptPayloadFromTUIEntry(right))
 }
 
 func (m *uiModel) deferProjectedCommittedTail(evt clientui.Event) {
@@ -126,7 +122,7 @@ func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bo
 func shouldClearAssistantStreamForCommittedTranscriptEntries(entries []tui.TranscriptEntry, activeStream string) bool {
 	trimmedActiveStream := strings.TrimSpace(activeStream)
 	for _, entry := range entries {
-		if !isAssistantTranscriptEntry(entry) || !transcriptEntryCommittedForApp(entry) {
+		if entry.Role != tui.TranscriptRoleAssistant || entry.Transient && !entry.Committed {
 			continue
 		}
 		if isFinalAssistantTranscriptEntry(entry) {
@@ -139,10 +135,6 @@ func shouldClearAssistantStreamForCommittedTranscriptEntries(entries []tui.Trans
 	return false
 }
 
-func isAssistantTranscriptEntry(entry tui.TranscriptEntry) bool {
-	return entry.Role == tui.TranscriptRoleAssistant
-}
-
 func isFinalAssistantProjectedEntry(entry clientui.ChatEntry) bool {
 	if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
 		return false
@@ -152,7 +144,7 @@ func isFinalAssistantProjectedEntry(entry clientui.ChatEntry) bool {
 }
 
 func isFinalAssistantTranscriptEntry(entry tui.TranscriptEntry) bool {
-	if !isAssistantTranscriptEntry(entry) {
+	if entry.Role != tui.TranscriptRoleAssistant {
 		return false
 	}
 	phase := strings.TrimSpace(string(entry.Phase))
@@ -285,7 +277,7 @@ func transcriptContainsCommittedToolCallID(entries []tui.TranscriptEntry, toolCa
 		if strings.TrimSpace(entry.ToolCallID) != trimmed {
 			continue
 		}
-		if transcriptEntryCommittedForApp(entry) {
+		if !entry.Transient || entry.Committed {
 			return true
 		}
 	}

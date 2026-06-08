@@ -50,10 +50,6 @@ type onboardingModel struct {
 	canceled         bool
 }
 
-func newOnboardingModel(globalRoot string, state onboardingFlowState) *onboardingModel {
-	return newOnboardingModelForWorkspace(globalRoot, "", state)
-}
-
 func newOnboardingModelForWorkspace(globalRoot string, workspaceRoot string, state onboardingFlowState) *onboardingModel {
 	input := newSingleLineEditor("")
 	m := &onboardingModel{
@@ -237,11 +233,17 @@ func (m *onboardingModel) submitCurrentScreen() (tea.Model, tea.Cmd) {
 		if m.cursor < 0 || m.cursor >= len(m.currentScreen.Options) {
 			return m, nil
 		}
-		err = step.ApplyChoice(&m.state, m.currentScreen.Options[m.cursor].ID)
+		if step.apply != nil {
+			err = step.apply(&m.state, m.currentScreen.Options[m.cursor].ID)
+		}
 	case onboardingScreenInput:
-		err = step.ApplyInput(&m.state, strings.TrimSpace(singleLineEditorValue(m.input)))
+		if step.apply != nil {
+			err = step.apply(&m.state, strings.TrimSpace(m.input.Text()))
+		}
 	case onboardingScreenMulti:
-		err = step.ApplyMultiSelect(&m.state, cloneSelection(m.selection))
+		if step.applyMultiSelect != nil {
+			err = step.applyMultiSelect(&m.state, cloneSelection(m.selection))
+		}
 	}
 	if err != nil {
 		m.errorText = err.Error()
@@ -310,7 +312,7 @@ func onboardingPreservedDefaults(state onboardingFlowState) map[string]bool {
 	return preserved
 }
 
-func (m *onboardingModel) currentStep() onboardingStepDefinition {
+func (m *onboardingModel) currentStep() *onboardingStepDefinition {
 	steps := m.workflow.visibleSteps(&m.state)
 	if len(steps) == 0 {
 		return nil
@@ -321,7 +323,7 @@ func (m *onboardingModel) currentStep() onboardingStepDefinition {
 	if m.stepIndex < 0 {
 		m.stepIndex = 0
 	}
-	return steps[m.stepIndex]
+	return &steps[m.stepIndex]
 }
 
 func (m *onboardingModel) syncScreen(resetViewport bool) {
@@ -329,19 +331,19 @@ func (m *onboardingModel) syncScreen(resetViewport bool) {
 	if step == nil {
 		return
 	}
-	screen := step.Build(&m.state)
+	screen := step.build(&m.state)
 	previousID := m.currentScreen.ID
 	previousKind := m.currentScreen.Kind
-	inputDraft := singleLineEditorValue(m.input)
+	inputDraft := m.input.Text()
 	m.currentScreen = screen
 	if resetViewport || previousID != screen.ID {
 		m.offset = 0
 	}
 	if screen.Kind == onboardingScreenInput {
 		if !resetViewport && previousID == screen.ID && previousKind == onboardingScreenInput {
-			setSingleLineEditorValue(&m.input, inputDraft)
+			m.input.Replace(strings.NewReplacer("\r", "", "\n", "").Replace(inputDraft))
 		} else {
-			setSingleLineEditorValue(&m.input, screen.InputValue)
+			m.input.Replace(strings.NewReplacer("\r", "", "\n", "").Replace(screen.InputValue))
 		}
 		m.inputPlaceholder = screen.Placeholder
 		if screen.SensitiveInput {

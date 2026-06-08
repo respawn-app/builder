@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/app/internal/worktreecreate"
 	"builder/cli/app/internal/worktreecreateform"
 	"builder/cli/app/internal/worktreecreateresolve"
 	"builder/shared/serverapi"
@@ -32,20 +31,16 @@ func (d *uiWorktreeCreateDialogState) syncFocus() {
 	d.focus = worktreecreateform.ClampField(d.focus, d.resolution.Kind)
 }
 
-func (d uiWorktreeCreateDialogState) usesBaseRef() bool {
-	return worktreecreateform.UsesBaseRef(d.resolution.Kind)
-}
-
 func (d *uiWorktreeCreateDialogState) moveFocus(delta int) {
 	if d == nil {
 		return
 	}
 	d.focus = worktreecreateform.MoveField(d.focus, d.resolution.Kind, delta)
 	if d.focus == uiWorktreeCreateFieldBranchTarget {
-		moveSingleLineEditorEnd(&d.branchTarget)
+		d.branchTarget.SetCursor(len(d.branchTarget.Text()))
 	}
 	if d.focus == uiWorktreeCreateFieldBaseRef {
-		moveSingleLineEditorEnd(&d.baseRef)
+		d.baseRef.SetCursor(len(d.baseRef.Text()))
 	}
 }
 
@@ -54,10 +49,6 @@ func (d *uiWorktreeCreateDialogState) moveAction(delta int) {
 		return
 	}
 	d.action = worktreecreateform.MoveAction(d.action, delta)
-}
-
-func (d uiWorktreeCreateDialogState) request(kind serverapi.WorktreeCreateTargetResolutionKind) (serverapi.WorktreeCreateRequest, error) {
-	return worktreecreate.Request(singleLineEditorValue(d.branchTarget), singleLineEditorValue(d.baseRef), kind)
 }
 
 func (d uiWorktreeCreateDialogState) resolveState() worktreecreateresolve.State {
@@ -92,11 +83,11 @@ func (d *uiWorktreeCreateDialogState) beginResolveSubmit(query string) (worktree
 }
 
 func (m *uiModel) scheduleWorktreeCreateTargetResolution() tea.Cmd {
-	if m == nil || !m.worktrees.isOpen() || m.worktrees.phase != uiWorktreeOverlayPhaseCreate {
+	if m == nil || !m.worktrees.open || m.worktrees.phase != uiWorktreeOverlayPhaseCreate {
 		return nil
 	}
 	dialog := &m.worktrees.create
-	query := strings.TrimSpace(singleLineEditorValue(dialog.branchTarget))
+	query := strings.TrimSpace(dialog.branchTarget.Text())
 	state, outcome := worktreecreateresolve.Schedule(dialog.resolveState(), query)
 	dialog.applyResolveState(state)
 	if !outcome.Debounce {
@@ -151,7 +142,7 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 				m.closeWorktreeDialog()
 				return m, nil
 			}
-			query := strings.TrimSpace(singleLineEditorValue(dialog.branchTarget))
+			query := strings.TrimSpace(dialog.branchTarget.Text())
 			outcome, ok := dialog.beginResolveSubmit(query)
 			if !ok {
 				return m, nil
@@ -168,9 +159,9 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 	case uiWorktreeCreateFieldBaseRef:
 		cmd = updateSingleLineEditorWithAppKeys(&dialog.baseRef, msg)
 	case uiWorktreeCreateFieldBranchTarget:
-		before := singleLineEditorValue(dialog.branchTarget)
+		before := dialog.branchTarget.Text()
 		cmd = updateSingleLineEditorWithAppKeys(&dialog.branchTarget, msg)
-		if singleLineEditorValue(dialog.branchTarget) != before {
+		if dialog.branchTarget.Text() != before {
 			resolveCmd = m.scheduleWorktreeCreateTargetResolution()
 		}
 	default:

@@ -62,7 +62,7 @@ func InspectSkills(workspaceRoot string, disabledSkills map[string]bool) ([]Skil
 			inspection := inspectSkillAtPath(entry.Name(), skillPath)
 			inspection.SourceKind = string(root.Kind)
 			if inspection.Loaded {
-				if disabledSkills[normalizeSkillToggleName(inspection.Name)] {
+				if disabledSkills[strings.ToLower(sanitizeSkillSingleLine(inspection.Name))] {
 					inspection.Disabled = true
 				}
 				if seenLoadedPaths[inspection.Path] {
@@ -73,7 +73,7 @@ func InspectSkills(workspaceRoot string, disabledSkills map[string]bool) ([]Skil
 					seenLoadedPaths[inspection.Path] = true
 				}
 				if inspection.Loaded && root.Kind != skillSourceGenerated {
-					userSkillNames[normalizeSkillToggleName(inspection.Name)] = true
+					userSkillNames[strings.ToLower(sanitizeSkillSingleLine(inspection.Name))] = true
 				}
 			}
 			inspections = append(inspections, inspection)
@@ -81,7 +81,7 @@ func InspectSkills(workspaceRoot string, disabledSkills map[string]bool) ([]Skil
 	}
 
 	for idx := range inspections {
-		if inspections[idx].Loaded && inspections[idx].SourceKind == string(skillSourceGenerated) && userSkillNames[normalizeSkillToggleName(inspections[idx].Name)] {
+		if inspections[idx].Loaded && inspections[idx].SourceKind == string(skillSourceGenerated) && userSkillNames[strings.ToLower(sanitizeSkillSingleLine(inspections[idx].Name))] {
 			inspections[idx].Shadowed = true
 		}
 	}

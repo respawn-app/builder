@@ -5,34 +5,11 @@ import (
 
 	tuiinput "builder/cli/tui/input"
 	"builder/shared/theme"
+
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
-
-func (m *uiModel) renderStatusLine(width int, style uiStyles) string {
-	return m.layout().renderStatusLine(width, style)
-}
-
-func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
-	return m.layout().renderInputLines(width, style)
-}
-
-func (m *uiModel) renderSlashCommandPicker(width int) []string {
-	return m.layout().renderActivePicker(width)
-}
-
-func (m *uiModel) renderQueuedMessagesPane(width int) []string {
-	return m.layout().renderQueuedMessagesPane(width)
-}
-
-func (m *uiModel) effectiveWidth() int {
-	return m.layout().effectiveWidth()
-}
-
-func (m *uiModel) calcChatLines() int {
-	return m.layout().calcChatLines()
-}
 
 func (m *uiModel) syncViewport() {
 	m.layout().syncViewport()
@@ -52,7 +29,7 @@ func renderFramedEditableInputLines(width, maxContentLines int, spec uiEditableI
 		return []string{padRight("", width)}
 	}
 	renderedField := renderEditableInputField(width, maxContentLines, spec)
-	return renderFramedLines(width, renderEditableInputSoftCursorLines(width, renderedField, lineStyle), borderStyle)
+	return renderFramedLines(width, tuiinput.RenderSoftCursorLines(width, renderedField, lineStyle), borderStyle)
 }
 
 func renderFramedLines(width int, lines []string, borderStyle lipgloss.Style) []string {
@@ -70,7 +47,7 @@ func wrappedEditableInputLines(width int, spec uiEditableInputRenderSpec) []stri
 }
 
 func visibleEditableInputViewport(width, maxContentLines int, spec uiEditableInputRenderSpec) ([]string, int, int) {
-	rendered := visibleEditableInputRender(width, maxContentLines, spec)
+	rendered := renderEditableInputField(width, maxContentLines, spec)
 	cursor := rendered.Cursor
 	if !cursor.Visible {
 		return rendered.Lines, -1, 0
@@ -78,17 +55,9 @@ func visibleEditableInputViewport(width, maxContentLines int, spec uiEditableInp
 	return rendered.Lines, cursor.Row, cursor.Col
 }
 
-func visibleEditableInputRender(width, maxContentLines int, spec uiEditableInputRenderSpec) tuiinput.RenderResult {
-	return renderEditableInputField(width, maxContentLines, spec)
-}
-
 func renderEditableInputField(width, maxContentLines int, spec uiEditableInputRenderSpec) tuiinput.RenderResult {
 	field := editableInputField(width, maxContentLines, spec)
 	return field.Render(width)
-}
-
-func renderEditableInputSoftCursorLines(width int, rendered tuiinput.RenderResult, lineStyle lipgloss.Style) []string {
-	return tuiinput.RenderSoftCursorLines(width, rendered, lineStyle)
 }
 
 func editableInputField(width, maxContentLines int, spec uiEditableInputRenderSpec) tuiinput.Field {

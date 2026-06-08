@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"builder/cli/app/internal/submissionerror"
 	"builder/cli/app/internal/worktreecreateform"
 	"builder/cli/app/internal/worktreedelete"
 	"builder/cli/app/internal/worktreemutation"
@@ -131,23 +132,15 @@ type worktreeDeleteDoneMsg struct {
 	err   error
 }
 
-func newWorktreeDialogEditor(value string) tuiinput.Editor {
-	return newSingleLineEditor(strings.TrimSpace(value))
-}
-
 func newWorktreeCreateDialog(suggestedBranch string) uiWorktreeCreateDialogState {
 	dialog := uiWorktreeCreateDialogState{
-		baseRef:      newWorktreeDialogEditor("HEAD"),
-		branchTarget: newWorktreeDialogEditor(strings.TrimSpace(suggestedBranch)),
+		baseRef:      newSingleLineEditor(strings.TrimSpace("HEAD")),
+		branchTarget: newSingleLineEditor(strings.TrimSpace(suggestedBranch)),
 		focus:        uiWorktreeCreateFieldBranchTarget,
 		action:       uiWorktreeCreateActionCreate,
 	}
 	dialog.syncFocus()
 	return dialog
-}
-
-func (s uiWorktreeOverlayState) isOpen() bool {
-	return s.open
 }
 
 func (s uiWorktreeOverlayState) visibleErrorText() string {
@@ -190,14 +183,6 @@ func (m *uiModel) closeWorktreeOverlay() {
 	}
 	m.worktrees = uiWorktreeOverlayState{}
 	m.restorePrimaryInputMode()
-}
-
-func (m *uiModel) pushWorktreeOverlayIfNeeded() tea.Cmd {
-	return m.activateSurface(uiSurfaceWorktree)
-}
-
-func (m *uiModel) popWorktreeOverlayIfNeeded() tea.Cmd {
-	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) requestWorktreeListCmd() tea.Cmd {
@@ -284,9 +269,9 @@ func (m *uiModel) applyWorktreeIntent() tea.Cmd {
 	if !intent.OpenDelete {
 		return nil
 	}
-	target, err := resolveWorktreeDeletionTargetFromEntries(m.worktrees.entries, intent.ConfirmDeleteTarget)
+	target, err := worktreeview.ResolveDeletionTarget(m.worktrees.entries, intent.ConfirmDeleteTarget)
 	if err != nil {
-		m.worktrees.errorText = formatSubmissionError(err)
+		m.worktrees.errorText = submissionerror.Format(err)
 		return nil
 	}
 	m.recordWorktreeSelection()
@@ -300,19 +285,11 @@ func (m *uiModel) applyWorktreeIntent() tea.Cmd {
 	return nil
 }
 
-func resolveWorktreeDeletionTargetFromEntries(entries []serverapi.WorktreeView, token string) (serverapi.WorktreeView, error) {
-	return worktreeview.ResolveDeletionTarget(entries, token)
-}
-
-func resolveWorktreeTokenFromEntries(entries []serverapi.WorktreeView, token string) (serverapi.WorktreeView, error) {
-	return worktreeview.ResolveToken(entries, token)
-}
-
 func (m *uiModel) suggestedWorktreeBranchFromEntries() string {
 	if m == nil {
 		return ""
 	}
-	if sessionBranch := sanitizeWorktreeBranchSuggestion(m.suggestedWorktreeSessionName()); sessionBranch != "" {
+	if sessionBranch := worktreeview.SanitizeBranchSuggestion(m.suggestedWorktreeSessionName()); sessionBranch != "" {
 		return sessionBranch
 	}
 	return ""
@@ -387,10 +364,11 @@ func (m *uiModel) worktreeMutationService() worktreemutation.Service {
 	}
 	if client, ok := m.runtimeClient().(*sessionRuntimeClient); ok && client != nil {
 		service.Runtime = worktreemutation.RuntimeControl{
-			Context:        client.controlContext,
-			CurrentLeaseID: client.controllerLeaseIDValue,
-			RecoverLease:   client.recoverControllerLease,
-			ReadOnly:       client.isReadOnly,
+			Context:               service.ResolveContext,
+			CurrentLeaseID:        client.controllerLeaseIDValue,
+			RecoverLease:          client.recoverControllerLeaseWithWarning,
+			AppendRecoveryWarning: true,
+			ReadOnly:              client.isReadOnly,
 		}
 	}
 	return service

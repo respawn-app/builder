@@ -293,7 +293,7 @@ func (p *systemClipboardImagePaster) pasteWindows(ctx context.Context) (string, 
 	if tempErr != nil {
 		return "", tempErr
 	}
-	script := fmt.Sprintf("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) { exit 3 }; $image = [System.Windows.Forms.Clipboard]::GetImage(); if ($null -eq $image) { exit 3 }; $image.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png)", escapePowerShellSingleQuoted(path))
+	script := fmt.Sprintf("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) { exit 3 }; $image = [System.Windows.Forms.Clipboard]::GetImage(); if ($null -eq $image) { exit 3 }; $image.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png)", strings.ReplaceAll(path, "'", "''"))
 	if err := p.runner.Run(ctx, powershell, "-NoProfile", "-NonInteractive", "-STA", "-Command", script); err != nil {
 		cleanup()
 		var exitCoder interface{ ExitCode() int }
@@ -466,10 +466,6 @@ func (p *systemClipboardTextCopier) findFirstTool(names ...string) (string, erro
 	return "", errors.Join(errs...)
 }
 
-func escapePowerShellSingleQuoted(path string) string {
-	return strings.ReplaceAll(path, "'", "''")
-}
-
 func isClipboardImagePasteKey(msg tea.KeyMsg) bool {
 	if msg.Paste {
 		return false
@@ -507,7 +503,7 @@ func (m *uiModel) pasteClipboardImageCmd(target uiClipboardPasteTarget) tea.Cmd 
 func (m *uiModel) handleClipboardImagePasteDone(msg clipboardImagePasteDoneMsg) tea.Cmd {
 	if msg.Err != nil {
 		message, kind := clipboardImagePasteStatus(msg.Err)
-		return m.setTransientStatusWithKind(message, kind)
+		return m.sendTransientStatusWithNoticeID(message, kind, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	if strings.TrimSpace(msg.Path) == "" {
 		return nil
@@ -547,9 +543,9 @@ func copyClipboardText(ctx context.Context, copier uiClipboardTextCopier, text s
 func (m *uiModel) handleClipboardTextCopyDone(msg clipboardTextCopyDoneMsg) tea.Cmd {
 	if msg.Err != nil {
 		message, kind := clipboardTextCopyStatus(msg.Err)
-		return m.setTransientStatusWithKind(message, kind)
+		return m.sendTransientStatusWithNoticeID(message, kind, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
-	return m.setTransientStatusWithKind("Copied final answer to clipboard", uiStatusNoticeSuccess)
+	return m.sendTransientStatusWithNoticeID("Copied final answer to clipboard", uiStatusNoticeSuccess, transientStatusDuration, uiStatusNoticeReplace, "")
 }
 
 func clipboardImagePasteStatus(err error) (string, uiStatusNoticeKind) {

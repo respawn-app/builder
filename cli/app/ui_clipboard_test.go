@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -309,7 +310,7 @@ func TestClipboardImagePasteSkipsSlashAutocompleteReplacement(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
 	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "/ne"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
 	updated := next.(*uiModel)
@@ -509,8 +510,7 @@ func TestClipboardImagePasteMissingToolShowsErrorStatusAndPreservesInput(t *test
 }
 
 func TestHelpSectionsIncludeClipboardImagePasteEntry(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	sections := m.helpSections()
+	sections := helpSectionsForGOOS(goruntime.GOOS)
 	for _, section := range sections {
 		for _, entry := range section.Entries {
 			if entry.Description != "paste a clipboard screenshot as a file path" {

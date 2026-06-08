@@ -18,13 +18,13 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 			blocks = append(blocks, reasoningSpec)
 		}
 		entry := m.transcriptInput.Entries[idx]
-		role := m.entryRole(entry)
-		intent := m.entryIntent(entry)
+		role := TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role))
+		intent := role.DisplayIntent(entry.Phase)
 		switch role {
 		case TranscriptRoleToolCall:
 			blocks = append(blocks, m.detailToolCallSpec(idx, entry, consumedResults, resultIndex))
 		case TranscriptRoleToolResult, TranscriptRoleToolResultOK, TranscriptRoleToolResultError:
-			blockRole := toolBlockRoleFromResult(role, RenderIntentTool)
+			blockRole := RenderIntentTool.BaseToolResultIntent(role)
 			text := entry.Text
 			absoluteIndex := m.absoluteTranscriptIndex(idx)
 			blocks = append(blocks, detailBlockSpec{
@@ -60,7 +60,7 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 }
 
 func (m Model) renderFlatCommittedOngoingTranscript() string {
-	return m.CommittedOngoingProjection().Render(detailDivider())
+	return m.CommittedOngoingProjection().Render(TranscriptDivider)
 }
 
 func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
@@ -96,8 +96,8 @@ func (m Model) buildTranscriptBlocks(opts transcriptBlockOptions) []ongoingBlock
 			blocks = append(blocks, reasoningBlock)
 		}
 		entry := m.transcriptInput.Entries[idx]
-		role := m.entryRole(entry)
-		intent := m.entryIntent(entry)
+		role := TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role))
+		intent := role.DisplayIntent(entry.Phase)
 		if opts.mode == transcriptBlockModeOngoing && skipInOngoing(entry) {
 			continue
 		}
@@ -144,7 +144,7 @@ func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role Transcript
 		if opts.mode == transcriptBlockModeOngoing {
 			return ongoingBlock{}, false
 		}
-		blockRole := toolBlockRoleFromResult(role, RenderIntentTool)
+		blockRole := RenderIntentTool.BaseToolResultIntent(role)
 		return ongoingBlock{
 			role:       blockRole,
 			lines:      m.flattenEntry(blockRole, entry.Text),
@@ -177,9 +177,9 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	effectiveMeta := entry.ToolCall
 	if resultIdx >= 0 && m.transcriptInput.Entries[resultIdx].ToolCall != nil {
 		effectiveMeta = m.transcriptInput.Entries[resultIdx].ToolCall
-		combined = compactToolCallText(effectiveMeta, combined)
+		combined = transcript.CompactToolCallText(effectiveMeta, combined)
 		if isPatchToolCall(effectiveMeta) {
-			blockRole = toolBlockRoleFromResult(roleFromEntry(m.transcriptInput.Entries[resultIdx]), RenderIntentToolPatch)
+			blockRole = RenderIntentToolPatch.BaseToolResultIntent(TranscriptRoleFromWire(TranscriptRoleToWire(m.transcriptInput.Entries[resultIdx].Role)))
 		}
 	}
 	lines := m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, effectiveMeta)
@@ -215,7 +215,7 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		if resultEntry.ToolCall != nil {
 			combined = toolCallDisplayText(resultEntry.ToolCall, combined)
 		}
-		resultRole := roleFromEntry(resultEntry)
+		resultRole := TranscriptRoleFromWire(TranscriptRoleToWire(resultEntry.Role))
 		resultSummary = strings.TrimSpace(resultEntry.ToolResultSummary)
 		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != TranscriptRoleToolResultError
 		if trimmedResultText := strings.TrimSpace(resultEntry.Text); trimmedResultText != "" && !omitSuccessfulResult {
@@ -223,7 +223,7 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 			resultText = resultEntry.Text
 		}
 		if resultRole.IsToolResult() {
-			blockRole = toolBlockRoleFromResult(resultRole, blockRole)
+			blockRole = blockRole.BaseToolResultIntent(resultRole)
 			consumed[resultIdx] = struct{}{}
 			entryEnd = resultIdx
 		}
@@ -234,7 +234,7 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	if entryEnd != entryIndex && m.transcriptInput.Entries[entryEnd].ToolCall != nil {
 		meta = cloneToolCallMeta(m.transcriptInput.Entries[entryEnd].ToolCall)
 		if isPatchToolCall(meta) {
-			blockRole = toolBlockRoleFromResult(roleFromEntry(m.transcriptInput.Entries[entryEnd]), RenderIntentToolPatch)
+			blockRole = RenderIntentToolPatch.BaseToolResultIntent(TranscriptRoleFromWire(TranscriptRoleToWire(m.transcriptInput.Entries[entryEnd].Role)))
 		}
 	}
 	return detailBlockSpec{
@@ -263,13 +263,13 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 	entryEnd := entryIndex
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcriptInput.Entries, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcriptInput.Entries[resultIdx]
-		nextRole := roleFromEntry(resultEntry)
+		nextRole := TranscriptRoleFromWire(TranscriptRoleToWire(resultEntry.Role))
 		if nextRole.IsToolResult() {
 			answer = strings.TrimSpace(resultEntry.Text)
 			if opts.mode == transcriptBlockModeOngoing {
 				answer = strings.TrimSpace(ongoingTranscriptText(resultEntry))
 			}
-			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
+			blockRole = blockRole.BaseToolResultIntent(nextRole)
 			consumed[resultIdx] = struct{}{}
 			entryEnd = resultIdx
 		}
@@ -292,11 +292,11 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 	answer := ""
 	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcriptInput.Entries, entryIndex, consumed); resultIdx >= 0 {
-		nextRole := roleFromEntry(m.transcriptInput.Entries[resultIdx])
+		nextRole := TranscriptRoleFromWire(TranscriptRoleToWire(m.transcriptInput.Entries[resultIdx].Role))
 		if nextRole.IsToolResult() {
 			answer = strings.TrimSpace(m.transcriptInput.Entries[resultIdx].Text)
 			resultSummary = strings.TrimSpace(m.transcriptInput.Entries[resultIdx].ToolResultSummary)
-			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
+			blockRole = blockRole.BaseToolResultIntent(nextRole)
 			consumed[resultIdx] = struct{}{}
 		}
 	}
@@ -325,8 +325,8 @@ func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole RenderIntent
 	if opts.mode == transcriptBlockModeDetail {
 		return toolCallDisplayText(entry.ToolCall, entry.Text)
 	}
-	combined := compactToolCallText(entry.ToolCall, entry.Text)
-	if isShellPreviewRole(blockRole) {
+	combined := transcript.CompactToolCallText(entry.ToolCall, entry.Text)
+	if blockRole.IsShellPreview() {
 		combined = compactOngoingShellPreviewText(combined)
 	}
 	return combined
@@ -337,7 +337,7 @@ func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, bl
 	if resultIdx < 0 {
 		return blockRole, combined, -1
 	}
-	nextRole := roleFromEntry(m.transcriptInput.Entries[resultIdx])
+	nextRole := TranscriptRoleFromWire(TranscriptRoleToWire(m.transcriptInput.Entries[resultIdx].Role))
 	if opts.mode == transcriptBlockModeDetail {
 		resultText := m.transcriptInput.Entries[resultIdx].Text
 		omitSuccessfulResult := meta != nil && meta.OmitSuccessfulResult && nextRole != TranscriptRoleToolResultError
@@ -346,7 +346,7 @@ func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, bl
 		}
 	}
 	if nextRole.IsToolResult() {
-		blockRole = toolBlockRoleFromResult(nextRole, blockRole)
+		blockRole = blockRole.BaseToolResultIntent(nextRole)
 		consumed[resultIdx] = struct{}{}
 	}
 	return blockRole, combined, resultIdx
@@ -367,7 +367,7 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role Re
 		if role == RenderIntentReviewerStatus {
 			text = compactReviewerStatusForOngoing(text)
 		} else if role == RenderIntentReviewerSuggestions {
-			text = compactReviewerSuggestionsForOngoing(text)
+			text = strings.TrimSpace(text)
 		}
 	}
 	lines := m.flattenEntry(role, text)
@@ -409,7 +409,7 @@ func (m Model) combinedThinkingText(entryIndex int, consumed map[int]struct{}) s
 		if _, used := consumed[idx]; used {
 			break
 		}
-		if !roleFromEntry(m.transcriptInput.Entries[idx]).IsThinking() {
+		if !TranscriptRoleFromWire(TranscriptRoleToWire(m.transcriptInput.Entries[idx].Role)).IsThinking() {
 			break
 		}
 		nextText := strings.TrimSpace(m.transcriptInput.Entries[idx].Text)
@@ -512,7 +512,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 	if idx < 0 || idx >= len(entries) {
 		return "", false
 	}
-	role := m.entryRole(entries[idx])
+	role := TranscriptRoleFromWire(TranscriptRoleToWire(entries[idx].Role))
 	if role != TranscriptRoleAssistant && role != TranscriptRoleToolCall {
 		return "", false
 	}
@@ -522,7 +522,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 		if _, used := consumed[next]; used {
 			break
 		}
-		if roleFromEntry(entries[next]) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(TranscriptRoleToWire(entries[next].Role)) != TranscriptRoleToolCall {
 			break
 		}
 		actionEnd = next
@@ -534,7 +534,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 	if _, used := consumed[thinkingStart]; used {
 		return "", false
 	}
-	if !roleFromEntry(entries[thinkingStart]).IsThinking() {
+	if !TranscriptRoleFromWire(TranscriptRoleToWire(entries[thinkingStart].Role)).IsThinking() {
 		return "", false
 	}
 
@@ -544,7 +544,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 		if _, used := consumed[j]; used {
 			break
 		}
-		if !roleFromEntry(entries[j]).IsThinking() {
+		if !TranscriptRoleFromWire(TranscriptRoleToWire(entries[j].Role)).IsThinking() {
 			break
 		}
 		nextText := strings.TrimSpace(entries[j].Text)

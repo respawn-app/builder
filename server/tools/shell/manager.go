@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"builder/server/tools/shell/postprocess"
+	"builder/server/tools/shell/shellenv"
 	"builder/shared/config"
 )
 
@@ -120,7 +121,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	cmd := exec.CommandContext(context.Background(), req.Command[0], req.Command[1:]...)
 	cmd.Dir = workdir
 	ownerSessionID := strings.TrimSpace(req.OwnerSessionID)
-	cmd.Env = enrichEnvForSession(os.Environ(), ownerSessionID)
+	cmd.Env = shellenv.EnrichForSession(os.Environ(), ownerSessionID)
 	prepareManagedExec(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -224,7 +225,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		if err != nil {
 			return ExecResult{}, err
 		}
-		display, _, _ := truncate(processed.Output, maxOutputChars)
+		display, _, _ := truncateWithTemplate(processed.Output, maxOutputChars, truncationBannerTemplate)
 		result.ExitCode = postprocess.CloneIntPtr(snapshot.ExitCode)
 		result.Output = display
 		result.Warning = processed.Warning
@@ -237,7 +238,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if err != nil {
 		return ExecResult{}, err
 	}
-	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
+	display, _, _ := truncateWithTemplate(processed.Output, maxOutputChars, backgroundTruncationBannerTemplate)
 	result.Running = true
 	result.Backgrounded = true
 	result.MovedToBackground = true
@@ -323,7 +324,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 			return ExecResult{}, err
 		}
 	}
-	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
+	display, _, _ := truncateWithTemplate(processed.Output, maxOutputChars, backgroundTruncationBannerTemplate)
 	if snapshot.Backgrounded && snapshot.ExitCode != nil && consumedCompletion {
 		entry.markCompletionNoticeConsumed()
 	}
@@ -372,7 +373,7 @@ func (m *Manager) InlineOutput(id string, maxChars int) (string, string, error) 
 			return preview, snapshot.LogPath, nil
 		}
 		if strings.TrimSpace(snapshot.RecentOutput) != "" {
-			recent, _, _ := truncateBackgroundOutput(snapshot.RecentOutput, maxOutputChars)
+			recent, _, _ := truncateWithTemplate(snapshot.RecentOutput, maxOutputChars, backgroundTruncationBannerTemplate)
 			return recent, snapshot.LogPath, nil
 		}
 		if !snapshot.Running || time.Now().After(deadline) {

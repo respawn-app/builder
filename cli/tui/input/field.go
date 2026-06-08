@@ -1,6 +1,10 @@
 package input
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/rivo/uniseg"
+)
 
 type Field struct {
 	Editor      Editor
@@ -135,7 +139,7 @@ func normalizeCursorCol(col int, width int) int {
 }
 
 func padDisplayRight(text string, width int) string {
-	current := displayWidth(text)
+	current := uniseg.StringWidth(text)
 	if current >= width {
 		return text
 	}

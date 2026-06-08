@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"builder/server/tools"
-	"builder/shared/toolspec"
 
 	"github.com/google/uuid"
 )
@@ -295,7 +294,7 @@ func buildToolOutputSummary(resp Response) (string, error) {
 	if freeform == "" {
 		return "", errors.New("non-approval questions require an answer")
 	}
-	return freeformToolOutputSummary(freeform), nil
+	return "User answered: " + freeform, nil
 }
 
 func selectedOptionToolOutputSummary(optionNumber int, freeform string) string {
@@ -304,10 +303,6 @@ func selectedOptionToolOutputSummary(optionNumber int, freeform string) string {
 		return base
 	}
 	return base + " They also said: " + freeform
-}
-
-func freeformToolOutputSummary(freeform string) string {
-	return "User answered: " + freeform
 }
 
 func buildOngoingToolOutputText(req Request, resp Response) string {
@@ -374,10 +369,6 @@ type Tool struct {
 
 func NewTool(b *Broker) *Tool {
 	return &Tool{broker: b}
-}
-
-func (t *Tool) Name() toolspec.ID {
-	return toolspec.ToolAskQuestion
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

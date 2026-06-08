@@ -14,6 +14,10 @@ import (
 	"builder/cli/app/internal/authoauth"
 	"builder/cli/app/internal/authview"
 	"builder/cli/app/internal/oauthadapter"
+	serverauth "builder/server/auth"
+	serverauthflow "builder/server/authflow"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type authInteraction = authflowadapter.InteractionRequest
@@ -23,7 +27,6 @@ type authInteractor interface {
 	NeedsInteraction(req authInteraction) bool
 	Interact(ctx context.Context, req authInteraction) (authflowadapter.InteractionOutcome, error)
 	LookupEnv(key string) string
-	Interactive() bool
 }
 
 type headlessAuthInteractor struct {
@@ -55,11 +58,11 @@ func newInteractiveAuthInteractor() authInteractor {
 		stdin:       os.Stdin,
 		stderr:      os.Stderr,
 		lookupEnv:   os.Getenv,
-		openBrowser: oauthadapter.OpenBrowser,
+		openBrowser: serverauth.OpenBrowser,
 		startCallbackListener: func() (oauthCallbackListener, error) {
-			return oauthadapter.StartOAuthCallbackListener()
+			return serverauth.StartOAuthCallbackListener()
 		},
-		runDeviceFlow:   oauthadapter.RunOpenAIDeviceCodeFlow,
+		runDeviceFlow:   serverauth.RunOpenAIDeviceCodeFlow,
 		runCallbackPage: runAuthCallbackPage,
 	}
 }
@@ -69,11 +72,11 @@ func newHeadlessAuthInteractor() authInteractor {
 }
 
 func (i *interactiveAuthInteractor) WrapStore(base authflowadapter.Store) authflowadapter.Store {
-	return authflowadapter.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
+	return serverauthflow.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
 }
 
 func (i *headlessAuthInteractor) WrapStore(base authflowadapter.Store) authflowadapter.Store {
-	return authflowadapter.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
+	return serverauthflow.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
 }
 
 func (i *interactiveAuthInteractor) LookupEnv(key string) string {
@@ -83,16 +86,12 @@ func (i *interactiveAuthInteractor) LookupEnv(key string) string {
 	return i.lookupEnv(key)
 }
 
-func (i *interactiveAuthInteractor) Interactive() bool { return true }
-
 func (i *headlessAuthInteractor) LookupEnv(key string) string {
 	if i == nil || i.lookupEnv == nil {
 		return os.Getenv(key)
 	}
 	return i.lookupEnv(key)
 }
-
-func (i *headlessAuthInteractor) Interactive() bool { return false }
 
 func (i *headlessAuthInteractor) NeedsInteraction(req authInteraction) bool {
 	return authinteraction.HeadlessNeedsInteraction(req)
@@ -106,7 +105,7 @@ func (i *headlessAuthInteractor) Interact(ctx context.Context, req authInteracti
 	if req.StartupErr != nil {
 		return authflowadapter.InteractionOutcome{}, req.StartupErr
 	}
-	return authflowadapter.InteractionOutcome{}, authflowadapter.EnsureEmptyStartupReady()
+	return authflowadapter.InteractionOutcome{}, serverauth.EnsureStartupReady(serverauth.EmptyState())
 }
 
 func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authInteraction) (authflowadapter.InteractionOutcome, error) {
@@ -141,9 +140,9 @@ func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authIntera
 			}
 			return authflowadapter.InteractionOutcome{}, nil
 		case authMethodChoiceBrowserAuto:
-			method, err = i.runOAuthBrowserAuto(ctx, req.OAuthOptions, req.Theme)
+			method, err = i.authOAuthRunner(req.Theme).BrowserAuto(ctx, req.OAuthOptions)
 		case authMethodChoiceBrowserPaste:
-			method, err = i.runOAuthBrowserPaste(ctx, req.OAuthOptions, req.Theme)
+			method, err = i.authOAuthRunner(req.Theme).BrowserPaste(ctx, req.OAuthOptions)
 		case authMethodChoiceDevice:
 			method, err = i.authOAuthRunner(req.Theme).Device(ctx, req.OAuthOptions)
 		default:
@@ -234,27 +233,19 @@ func (i *interactiveAuthInteractor) chooseMethod(req authInteraction) (authMetho
 	return picked.Choice, nil
 }
 
-func (i *interactiveAuthInteractor) runOAuthBrowserAuto(ctx context.Context, opts oauthadapter.OpenAIOAuthOptions, theme string) (authflowadapter.Method, error) {
-	return i.authOAuthRunner(theme).BrowserAuto(ctx, opts)
-}
-
-func (i *interactiveAuthInteractor) runOAuthBrowserPaste(ctx context.Context, opts oauthadapter.OpenAIOAuthOptions, theme string) (authflowadapter.Method, error) {
-	return i.authOAuthRunner(theme).BrowserPaste(ctx, opts)
-}
-
 func (i *interactiveAuthInteractor) authOAuthRunner(theme string) authoauth.Runner {
 	runDeviceFlow := i.runDeviceFlow
 	if runDeviceFlow == nil {
-		runDeviceFlow = oauthadapter.RunOpenAIDeviceCodeFlow
+		runDeviceFlow = serverauth.RunOpenAIDeviceCodeFlow
 	}
 	openBrowser := i.openBrowser
 	if openBrowser == nil {
-		openBrowser = oauthadapter.OpenBrowser
+		openBrowser = serverauth.OpenBrowser
 	}
 	startListener := i.startCallbackListener
 	if startListener == nil {
 		startListener = func() (oauthCallbackListener, error) {
-			return oauthadapter.StartOAuthCallbackListener()
+			return serverauth.StartOAuthCallbackListener()
 		}
 	}
 	runner := authoauth.Runner{
@@ -266,7 +257,7 @@ func (i *interactiveAuthInteractor) authOAuthRunner(theme string) authoauth.Runn
 			return runDeviceFlow(ctx, opts, onCode)
 		},
 		Prompt: func(label string) (string, error) {
-			return i.prompt(authPromptStyle(theme).Render(label))
+			return i.prompt(lipgloss.NewStyle().Foreground(uiPalette(theme).primary).Bold(true).Render(label))
 		},
 		Presenter: interactiveAuthOAuthPresenter{interactor: i, theme: theme},
 	}

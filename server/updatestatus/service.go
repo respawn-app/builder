@@ -45,11 +45,11 @@ func WithLatestReleaseURL(url string) Option {
 
 func NewService(currentVersion string, opts ...Option) *Service {
 	s := &Service{
-		currentVersion: normalizeVersion(currentVersion),
+		currentVersion: strings.TrimPrefix(strings.TrimSpace(currentVersion), "v"),
 		latestURL:      defaultLatestReleaseURL,
 		client:         http.DefaultClient,
 		status: clientui.UpdateStatus{
-			CurrentVersion: normalizeVersion(currentVersion),
+			CurrentVersion: strings.TrimPrefix(strings.TrimSpace(currentVersion), "v"),
 		},
 	}
 	for _, opt := range opts {
@@ -153,15 +153,11 @@ func (s *Service) fetchLatestVersion(ctx context.Context) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return "", err
 	}
-	latest := normalizeVersion(payload.TagName)
+	latest := strings.TrimPrefix(strings.TrimSpace(payload.TagName), "v")
 	if !isComparableVersion(latest) {
 		return "", errors.New("latest release tag is not semantic")
 	}
 	return latest, nil
-}
-
-func normalizeVersion(version string) string {
-	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
 func isComparableVersion(version string) bool {
@@ -187,7 +183,7 @@ func compareVersions(left string, right string) int {
 }
 
 func versionParts(version string) []int {
-	rawParts := strings.Split(normalizeVersion(version), ".")
+	rawParts := strings.Split(strings.TrimPrefix(strings.TrimSpace(version), "v"), ".")
 	if len(rawParts) != 3 {
 		return nil
 	}

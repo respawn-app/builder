@@ -3,6 +3,7 @@ package shell
 import (
 	"builder/server/tools"
 	"builder/server/tools/shell/postprocess"
+	"builder/server/tools/shell/shellenv"
 	"builder/shared/config"
 	"builder/shared/toolspec"
 	"context"
@@ -122,7 +123,7 @@ func envSliceToMap(t *testing.T, in []string) map[string]string {
 }
 
 func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
-	env := envSliceToMap(t, enrichEnv([]string{
+	env := envSliceToMap(t, shellenv.EnrichForSession([]string{
 		"TERM=xterm-256color",
 		"AGENT=other",
 		"GIT_EDITOR=vim",
@@ -135,7 +136,7 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 		"npm_config_progress=true",
 		"YARN_ENABLE_PROGRESS_BARS=true",
 		"KEEP=1",
-	}))
+	}, ""))
 
 	if env["TERM"] != "dumb" {
 		t.Fatalf("TERM = %q, want dumb", env["TERM"])
@@ -179,7 +180,7 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 }
 
 func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
-	env := envSliceToMap(t, enrichEnvForSession([]string{
+	env := envSliceToMap(t, shellenv.EnrichForSession([]string{
 		"BUILDER_SESSION_ID=stale",
 		"KEEP=1",
 	}, "session-abc"))
@@ -220,7 +221,7 @@ func TestEnrichEnvAddsManagedRGConfigPathWhenAvailable(t *testing.T) {
 		t.Fatalf("ensure managed rg config file: %v", err)
 	}
 
-	env := envSliceToMap(t, enrichEnv([]string{"KEEP=1"}))
+	env := envSliceToMap(t, shellenv.EnrichForSession([]string{"KEEP=1"}, ""))
 	want := filepath.Join(home, ".builder", "rg.conf")
 	if env["RIPGREP_CONFIG_PATH"] != want {
 		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want %q", env["RIPGREP_CONFIG_PATH"], want)
@@ -234,7 +235,7 @@ func TestEnrichEnvKeepsUserRIPGREPConfigPath(t *testing.T) {
 		t.Fatalf("ensure managed rg config file: %v", err)
 	}
 
-	env := envSliceToMap(t, enrichEnv([]string{"RIPGREP_CONFIG_PATH=/tmp/user-rg.conf"}))
+	env := envSliceToMap(t, shellenv.EnrichForSession([]string{"RIPGREP_CONFIG_PATH=/tmp/user-rg.conf"}, ""))
 	if env["RIPGREP_CONFIG_PATH"] != "/tmp/user-rg.conf" {
 		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want /tmp/user-rg.conf", env["RIPGREP_CONFIG_PATH"])
 	}
@@ -242,7 +243,7 @@ func TestEnrichEnvKeepsUserRIPGREPConfigPath(t *testing.T) {
 
 func TestSanitizeOutputStripsANSIAndControlSequences(t *testing.T) {
 	in := "\x1b[31mred\x1b[0m\r\nline2\a\b\tok\rline3"
-	out := sanitizeOutput(in)
+	out := postprocess.SanitizeOutput(in)
 
 	if strings.Contains(out, "\x1b[") {
 		t.Fatalf("output still contains ANSI escape: %q", out)
@@ -257,7 +258,7 @@ func TestSanitizeOutputStripsANSIAndControlSequences(t *testing.T) {
 
 func TestTruncateBannerUsesByteWording(t *testing.T) {
 	in := strings.Repeat("a", headTailSize+headTailSize+10)
-	out, truncated, removed := truncate(in, 100)
+	out, truncated, removed := truncateWithTemplate(in, 100, truncationBannerTemplate)
 	if !truncated {
 		t.Fatal("expected truncation")
 	}
@@ -477,7 +478,7 @@ func TestManagerSubscribeOutputCloseUnblocksNext(t *testing.T) {
 
 func TestTruncateBackgroundOutputBannerReferencesLogFile(t *testing.T) {
 	in := strings.Repeat("a", headTailSize+headTailSize+10)
-	out, truncated, removed := truncateBackgroundOutput(in, 100)
+	out, truncated, removed := truncateWithTemplate(in, 100, backgroundTruncationBannerTemplate)
 	if !truncated {
 		t.Fatal("expected truncation")
 	}
@@ -494,7 +495,7 @@ func TestTruncateBackgroundOutputBannerReferencesLogFile(t *testing.T) {
 
 func TestTruncateDoesNotDuplicateWholeOutputWhenShorterThanHeadTailWindow(t *testing.T) {
 	in := strings.Repeat("x", 543)
-	out, truncated, removed := truncate(in, 80)
+	out, truncated, removed := truncateWithTemplate(in, 80, truncationBannerTemplate)
 	if !truncated {
 		t.Fatal("expected truncation")
 	}
@@ -508,7 +509,7 @@ func TestTruncateDoesNotDuplicateWholeOutputWhenShorterThanHeadTailWindow(t *tes
 		t.Fatalf("did not expect full input duplicated in output, got %q", out)
 	}
 	headLen, tailLen := truncationSegmentLengths(len(in), 80)
-	wantMax := headLen + tailLen + truncationBannerLen(removed)
+	wantMax := headLen + tailLen + len(fmt.Sprintf(truncationBannerTemplate, removed))
 	if got := len(out); got > wantMax {
 		t.Fatalf("expected bounded truncated output <= %d bytes, got %d", wantMax, got)
 	}

@@ -3,7 +3,6 @@ package tui
 import (
 	"builder/shared/theme"
 	"builder/shared/transcript"
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -20,7 +19,7 @@ func buildToolResultIndex(entries []TranscriptEntry) toolResultIndex {
 		cursors: make(map[string]int),
 	}
 	for idx, entry := range entries {
-		if !roleFromEntry(entry).IsToolResult() {
+		if !TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)).IsToolResult() {
 			continue
 		}
 		callID := strings.TrimSpace(entry.ToolCallID)
@@ -39,7 +38,7 @@ func (index toolResultIndex) findMatchingToolResultIndex(entries []TranscriptEnt
 	callID := strings.TrimSpace(entries[callIdx].ToolCallID)
 	nextIdx := callIdx + 1
 	if nextIdx < len(entries) {
-		if _, used := consumed[nextIdx]; !used && roleFromEntry(entries[nextIdx]).IsToolResult() {
+		if _, used := consumed[nextIdx]; !used && TranscriptRoleFromWire(TranscriptRoleToWire(entries[nextIdx].Role)).IsToolResult() {
 			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
 			if callID == nextCallID {
 				return nextIdx
@@ -65,10 +64,6 @@ func (index toolResultIndex) findMatchingToolResultIndex(entries []TranscriptEnt
 	}
 	index.cursors[callID] = len(results)
 	return -1
-}
-
-func toolBlockRoleFromResult(role TranscriptRole, baseRole RenderIntent) RenderIntent {
-	return baseRole.BaseToolResultIntent(role)
 }
 
 func (m Model) roleSymbol(role RenderIntent) string {
@@ -232,14 +227,6 @@ func styleForRole(role RenderIntent, p palette) lipgloss.Style {
 	}
 }
 
-func (m Model) entryRole(entry TranscriptEntry) TranscriptRole {
-	return roleFromEntry(entry)
-}
-
-func (m Model) entryIntent(entry TranscriptEntry) RenderIntent {
-	return intentFromEntry(entry)
-}
-
 type palette struct {
 	foregroundColor          rgbColor
 	selectionForegroundColor rgbColor
@@ -319,34 +306,6 @@ func rgbColorFromHex(hex string) rgbColor {
 	return rgbColor{r: r, g: g, b: b}
 }
 
-func themeForegroundColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Foreground.TrueColor)
-}
-
-func themePreviewColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Subdued.TrueColor)
-}
-
-func themePrimaryColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).App.Primary.TrueColor)
-}
-
-func themeModeBackgroundColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).App.ModeBg.TrueColor)
-}
-
-func themeSuccessColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Success.TrueColor)
-}
-
-func themeWarningColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Warning.TrueColor)
-}
-
-func themeErrorColor(themeName string) rgbColor {
-	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Error.TrueColor)
-}
-
 func (m Model) ansiIntentPalette() ansiIntentPalette {
 	colors := m.palette()
 	return ansiIntentPalette{
@@ -357,14 +316,6 @@ func (m Model) ansiIntentPalette() ansiIntentPalette {
 		WarningForeground: colors.warningColor,
 		ErrorForeground:   colors.errorColor,
 	}
-}
-
-func (c rgbColor) hexString() string {
-	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
-}
-
-func normalizeTheme(themeName string) string {
-	return theme.Resolve(themeName)
 }
 
 func splitLines(v string) []string {

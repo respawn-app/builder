@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"builder/server/llm"
@@ -31,15 +30,6 @@ func (s compactionOverflowRepairStats) Add(other compactionOverflowRepairStats) 
 		PatchInputsCollapsed:  s.PatchInputsCollapsed + other.PatchInputsCollapsed,
 		EstimatedSavedTokens:  s.EstimatedSavedTokens + other.EstimatedSavedTokens,
 	}
-}
-
-func compactionOverflowRepairDiagnosticText(stats compactionOverflowRepairStats) string {
-	return fmt.Sprintf(
-		"Context compaction succeeded after collapsing tool payloads: %d shell outputs, %d patch inputs, ~%d tokens omitted. Full original tool payloads remain in pre-compaction transcript history but are omitted from the compacted model context.",
-		stats.ShellOutputsCollapsed,
-		stats.PatchInputsCollapsed,
-		stats.EstimatedSavedTokens,
-	)
 }
 
 func collapseCompactionOverflowToolPayloadsAfterSavings(items []llm.ResponseItem, targetSavedTokens int, existingSavedTokens int) ([]llm.ResponseItem, compactionOverflowRepairStats) {
@@ -73,7 +63,7 @@ func collapseCompactionOverflowToolPayloadsAfterSavings(items []llm.ResponseItem
 			stats.EstimatedSavedTokens += saved
 			currentSavedTokens += saved
 		case llm.ResponseItemTypeCustomToolCall:
-			if compactionOverflowRepairToolID(item, callTools) != toolspec.ToolPatch || isCollapsedCompactionOverflowPatchInput(item.CustomInput) {
+			if compactionOverflowRepairToolID(item, callTools) != toolspec.ToolPatch || item.CustomInput == compactionOverflowCollapsedText {
 				continue
 			}
 			replacement, saved := collapsedCompactionOverflowPatchInput(item.CustomInput)
@@ -181,19 +171,11 @@ func isCollapsedCompactionOverflowShellOutput(output json.RawMessage) bool {
 
 func collapsedCompactionOverflowPatchInput(input string) (string, int) {
 	before := estimateTextTokens(input)
-	replacement := patchInputCollapsePayload()
+	replacement := compactionOverflowCollapsedText
 	after := estimateTextTokens(replacement)
 	saved := before - after
 	if saved <= 0 {
 		return "", 0
 	}
 	return replacement, saved
-}
-
-func patchInputCollapsePayload() string {
-	return compactionOverflowCollapsedText
-}
-
-func isCollapsedCompactionOverflowPatchInput(input string) bool {
-	return input == compactionOverflowCollapsedText
 }

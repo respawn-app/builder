@@ -165,7 +165,7 @@ func (c *strictCountingStatusCollector) CollectEnvironment(context.Context, uiSt
 
 func TestTUIStrictIOStatusOpenDefersCollectorBaseToCommand(t *testing.T) {
 	collector := &strictCountingStatusCollector{}
-	repository := newMemoryUIStatusRepository()
+	repository := appstatus.NewMemoryRepository()
 	request := populateStatusRequestCacheKeys(uiStatusRequest{WorkspaceRoot: t.TempDir(), CurrentTime: time.Now()})
 	repository.StoreGit(request.CacheKeys.Git, uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "cached"}}, time.Now())
 	m := newProjectedStaticUIModel(

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -20,18 +19,6 @@ type ansiStyleTransform struct {
 	PreserveBackground  bool
 	TransformForeground func(rgbColor) rgbColor
 	ForceFaint          bool
-}
-
-func applyDefaultForeground(text string, target rgbColor) string {
-	return applyANSIStyleIntents(text, ansiIntentPalette{ThemeForeground: target}, ThemeForeground)
-}
-
-func applySelectionColors(text string, foreground, background rgbColor) string {
-	return applyANSIStyleTransform(text, ansiStyleTransform{DefaultForeground: &foreground, DefaultBackground: &background})
-}
-
-func applySelectionBackground(text string, background rgbColor) string {
-	return applyANSIStyleTransform(text, ansiStyleTransform{DefaultBackground: &background, PreserveBackground: true})
 }
 
 func ApplyThemeDefaultForeground(text, theme string) string {
@@ -334,13 +321,13 @@ func parseTrueColor(params xansi.Params, start int) (rgbColor, int, bool) {
 	g, _, okG := params.Param(start+1, -1)
 	b, _, okB := params.Param(start+2, -1)
 	if okR && okG && okB && r >= 0 && g >= 0 && b >= 0 {
-		return rgbColor{r: clampColor(r), g: clampColor(g), b: clampColor(b)}, 3, true
+		return rgbColor{r: clamp(r, 0, 255), g: clamp(g, 0, 255), b: clamp(b, 0, 255)}, 3, true
 	}
 	r, _, okR = params.Param(start+1, -1)
 	g, _, okG = params.Param(start+2, -1)
 	b, _, okB = params.Param(start+3, -1)
 	if okR && okG && okB && r >= 0 && g >= 0 && b >= 0 {
-		return rgbColor{r: clampColor(r), g: clampColor(g), b: clampColor(b)}, 4, true
+		return rgbColor{r: clamp(r, 0, 255), g: clamp(g, 0, 255), b: clamp(b, 0, 255)}, 4, true
 	}
 	return rgbColor{}, 0, false
 }
@@ -351,10 +338,6 @@ func foregroundParams(color rgbColor) []string {
 
 func backgroundParams(color rgbColor) []string {
 	return []string{"48", "2", strconv.Itoa(color.r), strconv.Itoa(color.g), strconv.Itoa(color.b)}
-}
-
-func foregroundEscape(color rgbColor) string {
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", color.r, color.g, color.b)
 }
 
 func ansi256Color(index int) rgbColor {
@@ -372,7 +355,7 @@ func ansi256Color(index int) rgbColor {
 		}
 	}
 	gray := 8 + (index-232)*10
-	gray = clampColor(gray)
+	gray = clamp(gray, 0, 255)
 	return rgbColor{r: gray, g: gray, b: gray}
 }
 
@@ -396,8 +379,4 @@ func ansi16Color(index int) rgbColor {
 		{r: 255, g: 255, b: 255},
 	}
 	return palette[clamp(index, 0, len(palette)-1)]
-}
-
-func clampColor(value int) int {
-	return clamp(value, 0, 255)
 }

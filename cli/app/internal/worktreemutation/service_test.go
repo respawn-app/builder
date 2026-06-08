@@ -98,7 +98,7 @@ func TestMutationRetriesAfterRecoverableLeaseError(t *testing.T) {
 	recoverCalls := 0
 	service := newTestService(client)
 	service.Runtime.CurrentLeaseID = func() string { return leaseID }
-	service.Runtime.RecoverLease = func(context.Context, error) error {
+	service.Runtime.RecoverLease = func(context.Context, error, bool) error {
 		recoverCalls++
 		leaseID = "lease-2"
 		return nil
@@ -210,7 +210,7 @@ func newTestService(client *testWorktreeClient) Service {
 				return context.WithTimeout(context.Background(), time.Second)
 			},
 			CurrentLeaseID: func() string { return "lease-1" },
-			RecoverLease:   func(context.Context, error) error { return nil },
+			RecoverLease:   func(context.Context, error, bool) error { return nil },
 		},
 		NewClientRequestID: func() string { return "request-1" },
 	}

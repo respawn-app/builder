@@ -12,10 +12,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-func resolveSettingsFilePath() (string, error) {
-	return resolveSettingsFilePathInRoot("")
-}
-
 func resolveSettingsFilePathInRoot(root string) (string, error) {
 	trimmed := strings.TrimSpace(root)
 	if trimmed != "" {
@@ -83,7 +79,7 @@ func writeSettingsFileIfMissing(path string, contents string) (bool, error) {
 }
 
 func WriteDefaultSettingsFile() (path string, created bool, err error) {
-	path, err = resolveSettingsFilePath()
+	path, err = resolveSettingsFilePathInRoot("")
 	if err != nil {
 		return "", false, err
 	}
@@ -94,7 +90,7 @@ func WriteDefaultSettingsFile() (path string, created bool, err error) {
 	if exists {
 		return path, false, nil
 	}
-	created, err = writeSettingsFileIfMissing(path, defaultSettingsTOML())
+	created, err = writeSettingsFileIfMissing(path, settingsTOMLWithRenderingOptions(configRegistry.defaultState().Settings, true, nil, nil))
 	if err != nil {
 		return "", false, fmt.Errorf("write default settings file: %w", err)
 	}
@@ -102,7 +98,7 @@ func WriteDefaultSettingsFile() (path string, created bool, err error) {
 }
 
 func WriteDefaultSettingsFileWithTheme(selectedTheme string) (path string, created bool, err error) {
-	path, err = resolveSettingsFilePath()
+	path, err = resolveSettingsFilePathInRoot("")
 	if err != nil {
 		return "", false, err
 	}
@@ -129,7 +125,7 @@ type OnboardingWriteOptions struct {
 }
 
 func WriteSettingsFileForOnboardingWithOptions(settings Settings, options OnboardingWriteOptions) (string, error) {
-	path, err := resolveSettingsFilePath()
+	path, err := resolveSettingsFilePathInRoot("")
 	if err != nil {
 		return "", err
 	}

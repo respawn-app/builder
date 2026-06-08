@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"builder/cli/app/internal/serverbridge"
+	"builder/server/bootstrap"
 	"builder/shared/config"
 	"builder/shared/sessioncontract"
 	"builder/shared/sessionenv"
@@ -34,7 +34,7 @@ func ResolveSessionConfig(req Request) (config.App, error) {
 	if err != nil {
 		return config.App{}, err
 	}
-	plan, err := serverbridge.ResolveConfig(serverbridge.BootstrapRequest{
+	plan, err := bootstrap.ResolveConfig(bootstrap.Request{
 		WorkspaceRoot:         workspaceRoot,
 		WorkspaceRootExplicit: req.WorkspaceRootExplicit,
 		SessionID:             req.SessionID,
@@ -58,7 +58,7 @@ func ResolveRunPromptConfig(req Request) (RunPromptResult, error) {
 	if sessionID == "" && !req.WorkspaceRootExplicit {
 		sessionID = contextSessionID
 	}
-	plan, err := serverbridge.ResolveConfig(serverbridge.BootstrapRequest{
+	plan, err := bootstrap.ResolveConfig(bootstrap.Request{
 		WorkspaceRoot:         workspaceRoot,
 		WorkspaceRootExplicit: req.WorkspaceRootExplicit,
 		SessionID:             sessionID,
@@ -73,7 +73,7 @@ func ResolveRunPromptConfig(req Request) (RunPromptResult, error) {
 	}
 	contextAgentRole := ""
 	if contextSessionID != "" {
-		if agentRole, err := serverbridge.ResolveSessionAgentRole(plan.Config.PersistenceRoot, contextSessionID); err == nil {
+		if agentRole, err := bootstrap.ResolveSessionAgentRole(plan.Config.PersistenceRoot, contextSessionID); err == nil {
 			contextAgentRole = agentRole
 		}
 	}

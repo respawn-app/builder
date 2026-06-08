@@ -2,6 +2,7 @@ package app
 
 import (
 	"builder/server/runtime"
+	"builder/server/runtimewire"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"context"
@@ -60,12 +61,12 @@ func TestProjectRuntimeEventChannelStopsWhenRequested(t *testing.T) {
 }
 
 func TestProjectRuntimeEventChannelPublishesExplicitStreamGapAfterBridgeGap(t *testing.T) {
-	bridge := newRuntimeEventBridge(1, nil)
+	bridge := runtimewire.NewEventBridge(1, nil)
 	bridge.Publish(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "first"})
 	bridge.Publish(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 
 	stop := make(chan struct{})
-	out := projectRuntimeEventChannel(bridge.Channel(), bridge.GapChannel(), stop)
+	out := projectRuntimeEventChannel(bridge.Events, bridge.GapEvents, stop)
 	t.Cleanup(func() { close(stop) })
 
 	deadline := time.After(2 * time.Second)
@@ -166,13 +167,13 @@ func TestBridgeGapHydratesTranscriptStateInProjectedUI(t *testing.T) {
 			},
 		}},
 	}
-	bridge := newRuntimeEventBridge(1, nil)
+	bridge := runtimewire.NewEventBridge(1, nil)
 	// Overflow the bridge before starting the projector so recovery is deterministic.
 	bridge.Publish(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "partial"})
 	bridge.Publish(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 
 	stop := make(chan struct{})
-	runtimeEvents := projectRuntimeEventChannel(bridge.Channel(), bridge.GapChannel(), stop)
+	runtimeEvents := projectRuntimeEventChannel(bridge.Events, bridge.GapEvents, stop)
 	t.Cleanup(func() { close(stop) })
 
 	events := make([]clientui.Event, 0, 2)

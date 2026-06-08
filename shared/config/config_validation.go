@@ -9,10 +9,6 @@ import (
 	"builder/shared/theme"
 )
 
-func validateSettings(v Settings, sources map[string]string) error {
-	return configRegistry.validate(settingsState{Settings: v}, sources)
-}
-
 func validateSubagentRoleState(state settingsState, sources map[string]string) error {
 	if len(sources) == 0 {
 		return nil
@@ -144,7 +140,7 @@ func validateProviderOverrideRequiresModel(state settingsState, sources map[stri
 }
 
 func validateProviderOverrideValue(state settingsState, _ map[string]string) error {
-	switch normalizeProviderOverride(state.Settings.ProviderOverride) {
+	switch strings.ToLower(strings.TrimSpace(state.Settings.ProviderOverride)) {
 	case "", "openai", "anthropic":
 		return nil
 	default:
@@ -153,7 +149,7 @@ func validateProviderOverrideValue(state settingsState, _ map[string]string) err
 }
 
 func validateOpenAIBaseURL(state settingsState, _ map[string]string) error {
-	provider := normalizeProviderOverride(state.Settings.ProviderOverride)
+	provider := strings.ToLower(strings.TrimSpace(state.Settings.ProviderOverride))
 	if strings.TrimSpace(state.Settings.OpenAIBaseURL) != "" && provider != "" && provider != "openai" {
 		return fmt.Errorf("provider_override %q conflicts with openai_base_url; openai_base_url requires provider_override=openai or unset", state.Settings.ProviderOverride)
 	}
@@ -168,11 +164,6 @@ func validateProviderCapabilitiesProviderID(state settingsState, _ map[string]st
 	if capabilities.SupportsResponsesAPI || capabilities.SupportsResponsesCompact || capabilities.SupportsRequestInputTokenCount || capabilities.SupportsPromptCacheKey || capabilities.SupportsNativeWebSearch || capabilities.SupportsReasoningEncrypted || capabilities.SupportsServerSideContextEdit || capabilities.IsOpenAIFirstParty {
 		return fmt.Errorf("provider_capabilities.provider_id must not be empty when provider capability overrides are set")
 	}
-	return nil
-}
-
-func validateThinkingLevel(state settingsState, _ map[string]string) error {
-	// Custom/provider-specific thinking levels are intentionally allowed.
 	return nil
 }
 
@@ -276,10 +267,6 @@ func validateCacheWarningMode(state settingsState, _ map[string]string) error {
 	}
 }
 
-func normalizeWorkflowCompletionMode(raw string) WorkflowCompletionMode {
-	return WorkflowCompletionMode(strings.ToLower(strings.TrimSpace(raw)))
-}
-
 func validateWorkflowSettings(state settingsState, _ map[string]string) error {
 	if state.Settings.Workflow.CompletionMode == "" &&
 		state.Settings.Workflow.Concurrency == 0 &&
@@ -366,7 +353,7 @@ func validateReviewer(state settingsState, sources map[string]string) error {
 	default:
 		return fmt.Errorf("invalid reviewer.model_verbosity %q (expected low|medium|high)", reviewer.ModelVerbosity)
 	}
-	provider := normalizeProviderOverride(reviewer.ProviderOverride)
+	provider := strings.ToLower(strings.TrimSpace(reviewer.ProviderOverride))
 	switch provider {
 	case "", "openai", "anthropic":
 	default:
@@ -475,8 +462,4 @@ func normalizeReviewerAuth(raw string) string {
 	default:
 		return strings.TrimSpace(raw)
 	}
-}
-
-func normalizeProviderOverride(raw string) string {
-	return strings.ToLower(strings.TrimSpace(raw))
 }

@@ -107,10 +107,6 @@ func testDialWorkspace(context.Context, config.App, string, string) (*client.Rem
 	return new(client.Remote), nil
 }
 
-func testSupportsAll(protocol.CapabilityFlags) bool {
-	return true
-}
-
 func boundProjectDial(context.Context, config.App) (ProjectViewRemote, error) {
 	return boundProjectView(func(context.Context, serverapi.ProjectBindingPlanRequest) (serverapi.ProjectBindingPlanResponse, error) {
 		return boundPlanResponse(), nil
@@ -127,7 +123,7 @@ func testRemotePolicy(dialProject func(context.Context, config.App) (ProjectView
 		AttachTimeout:   time.Second,
 		DialProjectView: dialProject,
 		DialWorkspace:   testDialWorkspace,
-		Supports:        testSupportsAll,
+		Supports:        func(protocol.CapabilityFlags) bool { return true },
 	}
 }
 

@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"builder/server/runtime"
+	"builder/server/runtimewire"
 )
 
 func TestRuntimeEventBridgeDropsWhenFullWithoutBlocking(t *testing.T) {
 	var dropCount uint64
-	bridge := newRuntimeEventBridge(1, func(total uint64, _ runtime.Event) {
+	bridge := runtimewire.NewEventBridge(1, func(total uint64, _ runtime.Event) {
 		dropCount = total
 	})
 
@@ -29,7 +30,7 @@ func TestRuntimeEventBridgeDropsWhenFullWithoutBlocking(t *testing.T) {
 		t.Fatal("Publish appears to block under full buffer")
 	}
 
-	if got := bridge.Dropped(); got == 0 {
+	if got := bridge.Dropped.Load(); got == 0 {
 		t.Fatal("expected dropped events under saturation")
 	}
 	if dropCount == 0 {
@@ -38,12 +39,12 @@ func TestRuntimeEventBridgeDropsWhenFullWithoutBlocking(t *testing.T) {
 }
 
 func TestRuntimeEventBridgeDeliversWhenConsumerReady(t *testing.T) {
-	bridge := newRuntimeEventBridge(2, nil)
+	bridge := runtimewire.NewEventBridge(2, nil)
 	want := runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1"}
 	bridge.Publish(want)
 
 	select {
-	case got := <-bridge.Channel():
+	case got := <-bridge.Events:
 		if got.Kind != want.Kind || got.StepID != want.StepID {
 			t.Fatalf("unexpected event: %+v", got)
 		}
@@ -51,7 +52,7 @@ func TestRuntimeEventBridgeDeliversWhenConsumerReady(t *testing.T) {
 		t.Fatal("expected event delivery")
 	}
 
-	if got := bridge.Dropped(); got != 0 {
+	if got := bridge.Dropped.Load(); got != 0 {
 		t.Fatalf("unexpected dropped count: %d", got)
 	}
 }

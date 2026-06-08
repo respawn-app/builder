@@ -108,7 +108,7 @@ type WorktreeDeleteResponse struct {
 }
 
 func (r WorktreeListRequest) Validate() error {
-	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
 		return err
 	}
 	return validateControllerLeaseID(r.ControllerLeaseID)
@@ -128,7 +128,7 @@ func (r WorktreeCreateRequest) Validate() error {
 	if err := validateClientRequestID(r.ClientRequestID); err != nil {
 		return err
 	}
-	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
 		return err
 	}
 	if err := validateControllerLeaseID(r.ControllerLeaseID); err != nil {
@@ -156,7 +156,7 @@ func (r WorktreeSwitchRequest) Validate() error {
 	if err := validateClientRequestID(r.ClientRequestID); err != nil {
 		return err
 	}
-	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
 		return err
 	}
 	if err := validateControllerLeaseID(r.ControllerLeaseID); err != nil {
@@ -172,7 +172,7 @@ func (r WorktreeDeleteRequest) Validate() error {
 	if err := validateClientRequestID(r.ClientRequestID); err != nil {
 		return err
 	}
-	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
 		return err
 	}
 	if err := validateControllerLeaseID(r.ControllerLeaseID); err != nil {

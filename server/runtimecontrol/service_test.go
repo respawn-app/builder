@@ -114,8 +114,6 @@ func (c *cancelObservingRuntimeControlClient) ProviderCapabilities(context.Conte
 
 type fakeShellHandler struct{}
 
-func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolExecCommand }
-
 func (fakeShellHandler) Call(context.Context, tools.Call) (tools.Result, error) {
 	return tools.Result{Output: json.RawMessage(`{"output":"ok","exit_code":0,"truncated":false}`)}, nil
 }
@@ -605,7 +603,7 @@ func TestServiceCompleteGoalFeedbackIncludesCookDuration(t *testing.T) {
 }
 
 func TestServiceSetSessionNameReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
-	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	if err := store.SetName("before"); err != nil {
 		t.Fatalf("persist initial session name: %v", err)
 	}
@@ -755,7 +753,7 @@ func TestServiceSubmitUserTurnDedupesSuccessfulRetry(t *testing.T) {
 }
 
 func TestServiceSubmitUserShellCommandDedupesSuccessfulRetry(t *testing.T) {
-	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	req := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 
 	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
@@ -775,7 +773,7 @@ func TestServiceSubmitUserShellCommandDedupesSuccessfulRetry(t *testing.T) {
 }
 
 func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
-	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	verifier := &stubRuntimeLeaseVerifier{}
 	service := NewService(stubRuntimeResolver{engine: engine}, nil).
 		WithControllerLeaseVerifier(verifier)
@@ -797,7 +795,7 @@ func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidati
 }
 
 func TestServiceSubmitUserShellCommandRejectsClientRequestIDPayloadMismatch(t *testing.T) {
-	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	first := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 	if err := service.SubmitUserShellCommand(context.Background(), first); err != nil {
 		t.Fatalf("SubmitUserShellCommand first: %v", err)

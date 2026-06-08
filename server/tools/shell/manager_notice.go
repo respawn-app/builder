@@ -90,7 +90,7 @@ func backgroundNoticePreview(evt Event, maxChars int, mode BackgroundOutputMode)
 		if mode == BackgroundOutputVerbose {
 			return preview, countOutputLines(preview), false
 		}
-		display, truncated, _ := truncateBackgroundOutput(preview, maxChars)
+		display, truncated, _ := truncateWithTemplate(preview, maxChars, backgroundTruncationBannerTemplate)
 		return display, countOutputLines(preview), truncated
 	}
 	if strings.TrimSpace(evt.Snapshot.LogPath) != "" {
@@ -213,14 +213,14 @@ func (b *backgroundPreviewBuilder) writeSanitized(text string) {
 	for _, r := range text {
 		switch {
 		case r == '\r':
-			b.emitByte('\n')
+			b.emitBytes([]byte{'\n'})
 			b.prevCR = true
 		case r == '\n':
 			if b.prevCR {
 				b.prevCR = false
 				continue
 			}
-			b.emitByte('\n')
+			b.emitBytes([]byte{'\n'})
 		case r == '\t' || !unicode.IsControl(r):
 			b.prevCR = false
 			var buf [4]byte
@@ -230,10 +230,6 @@ func (b *backgroundPreviewBuilder) writeSanitized(text string) {
 			b.prevCR = false
 		}
 	}
-}
-
-func (b *backgroundPreviewBuilder) emitByte(v byte) {
-	b.emitBytes([]byte{v})
 }
 
 func (b *backgroundPreviewBuilder) emitBytes(data []byte) {
@@ -286,7 +282,7 @@ func (b *backgroundPreviewBuilder) Preview() string {
 	removed := b.totalBytes - headLen - tailLen
 	head := string(b.head[:headLen])
 	tail := string(b.tail[len(b.tail)-tailLen:])
-	return formatBackgroundTruncatedPreview(head, removed, tail)
+	return fmt.Sprintf("%s%s%s", head, fmt.Sprintf(backgroundTruncationBannerTemplate, removed), tail)
 }
 
 func (b *backgroundPreviewBuilder) LineCount() int {

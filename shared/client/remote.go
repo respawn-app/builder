@@ -103,26 +103,14 @@ func callUnscopedRPC[Req any, Resp any](c *Remote, ctx context.Context, method s
 	return resp, c.callUnscoped(ctx, method, req, &resp)
 }
 
-func callUnscopedRPCNoResponse[Req any](c *Remote, ctx context.Context, method string, req Req) error {
-	return c.callUnscoped(ctx, method, req, &struct{}{})
-}
-
 func callControlRPC[Req any, Resp any](c *Remote, ctx context.Context, method string, req Req) (Resp, error) {
 	var resp Resp
 	return resp, c.call(ctx, method, req, &resp)
 }
 
-func callControlRPCNoResponse[Req any](c *Remote, ctx context.Context, method string, req Req) error {
-	return c.call(ctx, method, req, nil)
-}
-
 func callDedicatedRPC[Req any, Resp any](c *Remote, ctx context.Context, requestID string, method string, req Req) (Resp, error) {
 	var resp Resp
 	return resp, c.callDedicated(ctx, requestID, method, req, &resp)
-}
-
-func callDedicatedRPCNoResponse[Req any](c *Remote, ctx context.Context, requestID string, method string, req Req) error {
-	return c.callDedicated(ctx, requestID, method, req, nil)
 }
 
 func (c *Remote) GetAuthBootstrapStatus(ctx context.Context, req serverapi.AuthGetBootstrapStatusRequest) (serverapi.AuthGetBootstrapStatusResponse, error) {
@@ -226,7 +214,7 @@ func (c *Remote) UpdateWorkflowNodeGroup(ctx context.Context, req serverapi.Work
 }
 
 func (c *Remote) DeleteWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupDeleteRequest) error {
-	return callUnscopedRPCNoResponse[serverapi.WorkflowNodeGroupDeleteRequest](c, ctx, protocol.MethodWorkflowNodeGroupDelete, req)
+	return c.callUnscoped(ctx, protocol.MethodWorkflowNodeGroupDelete, req, &struct{}{})
 }
 
 func (c *Remote) AddWorkflowNode(ctx context.Context, req serverapi.WorkflowNodeAddRequest) (serverapi.WorkflowNodeAddResponse, error) {
@@ -322,7 +310,7 @@ func (c *Remote) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTas
 }
 
 func (c *Remote) CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error {
-	return callUnscopedRPCNoResponse[serverapi.WorkflowTaskCancelRequest](c, ctx, protocol.MethodWorkflowTaskCancel, req)
+	return c.callUnscoped(ctx, protocol.MethodWorkflowTaskCancel, req, &struct{}{})
 }
 
 func (c *Remote) ListWorkflowAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
@@ -334,7 +322,7 @@ func (c *Remote) ListWorkflowTaskAttention(ctx context.Context, req serverapi.Wo
 }
 
 func (c *Remote) AnswerWorkflowTaskQuestion(ctx context.Context, req serverapi.WorkflowTaskQuestionAnswerRequest) error {
-	return callUnscopedRPCNoResponse[serverapi.WorkflowTaskQuestionAnswerRequest](c, ctx, protocol.MethodWorkflowTaskQuestionAnswer, req)
+	return c.callUnscoped(ctx, protocol.MethodWorkflowTaskQuestionAnswer, req, &struct{}{})
 }
 
 func (c *Remote) AddWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error) {
@@ -346,11 +334,11 @@ func (c *Remote) ListWorkflowTaskComments(ctx context.Context, req serverapi.Wor
 }
 
 func (c *Remote) ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentReplaceRequest) error {
-	return callUnscopedRPCNoResponse[serverapi.WorkflowTaskCommentReplaceRequest](c, ctx, protocol.MethodWorkflowTaskCommentReplace, req)
+	return c.callUnscoped(ctx, protocol.MethodWorkflowTaskCommentReplace, req, &struct{}{})
 }
 
 func (c *Remote) DeleteWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentDeleteRequest) error {
-	return callUnscopedRPCNoResponse[serverapi.WorkflowTaskCommentDeleteRequest](c, ctx, protocol.MethodWorkflowTaskCommentDelete, req)
+	return c.callUnscoped(ctx, protocol.MethodWorkflowTaskCommentDelete, req, &struct{}{})
 }
 
 func (c *Remote) ListWorkflowTaskActivity(ctx context.Context, req serverapi.WorkflowTaskActivityListRequest) (serverapi.WorkflowTaskActivityListResponse, error) {
@@ -449,11 +437,11 @@ func (c *Remote) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessio
 }
 
 func (c *Remote) SetSessionName(ctx context.Context, req serverapi.RuntimeSetSessionNameRequest) error {
-	return callControlRPCNoResponse(c, ctx, protocol.MethodRuntimeSetSessionName, req)
+	return c.call(ctx, protocol.MethodRuntimeSetSessionName, req, nil)
 }
 
 func (c *Remote) SetThinkingLevel(ctx context.Context, req serverapi.RuntimeSetThinkingLevelRequest) error {
-	return callControlRPCNoResponse(c, ctx, protocol.MethodRuntimeSetThinkingLevel, req)
+	return c.call(ctx, protocol.MethodRuntimeSetThinkingLevel, req, nil)
 }
 
 func (c *Remote) SetFastModeEnabled(ctx context.Context, req serverapi.RuntimeSetFastModeEnabledRequest) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
@@ -469,7 +457,7 @@ func (c *Remote) SetAutoCompactionEnabled(ctx context.Context, req serverapi.Run
 }
 
 func (c *Remote) AppendLocalEntry(ctx context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
-	return callControlRPCNoResponse(c, ctx, protocol.MethodRuntimeAppendLocalEntry, req)
+	return c.call(ctx, protocol.MethodRuntimeAppendLocalEntry, req, nil)
 }
 
 func (c *Remote) ShouldCompactBeforeUserMessage(ctx context.Context, req serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
@@ -485,15 +473,15 @@ func (c *Remote) SubmitUserTurn(ctx context.Context, req serverapi.RuntimeSubmit
 }
 
 func (c *Remote) SubmitUserShellCommand(ctx context.Context, req serverapi.RuntimeSubmitUserShellCommandRequest) error {
-	return callDedicatedRPCNoResponse(c, ctx, "runtime-submit-user-shell-command", protocol.MethodRuntimeSubmitUserShellCommand, req)
+	return c.callDedicated(ctx, "runtime-submit-user-shell-command", protocol.MethodRuntimeSubmitUserShellCommand, req, nil)
 }
 
 func (c *Remote) CompactContext(ctx context.Context, req serverapi.RuntimeCompactContextRequest) error {
-	return callDedicatedRPCNoResponse(c, ctx, "runtime-compact-context", protocol.MethodRuntimeCompactContext, req)
+	return c.callDedicated(ctx, "runtime-compact-context", protocol.MethodRuntimeCompactContext, req, nil)
 }
 
 func (c *Remote) CompactContextForPreSubmit(ctx context.Context, req serverapi.RuntimeCompactContextForPreSubmitRequest) error {
-	return callDedicatedRPCNoResponse(c, ctx, "runtime-compact-context-pre-submit", protocol.MethodRuntimeCompactContextForPreSubmit, req)
+	return c.callDedicated(ctx, "runtime-compact-context-pre-submit", protocol.MethodRuntimeCompactContextForPreSubmit, req, nil)
 }
 
 func (c *Remote) HasQueuedUserWork(ctx context.Context, req serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
@@ -505,7 +493,7 @@ func (c *Remote) SubmitQueuedUserMessages(ctx context.Context, req serverapi.Run
 }
 
 func (c *Remote) Interrupt(ctx context.Context, req serverapi.RuntimeInterruptRequest) error {
-	return callDedicatedRPCNoResponse(c, ctx, "runtime-interrupt", protocol.MethodRuntimeInterrupt, req)
+	return c.callDedicated(ctx, "runtime-interrupt", protocol.MethodRuntimeInterrupt, req, nil)
 }
 
 func (c *Remote) QueueUserMessage(ctx context.Context, req serverapi.RuntimeQueueUserMessageRequest) (serverapi.RuntimeQueueUserMessageResponse, error) {
@@ -517,7 +505,7 @@ func (c *Remote) DiscardQueuedUserMessage(ctx context.Context, req serverapi.Run
 }
 
 func (c *Remote) RecordPromptHistory(ctx context.Context, req serverapi.RuntimeRecordPromptHistoryRequest) error {
-	return callControlRPCNoResponse(c, ctx, protocol.MethodRuntimeRecordPromptHistory, req)
+	return c.call(ctx, protocol.MethodRuntimeRecordPromptHistory, req, nil)
 }
 
 func (c *Remote) ShowGoal(ctx context.Context, req serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
@@ -657,7 +645,7 @@ func dialRemoteURL(ctx context.Context, rpcURL string, projectID string, workspa
 	if err != nil {
 		return nil, err
 	}
-	return dialRemoteWithPlan(ctx, remoteDialPlan{endpoints: []rpcwire.Endpoint{endpoint}}, projectID, workspaceID, workspaceRoot)
+	return dialRemoteWithTransport(ctx, remoteDialPlan{endpoints: []rpcwire.Endpoint{endpoint}}, rpcwire.NewWebSocketTransport(), projectID, workspaceID, workspaceRoot)
 }
 
 func dialConfiguredRemote(ctx context.Context, cfg config.App, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
@@ -665,7 +653,7 @@ func dialConfiguredRemote(ctx context.Context, cfg config.App, projectID string,
 	if err != nil {
 		return nil, err
 	}
-	return dialRemoteWithPlan(ctx, plan, projectID, workspaceID, workspaceRoot)
+	return dialRemoteWithTransport(ctx, plan, rpcwire.NewWebSocketTransport(), projectID, workspaceID, workspaceRoot)
 }
 
 var _ ProjectViewClient = (*Remote)(nil)

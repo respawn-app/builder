@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 
+	sharedtheme "builder/shared/theme"
+
 	"github.com/alecthomas/chroma/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	glamouransi "github.com/charmbracelet/glamour/ansi"
@@ -13,8 +15,8 @@ type rendererStyleAdapter struct {
 	theme string
 }
 
-func newRendererStyleAdapter(theme string) rendererStyleAdapter {
-	return rendererStyleAdapter{theme: normalizeTheme(theme)}
+func newRendererStyleAdapter(themeName string) rendererStyleAdapter {
+	return rendererStyleAdapter{theme: sharedtheme.Resolve(themeName)}
 }
 
 func (a rendererStyleAdapter) markdownConfig() glamouransi.StyleConfig {
@@ -28,7 +30,7 @@ func (a rendererStyleAdapter) markdownConfig() glamouransi.StyleConfig {
 		chromaCfg := *cfg.CodeBlock.Chroma
 		cfg.CodeBlock.Chroma = &chromaCfg
 	}
-	foreground := themeForegroundColor(a.theme).hexString()
+	foreground := sharedtheme.ResolvePalette(a.theme).Transcript.Foreground.TrueColor
 	zero := uint(0)
 	cfg.Document.Margin = &zero
 	cfg.Document.BlockPrefix = ""
@@ -42,10 +44,6 @@ func (a rendererStyleAdapter) markdownConfig() glamouransi.StyleConfig {
 	}
 	clearMarkdownBackgrounds(&cfg)
 	return cfg
-}
-
-func (a rendererStyleAdapter) chromaStyle() *chroma.Style {
-	return withTransparentChromaBackgrounds(a.baseChromaStyle(), chroma.MustParseColour(themeForegroundColor(a.theme).hexString()))
 }
 
 func (a rendererStyleAdapter) baseChromaStyle() *chroma.Style {

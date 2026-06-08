@@ -20,7 +20,7 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 	if err != nil {
 		return compactionResult{}, err
 	}
-	requestItems := compactionConversationReplicaItems(input)
+	requestItems := llm.CloneResponseItems(input)
 	baseRequest := llm.CompactionRequest{
 		Model:        locked.Model,
 		Instructions: instructions,
@@ -51,12 +51,8 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 	}, nil
 }
 
-func compactionConversationReplicaItems(items []llm.ResponseItem) []llm.ResponseItem {
-	return llm.CloneResponseItems(items)
-}
-
 func compactionConversationWithPromptItems(items []llm.ResponseItem, instructions string) []llm.ResponseItem {
-	conversation := compactionConversationReplicaItems(items)
+	conversation := llm.CloneResponseItems(items)
 	prompt := strings.TrimSpace(instructions)
 	if prompt == "" {
 		return conversation
@@ -82,7 +78,7 @@ func (e *Engine) compactWithContextRepairRetry(
 		if err == nil {
 			return resp, currentInput, repairStats, nil
 		}
-		if !isCompactionContextOverflow(err) || attempt == len(compactionOverflowRepairTargetPercents) {
+		if !llm.IsContextLengthOverflowError(err) || attempt == len(compactionOverflowRepairTargetPercents) {
 			return llm.CompactionResponse{}, nil, repairStats, err
 		}
 
@@ -181,10 +177,6 @@ func (e *Engine) compactionCacheObservationRequest(ctx context.Context, request 
 	return req, true, nil
 }
 
-func isCompactionContextOverflow(err error) bool {
-	return llm.IsContextLengthOverflowError(err)
-}
-
 func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string, mode compactionMode) (compactionResult, error) {
 	summary, repairStats, err := e.localCompactionSummaryWithRepair(ctx, input, instructions, mode)
 	if err != nil {
@@ -241,7 +233,7 @@ func (e *Engine) localCompactionSummaryWithRepair(ctx context.Context, input []l
 		if err == nil {
 			return summary, repairStats, nil
 		}
-		if !isCompactionContextOverflow(err) || repairAttempt == len(compactionOverflowRepairTargetPercents) {
+		if !llm.IsContextLengthOverflowError(err) || repairAttempt == len(compactionOverflowRepairTargetPercents) {
 			return "", repairStats, err
 		}
 		targetSavedTokens := compactionOverflowRepairTargetTokens(contextWindowTokens, repairAttempt+1)

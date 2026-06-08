@@ -21,7 +21,7 @@ func resolveSubagentSettings(base config.Settings, providerBase config.Settings,
 	}
 	role, hasRole := base.Subagents[normalizedRole]
 	if !hasRole && normalizedRole != config.BuiltInSubagentRoleFast {
-		return config.Settings{}, "", unrecognizedSubagentRoleError(normalizedRole, config.AvailableSubagentRoleNames(base, false))
+		return config.Settings{}, "", fmt.Errorf("Unrecognized role %q. It may have been removed by the user during the session. Available roles: [%s]", normalizedRole, strings.Join(config.AvailableSubagentRoleNames(base, false), ", "))
 	}
 	resolved := cloneSettings(base)
 	providerSettings := cloneSettings(providerBase)
@@ -46,10 +46,6 @@ func resolveSubagentSettings(base config.Settings, providerBase config.Settings,
 		warning = fastRoleSameAsMainWarning
 	}
 	return resolved, warning, nil
-}
-
-func unrecognizedSubagentRoleError(role string, available []string) error {
-	return fmt.Errorf("Unrecognized role %q. It may have been removed by the user during the session. Available roles: [%s]", role, strings.Join(available, ", "))
 }
 
 func applyBuiltInRoleHeuristics(settings *config.Settings, roleName string, providerID string, allowModelOverride bool) bool {

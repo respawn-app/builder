@@ -17,9 +17,7 @@ type Result struct {
 	SettingsPath         string
 }
 
-type InteractiveRunner interface {
-	RunInteractiveOnboarding(ctx context.Context, cfg config.App, authState auth.State) (Result, error)
-}
+type InteractiveRunner func(ctx context.Context, cfg config.App, authState auth.State) (Result, error)
 
 func EnsureReady(ctx context.Context, cfg config.App, mgr *auth.Manager, interactive bool, reloadConfig func() (config.App, error), runner InteractiveRunner) (config.App, bool, error) {
 	if cfg.Source.SettingsFileExists {
@@ -52,7 +50,7 @@ func EnsureReady(ctx context.Context, cfg config.App, mgr *auth.Manager, interac
 	if err != nil {
 		return cfg, false, err
 	}
-	result, err := runner.RunInteractiveOnboarding(ctx, cfg, state)
+	result, err := runner(ctx, cfg, state)
 	if err != nil {
 		return cfg, false, err
 	}

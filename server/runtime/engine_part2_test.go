@@ -396,7 +396,7 @@ func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
 		t.Fatalf("mark locked: %v", err)
 	}
 
-	firstEngine := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	firstEngine := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 272_000,
@@ -409,7 +409,7 @@ func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
 		t.Fatalf("first estimated tool calls = %d, want 185", got)
 	}
 
-	secondEngine := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	secondEngine := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 400_000,
@@ -662,7 +662,7 @@ func TestSetAutoCompactionDisabledConcurrentWithBusyStepSkipsCompactionForCurren
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}}), Config{
 		Model:                 "gpt-5",
 		AutoCompactTokenLimit: 350000,
 	})
@@ -704,7 +704,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 			Client:        &fakeClient{},
 		},
 	}
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), cfg)
 	changed, mode, err := eng.SetReviewerEnabled(true)
 	if err != nil {
 		t.Fatalf("enable reviewer: %v", err)
@@ -716,7 +716,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("reviewer frequency = %q, want edits", got)
 	}
 
-	restarted := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
+	restarted := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), cfg)
 	if got := restarted.ReviewerFrequency(); got != "off" {
 		t.Fatalf("reviewer frequency after restart = %q, want off", got)
 	}
@@ -725,7 +725,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
 	dir := t.TempDir()
 	store := mustCreateTestSessionAt(t, dir)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "off",
@@ -749,7 +749,7 @@ func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
 func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
 	dir := t.TempDir()
 	store := mustCreateTestSessionAt(t, dir)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "off",

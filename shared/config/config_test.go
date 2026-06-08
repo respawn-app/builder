@@ -677,7 +677,7 @@ func TestLoadSubagentRoleRejectsPersistenceRoot(t *testing.T) {
 }
 
 func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.ModelCapabilities.SupportsReasoningEffort = true
 	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
 		ProviderID:                     "openai-compatible",
@@ -686,7 +686,7 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 		SupportsPromptCacheKey:         true,
 		SupportsServerSideContextEdit:  true,
 	}
-	toml := settingsTOML(settings)
+	toml := settingsTOMLWithRenderingOptions(settings, true, nil, nil)
 
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
@@ -723,7 +723,7 @@ func TestWriteSettingsFileForOnboardingDoesNotOverwriteExistingFile(t *testing.T
 	t.Setenv("HOME", home)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	writeConfigTestFile(t, configPath, "model = \"existing\"\n")
-	_, err := WriteSettingsFileForOnboarding(defaultSettings())
+	_, err := WriteSettingsFileForOnboarding(configRegistry.defaultState().Settings)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected existing settings file error, got %v", err)
 	}

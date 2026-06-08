@@ -3,6 +3,7 @@ package app
 import (
 	"builder/cli/tui"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 	"strings"
 )
 
@@ -117,7 +118,7 @@ func (w uiDetailTranscriptWindow) matchesPage(page clientui.TranscriptPage) bool
 		return false
 	}
 	for i := range page.Entries {
-		if !transcriptEntryMatchesChatEntry(w.entries[i], page.Entries[i]) {
+		if !transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(w.entries[i]), transcriptPayloadFromClientEntry(page.Entries[i])) {
 			return false
 		}
 	}

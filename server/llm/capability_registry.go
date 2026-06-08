@@ -32,7 +32,7 @@ func lookupProviderContract(provider Provider) (ProviderContract, bool) {
 }
 
 func lookupProviderVariantContract(providerID string) (providerVariantRegistration, bool) {
-	key := normalizeCapabilityRegistryKey(providerID)
+	key := strings.ToLower(strings.TrimSpace(providerID))
 	if key == "" {
 		return providerVariantRegistration{}, false
 	}
@@ -41,7 +41,7 @@ func lookupProviderVariantContract(providerID string) (providerVariantRegistrati
 }
 
 func LookupModelCapabilityContract(model string) (ModelCapabilityContract, bool) {
-	key := normalizeCapabilityRegistryKey(model)
+	key := strings.ToLower(strings.TrimSpace(model))
 	if key == "" {
 		return ModelCapabilityContract{}, false
 	}
@@ -130,10 +130,6 @@ func isLoopbackOpenAIBaseURL(baseURL string) bool {
 	}
 	parsedIP := net.ParseIP(hostname)
 	return parsedIP != nil && parsedIP.IsLoopback()
-}
-
-func normalizeCapabilityRegistryKey(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func LockedModelCapabilitiesForModel(model string) session.LockedModelCapabilities {

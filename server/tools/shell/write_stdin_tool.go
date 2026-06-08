@@ -10,7 +10,6 @@ import (
 
 	"builder/server/tools"
 	"builder/server/tools/shell/postprocess"
-	"builder/shared/toolspec"
 )
 
 type writeStdinInput struct {
@@ -38,10 +37,6 @@ func NewWriteStdinTool(outputLimit int, background *Manager) *WriteStdinTool {
 		outputLimit = defaultLimit
 	}
 	return &WriteStdinTool{outputLimit: outputLimit, background: background}
-}
-
-func (t *WriteStdinTool) Name() toolspec.ID {
-	return toolspec.ToolWriteStdin
 }
 
 func (t *WriteStdinTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

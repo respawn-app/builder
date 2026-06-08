@@ -32,15 +32,11 @@ func newRuntimeEntry(engine *runtime.Engine) *runtimeEntry {
 	}
 }
 
-func normalizeRegistrySessionID(sessionID string) string {
-	return strings.TrimSpace(sessionID)
-}
-
 func (d *runtimeDirectory) Register(sessionID string, engine *runtime.Engine) *runtimeEntry {
 	if d == nil || engine == nil {
 		return nil
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return nil
 	}
@@ -56,7 +52,7 @@ func (d *runtimeDirectory) Unregister(sessionID string, engine *runtime.Engine) 
 	if d == nil {
 		return "", nil
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return "", nil
 	}
@@ -87,7 +83,7 @@ func (d *runtimeDirectory) Entry(sessionID string) *runtimeEntry {
 	if d == nil {
 		return nil
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return nil
 	}

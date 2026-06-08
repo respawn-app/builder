@@ -32,12 +32,8 @@ func (m *uiModel) moveWorktreeSelection(delta int) {
 }
 
 func (m *uiModel) moveWorktreeSelectionPage(deltaPages int) {
-	rows := m.worktreeRowsPerPage()
+	rows := worktreeviewport.RowsPerPage(m.termHeight, worktreeOverlayHeaderLines, worktreeOverlayFooterLines, worktreeOverlayRowLines)
 	m.moveWorktreeSelection(rows * deltaPages)
-}
-
-func (m *uiModel) worktreeRowsPerPage() int {
-	return worktreeviewport.RowsPerPage(m.termHeight, worktreeOverlayHeaderLines, worktreeOverlayFooterLines, worktreeOverlayRowLines)
 }
 
 func (m *uiModel) selectFirstWorktreeRow() {
@@ -86,8 +82,8 @@ func (c uiInputController) startWorktreeOverlayCmd(intent uiWorktreeOpenIntent) 
 	m := c.model
 	m.openWorktreeOverlay(intent)
 	refreshCmd := m.requestWorktreeListCmd()
-	spinnerCmd := m.ensureSpinnerTicking()
-	if overlayCmd := m.pushWorktreeOverlayIfNeeded(); overlayCmd != nil {
+	spinnerCmd := m.reconcileSpinnerTicking(false)
+	if overlayCmd := m.activateSurface(uiSurfaceWorktree); overlayCmd != nil {
 		return tea.Batch(overlayCmd, refreshCmd, spinnerCmd)
 	}
 	return tea.Batch(refreshCmd, spinnerCmd)
@@ -98,9 +94,9 @@ func (c uiInputController) stopWorktreeOverlayCmd() tea.Cmd {
 	if m.worktrees.switchPending {
 		return nil
 	}
-	overlayCmd := m.popWorktreeOverlayIfNeeded()
+	overlayCmd := m.restoreTranscriptSurface()
 	m.closeWorktreeOverlay()
-	spinnerCmd := m.ensureSpinnerTicking()
+	spinnerCmd := m.reconcileSpinnerTicking(false)
 	if overlayCmd != nil {
 		return tea.Batch(overlayCmd, spinnerCmd)
 	}
@@ -121,7 +117,7 @@ func (c uiInputController) handleWorktreeOverlayKey(msg tea.KeyMsg) (tea.Model, 
 			return m, c.interruptBusyRuntime()
 		}
 		m.exitAction = UIActionExit
-		if overlayCmd := m.popWorktreeOverlayIfNeeded(); overlayCmd != nil {
+		if overlayCmd := m.restoreTranscriptSurface(); overlayCmd != nil {
 			m.closeWorktreeOverlay()
 			return m, tea.Sequence(overlayCmd, tea.Quit)
 		}
@@ -147,29 +143,29 @@ func (c uiInputController) handleWorktreeOverlayKey(msg tea.KeyMsg) (tea.Model, 
 		m.selectLastWorktreeRow()
 		return m, nil
 	case "r":
-		return m, tea.Batch(m.requestWorktreeListCmd(), m.ensureSpinnerTicking())
+		return m, tea.Batch(m.requestWorktreeListCmd(), m.reconcileSpinnerTicking(false))
 	case "c", "n":
 		return m, m.openCreateWorktreeDialog()
 	case "d":
 		target, ok := m.selectedWorktreeRow()
 		if !ok {
-			return m, c.showErrorStatus("Select a worktree to delete")
+			return m, c.model.sendTransientStatusWithNoticeID("Select a worktree to delete", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 		}
 		if target.IsMain {
-			return m, c.showErrorStatus("Main workspace is not deletable")
+			return m, c.model.sendTransientStatusWithNoticeID("Main workspace is not deletable", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 		}
 		m.worktrees.intent = uiWorktreeOpenIntent{OpenDelete: true, ConfirmDeleteTarget: target.WorktreeID}
-		return m, tea.Batch(m.requestWorktreeListCmd(), m.ensureSpinnerTicking())
+		return m, tea.Batch(m.requestWorktreeListCmd(), m.reconcileSpinnerTicking(false))
 	case "x":
 		target, ok := m.selectedWorktreeRow()
 		if !ok {
-			return m, c.showErrorStatus("Select a worktree to delete")
+			return m, c.model.sendTransientStatusWithNoticeID("Select a worktree to delete", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 		}
 		if target.IsMain {
-			return m, c.showErrorStatus("Main workspace is not deletable")
+			return m, c.model.sendTransientStatusWithNoticeID("Main workspace is not deletable", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 		}
 		m.worktrees.intent = uiWorktreeOpenIntent{OpenDelete: true, ConfirmDeleteTarget: target.WorktreeID, PreferDeleteBranch: true}
-		return m, tea.Batch(m.requestWorktreeListCmd(), m.ensureSpinnerTicking())
+		return m, tea.Batch(m.requestWorktreeListCmd(), m.reconcileSpinnerTicking(false))
 	case "enter":
 		if m.worktrees.selection == 0 {
 			return m, m.openCreateWorktreeDialog()
@@ -179,7 +175,7 @@ func (c uiInputController) handleWorktreeOverlayKey(msg tea.KeyMsg) (tea.Model, 
 			return m, nil
 		}
 		if target.IsCurrent {
-			return m, c.showTransientStatus("Already current worktree")
+			return m, c.model.sendTransientStatusWithNoticeID("Already current worktree", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, "")
 		}
 		return m, m.worktreeSwitchCmd(target)
 	default:

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/tools"
 	"builder/shared/toolspec"
@@ -33,12 +34,12 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 			{ID: "call_1", Name: "exec_command", Input: json.RawMessage(`{"command":"pwd","workdir":"/tmp","timeout_seconds":300}`)},
 		},
 	})
-	s.recordToolCompletion(tools.Result{
+	s.recordToolCompletionWithProviderItems(tools.Result{
 		CallID:  "call_1",
 		Name:    toolspec.ToolExecCommand,
 		IsError: false,
 		Output:  json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
-	})
+	}, nil)
 	s.appendMessage(llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call_1",
@@ -49,9 +50,9 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 
 	s.appendOngoingDelta("stream")
 	s.setOngoingError("failed")
-	s.appendLocalEntry("system", "note")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "system", Text: "note"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 6 {
 		t.Fatalf("expected 6 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -108,7 +109,7 @@ func TestChatStoreSnapshotKeepsShortCommentaryInTranscript(t *testing.T) {
 		},
 	})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	for _, entry := range snap.Entries {
 		if entry.Role == "assistant" && entry.Text == "Checking out repository" {
 			return
@@ -127,13 +128,13 @@ func TestChatStoreSnapshotSynthesizesCompletedToolResultBeforeToolMessage(t *tes
 			{ID: "call_b", Name: "exec_command", Input: json.RawMessage(`{"command":"pwd"}`)},
 		},
 	})
-	s.recordToolCompletion(tools.Result{
+	s.recordToolCompletionWithProviderItems(tools.Result{
 		CallID: "call_b",
 		Name:   toolspec.ToolExecCommand,
 		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
-	})
+	}, nil)
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 4 {
 		t.Fatalf("expected assistant, two tool calls, and synthesized tool result, got %+v", snap.Entries)
 	}
@@ -171,7 +172,7 @@ func TestChatStoreRestoreToolCompletionPreservesOngoingText(t *testing.T) {
 		t.Fatalf("restore completion: %v", err)
 	}
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 2 {
 		t.Fatalf("expected ask call and synthesized result, got %+v", snap.Entries)
 	}
@@ -189,7 +190,7 @@ func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 	content := strings.Repeat("reasoning detail ", 20)
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseCommentary, Content: content})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 || snap.Entries[0].Role != "assistant" || snap.Entries[0].Phase != llm.MessagePhaseCommentary || snap.Entries[0].Text != content {
 		t.Fatalf("expected substantive commentary preserved in transcript, got %+v", snap.Entries)
 	}
@@ -197,9 +198,9 @@ func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 
 func TestChatStoreSnapshotPreservesLocalEntryOngoingText(t *testing.T) {
 	s := newChatStore()
-	s.appendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First", "Supervisor made 1 suggestion.")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First", OngoingText: "Supervisor made 1 suggestion."})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected one entry, got %+v", snap.Entries)
 	}
@@ -212,7 +213,7 @@ func TestChatStoreTranscriptPageSnapshotCollectsRequestedWindow(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "u1"})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "a1"})
-	s.appendLocalEntry("system", "note")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "system", Text: "note"})
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "u2"})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "a2"})
 
@@ -246,11 +247,11 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 			{ID: "call_b", Name: "exec_command", Input: json.RawMessage(`{"command":"pwd"}`)},
 		},
 	})
-	s.recordToolCompletion(tools.Result{
+	s.recordToolCompletionWithProviderItems(tools.Result{
 		CallID: "call_b",
 		Name:   toolspec.ToolExecCommand,
 		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
-	})
+	}, nil)
 
 	page := s.transcriptPageSnapshot(0, 0)
 	if page.TotalEntries != 3 {
@@ -267,12 +268,12 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 func TestChatStoreTranscriptPageSnapshotPreservesHistoryAcrossCompaction(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before compaction"})
-	s.appendLocalEntry("error", "before replace")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "error", Text: "before replace"})
 	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{
 		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
 		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
 	}))
-	s.appendLocalEntry("compaction_notice", "after replace notice")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "compaction_notice", Text: "after replace notice"})
 
 	page := s.transcriptPageSnapshot(0, 0)
 	if got := len(page.Snapshot.Entries); got != 5 {
@@ -302,7 +303,7 @@ func TestChatStoreOngoingTailUsesLatestCompactionBoundaryAsFloor(t *testing.T) {
 		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
 		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
 	}))
-	s.appendLocalEntry("compaction_notice", "after replace notice")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "compaction_notice", Text: "after replace notice"})
 
 	window := s.ongoingTailSnapshot(1)
 	if got := len(window.Snapshot.Entries); got != 3 {
@@ -630,7 +631,7 @@ func TestChatStoreSnapshotFormatsAskQuestionStructuredAnswer(t *testing.T) {
 		Content:    `"ask result summary"`,
 	})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 2 {
 		t.Fatalf("expected 2 entries, got %+v", snap.Entries)
 	}
@@ -687,7 +688,7 @@ func TestChatStoreShowsCompactionSummaryMessage(t *testing.T) {
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"})
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "real user input"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 2 {
 		t.Fatalf("expected 2 visible entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -705,7 +706,7 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsOngoingVisibleRole(t *
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "phase mismatch warning"})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -722,7 +723,7 @@ func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T)
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: "AGENTS context"})
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "Environment context"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -741,7 +742,7 @@ func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsDetailOnlyContext(t 
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageType("custom_internal"), Content: "Internal developer note"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -754,7 +755,7 @@ func TestChatStoreSnapshotIncludesInterruptionAsDetailOnlyRole(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: "Interrupted by user."})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -772,7 +773,7 @@ func TestChatStoreSnapshotIncludesDeveloperCompactionSoonReminderAsWarningRole(t
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: "heads up"})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -789,7 +790,7 @@ func TestChatStoreSnapshotIncludesHeadlessModeVariantsAsDeveloperContext(t *test
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"})
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: "interactive mode instructions"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -805,11 +806,11 @@ func TestChatStoreSnapshotIncludesHandoffFutureMessageAsDeveloperContext(t *test
 	s := newChatStore()
 	s.appendMessage(handoffFutureAgentMessage("resume with tests"))
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[0].Text != handoffFutureAgentMessageContent("resume with tests") {
+	if snap.Entries[0].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[0].Text != prompts.FormatHandoffFutureAgentMessage("resume with tests") {
 		t.Fatalf("unexpected handoff future message entry: %+v", snap.Entries[0])
 	}
 }
@@ -818,10 +819,10 @@ func TestChatStoreSnapshotOmitsRawReviewerFeedbackDeveloperMessages(t *testing.T
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: "reviewer internal prompt"})
-	s.appendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First", "Supervisor made 1 suggestion.")
-	s.appendLocalEntry("reviewer_status", "Supervisor ran: 1 suggestion, applied.")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First", OngoingText: "Supervisor made 1 suggestion."})
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "reviewer_status", Text: "Supervisor ran: 1 suggestion, applied."})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 3 {
 		t.Fatalf("expected 3 visible transcript entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -844,7 +845,7 @@ func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 		CompactContent: "Background shell 1000 completed (exit 0)",
 	})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
@@ -867,7 +868,7 @@ func TestChatStoreSnapshotShowsManualCompactionCarryoverAsDetailOnlyMessage(t *t
 		Content:     "# Last user message before manual compaction\n\nplease keep tests green",
 	})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected carryover message to project once into transcript, got %+v", snap.Entries)
 	}

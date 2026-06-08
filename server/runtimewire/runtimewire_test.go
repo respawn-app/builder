@@ -393,17 +393,17 @@ func TestReviewerModelCapabilitiesHonorInheritedExplicitFalseSources(t *testing.
 }
 
 func TestRuntimeProviderClientUsesProviderCapabilitiesOverride(t *testing.T) {
-	client, err := newRuntimeProviderClient(providerRuntimeSettings{
-		Model:            "local-reviewer",
-		ProviderOverride: "openai",
-		OpenAIBaseURL:    "http://127.0.0.1:11434/v1",
-		Auth:             "none",
+	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
+		Model:         "local-reviewer",
+		Provider:      llm.Provider("openai"),
+		OpenAIBaseURL: "http://127.0.0.1:11434/v1",
+		Auth:          authProviderForPolicy("none", nil),
 		ProviderCapabilitiesOverride: &llm.ProviderCapabilities{
 			ProviderID:             "local-reviewer",
 			SupportsResponsesAPI:   true,
 			SupportsPromptCacheKey: true,
 		},
-	}, nil, nil)
+	})
 	if err != nil {
 		t.Fatalf("new runtime provider client: %v", err)
 	}
@@ -452,14 +452,15 @@ func TestReviewerAuthNoneDoesNotSendGlobalAuthToLocalEndpoint(t *testing.T) {
 		},
 	}), nil, time.Now)
 
-	client, err := newRuntimeProviderClient(providerRuntimeSettings{
+	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
 		Model:               "local-reviewer",
-		ProviderOverride:    "openai",
+		Provider:            llm.Provider("openai"),
 		OpenAIBaseURL:       server.URL + "/v1",
-		Auth:                "none",
-		ModelVerbosity:      config.ModelVerbosityLow,
+		Auth:                authProviderForPolicy("none", authMgr),
+		HTTPClient:          server.Client(),
+		ModelVerbosity:      string(config.ModelVerbosityLow),
 		ContextWindowTokens: 64000,
-	}, authMgr, server.Client())
+	})
 	if err != nil {
 		t.Fatalf("new reviewer provider client: %v", err)
 	}

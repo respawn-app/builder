@@ -76,11 +76,11 @@ func (m *uiModel) emitForcedNativeProjectionReplay(projection tui.TranscriptProj
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return tea.ClearScreen
 	}
-	styled := renderStyledNativeProjection(projection, m.theme, m.nativeReplayRenderWidth())
+	styled := renderStyledNativeProjectionLines(projection.Lines(tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
 	if strings.TrimSpace(styled) == "" {
 		return tea.ClearScreen
 	}
-	return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
+	return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedTextWithOptions(styled, false))
 }
 
 func nativeRenderedDelta(previous, current string) (string, bool) {
@@ -104,7 +104,7 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 		return nil
 	}
 	entries := m.transcriptEntries[:localIndex+1]
-	projection := m.nativeCommittedProjectionForEntries(entries)
+	projection := m.nativeCommittedProjection(committedTranscriptEntriesForApp(entries))
 	rawSnapshot := projection.Render(tui.TranscriptDivider)
 	m.nativeRenderedProjection = projection
 	m.nativeRenderedBaseOffset = m.transcriptBaseOffset
@@ -114,24 +114,8 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 	}
 	return tea.Sequence(
 		tea.ClearScreen,
-		m.emitNativeRenderedText(renderStyledNativeProjection(projection, m.theme, m.nativeReplayRenderWidth())),
+		m.emitNativeRenderedTextWithOptions(renderStyledNativeProjectionLines(projection.Lines(tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth()), false),
 	)
-}
-
-func nativeCommittedEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	return committedTranscriptEntriesForApp(entries)
-}
-
-func nativePendingEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	return tui.PendingOngoingEntries(entries)
-}
-
-func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
-	return m.emitNativeRenderedTextWithOptions(rendered, false)
-}
-
-func (m *uiModel) emitNativeRenderedTextClearingBelow(rendered string) tea.Cmd {
-	return m.emitNativeRenderedTextWithOptions(rendered, true)
 }
 
 func (m *uiModel) emitNativeRenderedTextWithOptions(rendered string, clearBelowBefore bool) tea.Cmd {
@@ -155,10 +139,6 @@ func (m *uiModel) emitNativeRenderedTextWithOptions(rendered string, clearBelowB
 		return cmds[0]
 	}
 	return tea.Sequence(cmds...)
-}
-
-func (m *uiModel) emitNativeHistoryFlush(text string, allowBlank bool) tea.Cmd {
-	return m.emitNativeHistoryFlushWithOptions(text, allowBlank, false)
 }
 
 func (m *uiModel) emitNativeHistoryFlushWithOptions(text string, allowBlank bool, clearBelowBefore bool) tea.Cmd {
@@ -294,14 +274,6 @@ func splitNativeScrollbackChunks(rendered string, maxBytes int) []string {
 	return chunks
 }
 
-func renderNativeScrollbackSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
-	return renderStyledNativeProjection(tui.ProjectCommittedOngoingTranscript(entries, theme, width), theme, width)
-}
-
-func renderNativeCommittedSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
-	return tui.RenderCommittedOngoingSnapshot(entries, theme, width)
-}
-
 func (m *uiModel) nativeCommittedProjection(entries []tui.TranscriptEntry) tui.TranscriptProjection {
 	if m == nil {
 		return tui.ProjectCommittedOngoingTranscript(entries, "", 0)
@@ -313,14 +285,6 @@ func (m *uiModel) nativeCommittedProjection(entries []tui.TranscriptEntry) tui.T
 		BaseOffset: m.transcriptBaseOffset,
 		EntryCount: len(entries),
 	})
-}
-
-func (m *uiModel) nativeCommittedProjectionForEntries(entries []tui.TranscriptEntry) tui.TranscriptProjection {
-	return m.nativeCommittedProjection(committedTranscriptEntriesForApp(entries))
-}
-
-func renderStyledNativeProjection(projection tui.TranscriptProjection, theme string, width int) string {
-	return renderStyledNativeProjectionLines(projection.Lines(tui.TranscriptDivider), theme, width)
 }
 
 func styleNativeReplayDividers(rendered, theme string, width int) string {

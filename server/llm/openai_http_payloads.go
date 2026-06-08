@@ -188,7 +188,7 @@ func buildFunctionToolParam(tool Tool) (responses.ToolUnionParam, error) {
 			return responses.ToolUnionParam{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
 		}
 	}
-	normalizeSchemaAdditionalProperties(params)
+	normalizeSchemaNode(params)
 	toolParam := responses.ToolParamOfFunction(tool.Name, params, false)
 	if description := strings.TrimSpace(tool.Description); description != "" && toolParam.OfFunction != nil {
 		toolParam.OfFunction.Description = openai.String(description)
@@ -282,10 +282,6 @@ func configuredTextVerbosity(model, configured string) string {
 		return ""
 	}
 	return normalized
-}
-
-func normalizeSchemaAdditionalProperties(schema map[string]any) {
-	normalizeSchemaNode(schema)
 }
 
 func normalizeSchemaNode(node any) {

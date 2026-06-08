@@ -18,16 +18,6 @@ const (
 	outsideWorkspaceDenySuggestion         = runtimewire.OutsideWorkspaceDenySuggestion
 )
 
-type outsideWorkspaceApprover = runtimewire.OutsideWorkspaceApprover
-
-func newOutsideWorkspaceApprover(broker *askquestion.Broker, actionVerb string) *outsideWorkspaceApprover {
-	return runtimewire.NewOutsideWorkspaceApprover(broker, actionVerb)
-}
-
-func outsideWorkspaceApprovalFromResponse(resp askquestion.Response) (patchtool.OutsideWorkspaceApproval, error) {
-	return runtimewire.OutsideWorkspaceApprovalFromResponse(resp)
-}
-
 func TestOutsideWorkspaceApprovalFromResponse(t *testing.T) {
 	tests := []struct {
 		name string
@@ -43,7 +33,7 @@ func TestOutsideWorkspaceApprovalFromResponse(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := outsideWorkspaceApprovalFromResponse(tc.resp)
+			got, err := runtimewire.OutsideWorkspaceApprovalFromResponse(tc.resp)
 			if err != nil {
 				t.Fatalf("parse approval response: %v", err)
 			}
@@ -65,7 +55,7 @@ func TestOutsideWorkspaceApprovalFromResponseRejectsMissingOrInvalidPayload(t *t
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := outsideWorkspaceApprovalFromResponse(tc.resp); err == nil {
+			if _, err := runtimewire.OutsideWorkspaceApprovalFromResponse(tc.resp); err == nil {
 				t.Fatal("expected error")
 			}
 		})
@@ -98,7 +88,7 @@ func TestPatchOutsideWorkspaceApproverCachesSessionDecision(t *testing.T) {
 		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowSession}}, nil
 	})
 
-	approver := newOutsideWorkspaceApprover(broker, "editing")
+	approver := runtimewire.NewOutsideWorkspaceApprover(broker, "editing")
 	req := patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"}
 
 	first, err := approver.Approve(context.Background(), req)
@@ -126,7 +116,7 @@ func TestPatchOutsideWorkspaceApproverPropagatesAskError(t *testing.T) {
 		return askquestion.Response{}, errors.New("ask failed")
 	})
 
-	approver := newOutsideWorkspaceApprover(broker, "editing")
+	approver := runtimewire.NewOutsideWorkspaceApprover(broker, "editing")
 	_, err := approver.Approve(context.Background(), patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"})
 	if err == nil {
 		t.Fatal("expected ask error")
@@ -144,7 +134,7 @@ func TestOutsideWorkspaceApproverUsesReadPromptText(t *testing.T) {
 		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
 	})
 
-	approver := newOutsideWorkspaceApprover(broker, "reading")
+	approver := runtimewire.NewOutsideWorkspaceApprover(broker, "reading")
 	approval, err := approver.Approve(context.Background(), patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.pdf", ResolvedPath: "/tmp/x.pdf", WorkspaceRoot: "/tmp/w"})
 	if err != nil {
 		t.Fatalf("approve read call: %v", err)
@@ -159,7 +149,7 @@ func TestOutsideWorkspaceApproverUsesReadPromptText(t *testing.T) {
 
 func TestOutsideWorkspaceApproverQueuedApprovalBlocksUntilSubmitted(t *testing.T) {
 	broker := askquestion.NewBroker()
-	approver := newOutsideWorkspaceApprover(broker, "editing")
+	approver := runtimewire.NewOutsideWorkspaceApprover(broker, "editing")
 	req := patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"}
 	type out struct {
 		approval patchtool.OutsideWorkspaceApproval
@@ -227,7 +217,7 @@ func TestOutsideWorkspaceApproverQueuedApprovalBlocksUntilSubmitted(t *testing.T
 
 func TestOutsideWorkspaceApproverQueuedAllowSessionCachesWithoutSecondPrompt(t *testing.T) {
 	broker := askquestion.NewBroker()
-	approver := newOutsideWorkspaceApprover(broker, "editing")
+	approver := runtimewire.NewOutsideWorkspaceApprover(broker, "editing")
 	req := patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"}
 	type out struct {
 		approval patchtool.OutsideWorkspaceApproval

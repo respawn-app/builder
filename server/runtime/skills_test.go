@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"builder/server/llm"
 )
@@ -18,7 +19,7 @@ func TestSkillsContextMessageIncludesCodexPromptAndSkillEntries(t *testing.T) {
 	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "home-skill", "from home")
 	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestSkillsContextMessageSkipsInvalidSkills(t *testing.T) {
 		t.Fatalf("write invalid skill: %v", err)
 	}
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestSkillsContextMessageLoadsSymlinkedSkillDirectory(t *testing.T) {
 		t.Fatalf("symlink skill dir: %v", err)
 	}
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestSkillsContextMessageLoadsSkillFromSymlinkedGlobalSkillsRoot(t *testing.
 		t.Fatalf("symlink global skills root: %v", err)
 	}
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestSkillsContextMessageSkipsBrokenSymlinkedSkillDirectory(t *testing.T) {
 		t.Fatalf("symlink broken skill dir: %v", err)
 	}
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestSkillsContextMessageFailsOnUnreadableSkillsDirectory(t *testing.T) {
 		readSkillsDir = prev
 	})
 
-	_, _, err := skillsContextMessage(workspace)
+	_, _, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err == nil {
 		t.Fatal("expected unreadable skills directory to fail discovery")
 	}
@@ -388,7 +389,7 @@ func TestGeneratedSkillsAreInjectedAfterUserSkills(t *testing.T) {
 	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
 	generatedSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -421,7 +422,7 @@ func TestUserSkillDuplicateNameBehaviorIsUnchanged(t *testing.T) {
 	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "same-skill-global"), "same-skill", "from home")
 	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "same-skill-workspace"), "same-skill", "from workspace")
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -448,7 +449,7 @@ func TestGeneratedSkillIsShadowedByUserSkillName(t *testing.T) {
 	userSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "skill-creator"), "skill-creator", "workspace")
 	writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
 
-	content, found, err := skillsContextMessage(workspace)
+	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
 		t.Fatalf("skillsContextMessage: %v", err)
 	}
@@ -598,7 +599,11 @@ func TestBuildReviewerRequestMessagesSkipsDisabledSkillsWhenBackfillingMeta(t *t
 	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
 
 	messages := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got, err := buildReviewerRequestMessages(messages, workspace, "gpt-5", "high", false, map[string]bool{"workspace skill": true})
+	got, err := buildReviewerRequestMessagesWithBuilder(
+		messages,
+		newMetaContextBuilder(workspace, "gpt-5", "high", map[string]bool{"workspace skill": true}, time.Now()),
+		false,
+	)
 	if err != nil {
 		t.Fatalf("buildReviewerRequestMessages: %v", err)
 	}

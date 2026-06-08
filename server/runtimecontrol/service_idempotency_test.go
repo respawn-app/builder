@@ -10,6 +10,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
@@ -304,7 +305,7 @@ func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseRotation(t
 	if err != nil {
 		t.Fatalf("create session store: %v", err)
 	}
-	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(fakeShellHandler{}), runtime.Config{Model: "gpt-5"})
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("create runtime engine: %v", err)
 	}

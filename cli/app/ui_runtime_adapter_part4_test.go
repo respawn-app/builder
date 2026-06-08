@@ -6,9 +6,10 @@ import (
 	"builder/server/runtime"
 	"builder/shared/clientui"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthoritativePageCorrectsOverlap(t *testing.T) {
@@ -24,7 +25,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -51,7 +52,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 			{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call-1"},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, corrected); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, corrected, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -67,7 +68,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 	if m.transcriptLiveDirty {
 		t.Fatal("expected corrective equal-revision refresh to clear transcriptLiveDirty")
 	}
-	rawCommitted := renderStyledNativeProjection(m.nativeProjection, m.theme, m.termWidth)
+	rawCommitted := renderStyledNativeProjectionLines(m.nativeProjection.Lines(tui.TranscriptDivider), m.theme, m.termWidth)
 	if plain := stripANSIPreserve(rawCommitted); !strings.Contains(plain, "$ pwd") {
 		t.Fatalf("expected corrected shell row in committed native projection, got %q", plain)
 	}
@@ -88,7 +89,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionReplacementWhenToolMetada
 			{Role: "tool_call", Text: "run", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	m.transcriptLiveDirty = true
@@ -103,7 +104,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionReplacementWhenToolMetada
 			{Role: "tool_call", Text: "run", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls"}},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, corrected); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, corrected, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -135,7 +136,7 @@ func TestProjectedAssistantToolCallEntriesApplyAsCommittedInRuntimeMode(t *testi
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -151,7 +152,7 @@ func TestProjectedAssistantToolCallEntriesApplyAsCommittedInRuntimeMode(t *testi
 			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
 		}},
 	}
-	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(toolStarted))
+	_ = collectCmdMessages(t, m.runtimeAdapter().applyProjectedRuntimeEvent(toolStarted, true).cmd)
 
 	if got, want := len(m.transcriptEntries), 2; got != want {
 		t.Fatalf("transcript entry count = %d, want %d", got, want)
@@ -178,11 +179,11 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = collectCmdMessages(t, m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
@@ -193,8 +194,8 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 			ToolCallID: "call-1",
 			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
 		}},
-	}))
-	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	}, true).cmd)
+	_ = collectCmdMessages(t, m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventToolCallCompleted,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         12,
@@ -204,9 +205,9 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 			Text:       "/tmp",
 			ToolCallID: "call-1",
 		}},
-	}))
+	}, true).cmd)
 
-	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     12,
 		Offset:       0,
@@ -216,7 +217,7 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 			{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
 			{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call-1"},
 		},
-	})
+	}, clientui.TranscriptRecoveryCauseNone)
 	if cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
@@ -246,11 +247,11 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhen
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = collectCmdMessages(t, m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventLocalEntryAdded,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
@@ -261,13 +262,13 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhen
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
 		}},
-	}))
+	}, true).cmd)
 
 	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
 		t.Fatalf("expected reviewer status to apply as committed transcript state, got %+v", m.transcriptEntries[1])
 	}
 
-	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     11,
 		Offset:       0,
@@ -276,7 +277,7 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhen
 			{Role: "assistant", Text: "seed"},
 			{Role: "reviewer_status", Text: "Supervisor ran and applied 2 suggestions."},
 		},
-	})
+	}, clientui.TranscriptRecoveryCauseNone)
 	if cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
@@ -305,7 +306,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoin
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	m.transcriptLiveDirty = true
@@ -318,7 +319,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoin
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 		OngoingError: "background continuation failed",
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, runtimeOnly); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, runtimeOnly, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -344,7 +345,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoin
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 		OngoingError: "background continuation failed",
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	m.transcriptLiveDirty = true
@@ -357,7 +358,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoin
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 		OngoingError: "",
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, cleared); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, cleared, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -388,7 +389,7 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionShiftedTailReplacement(t 
 			{Role: "assistant", Text: "seed-1"},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	m.transcriptLiveDirty = true
@@ -400,7 +401,7 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionShiftedTailReplacement(t 
 		TotalEntries: 2,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed-1"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, shifted); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, shifted, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		if msg := cmd(); msg != nil {
 			t.Fatalf("expected shifted equal-revision page to be ignored, got %T", msg)
 		}
@@ -433,7 +434,7 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementAfterLiveA
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated || needsHydration {
@@ -450,7 +451,7 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementAfterLiveA
 			{Role: "assistant", Text: "live append"},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, fresh); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, fresh, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if got := m.transcriptRevision; got != 11 {
@@ -477,7 +478,7 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	for i := 0; i < 200; i++ {
 		ongoingTail.Entries = append(ongoingTail.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("tail %03d", 300+i)})
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, ongoingTail); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, ongoingTail, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -486,7 +487,7 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	for i := 0; i < 250; i++ {
 		olderDetailPage.Entries = append(olderDetailPage.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("history %03d", i)})
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 250}, olderDetailPage); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Offset: 0, Limit: 250}, olderDetailPage, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -663,7 +664,7 @@ func TestAssistantDeltaDoesNotSuppressNewStepThatMatchesPreviousAssistantText(t 
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "Done", Phase: llm.MessagePhaseFinal}}
 	m.lastCommittedAssistantStepID = "step-1"
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-2", AssistantDelta: "Done"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-2", AssistantDelta: "Done"}, true).cmd
 
 	if got := m.view.OngoingStreamingText(); got != "Done" {
 		t.Fatalf("expected matching assistant delta from a new step to stream, got %q", got)
@@ -678,7 +679,7 @@ func TestAssistantDeltaSuppressesLateMatchingDeltaFromCommittedStep(t *testing.T
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "Done", Phase: llm.MessagePhaseFinal}}
 	m.lastCommittedAssistantStepID = "step-1"
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "Done"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "Done"}, true).cmd
 
 	if got := m.view.OngoingStreamingText(); got != "" {
 		t.Fatalf("expected matching assistant delta from the committed step to stay suppressed, got %q", got)
@@ -696,14 +697,14 @@ func TestProjectedAssistantMessageClearsStreamingTextOnCommit(t *testing.T) {
 		t.Fatalf("expected assistant delta in live stream, got %q", got)
 	}
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		CommittedTranscriptChanged: true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "assistant",
 			Text: "partial",
 		}},
-	})
+	}, true).cmd
 
 	if got := m.view.OngoingStreamingText(); got != "" {
 		t.Fatalf("expected committed assistant message to clear live stream, got %q", got)
@@ -721,7 +722,7 @@ func TestProjectedAssistantCommentaryDoesNotClearStreamingFinal(t *testing.T) {
 	m.setBusy(true)
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "final still streaming"})
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		CommittedTranscriptChanged: true,
 		TranscriptEntries: []clientui.ChatEntry{{
@@ -729,7 +730,7 @@ func TestProjectedAssistantCommentaryDoesNotClearStreamingFinal(t *testing.T) {
 			Text:  "commentary note",
 			Phase: string(llm.MessagePhaseCommentary),
 		}},
-	})
+	}, true).cmd
 
 	if got := m.view.OngoingStreamingText(); got != "final still streaming" {
 		t.Fatalf("expected commentary commit to preserve live stream, got %q", got)
@@ -747,7 +748,7 @@ func TestProjectedAssistantMessageDoesNotClearStreamingTextWhenCommitIsSkipped(t
 	m.transcriptTotalEntries = len(m.transcriptEntries)
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "newer live"})
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         5,
@@ -756,7 +757,7 @@ func TestProjectedAssistantMessageDoesNotClearStreamingTextWhenCommitIsSkipped(t
 			Role: "assistant",
 			Text: "older",
 		}},
-	})
+	}, true).cmd
 
 	if got := m.view.OngoingStreamingText(); got != "newer live" {
 		t.Fatalf("expected skipped assistant commit to preserve live stream, got %q", got)
@@ -774,7 +775,7 @@ func TestProjectedAssistantMessageClearsStreamingTextWhenSkippedCommitMatchesLiv
 	m.transcriptTotalEntries = len(m.transcriptEntries)
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "final"})
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         5,
@@ -783,7 +784,7 @@ func TestProjectedAssistantMessageClearsStreamingTextWhenSkippedCommitMatchesLiv
 			Role: "assistant",
 			Text: "final",
 		}},
-	})
+	}, true).cmd
 
 	if got := m.view.OngoingStreamingText(); got != "" {
 		t.Fatalf("expected skipped assistant commit matching live stream to clear it, got %q", got)
@@ -813,7 +814,7 @@ func TestApplyRuntimeTranscriptPagePreservesNonEmptyAuthoritativeOngoingEvenWhen
 		Ongoing: "final",
 	}
 
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, page, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if got := m.view.OngoingStreamingText(); got != "final" {
@@ -850,7 +851,7 @@ func TestApplyRuntimeTranscriptPageAllowsEqualRevisionToClearDuplicateCommittedA
 		Ongoing: "",
 	}
 
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, page, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if got := m.view.OngoingStreamingText(); got != "" {
@@ -884,7 +885,7 @@ func TestApplyRuntimeTranscriptPagePreservesAuthoritativeNonEmptyOngoingOverStal
 		Ongoing: "final continuation",
 	}
 
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, page, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if got := m.view.OngoingStreamingText(); got != "final continuation" {
@@ -938,7 +939,7 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionReasoningClear(t *testing
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "user", Text: "u"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary"}})
@@ -953,7 +954,7 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionReasoningClear(t *testing
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "user", Text: "u"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, stale); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, stale, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if detail := stripANSIAndTrimRight(m.view.View()); !strings.Contains(detail, "Plan summary") {

@@ -1,43 +1,19 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 
-	"builder/cli/app/internal/onboardingmodel"
 	"builder/cli/app/internal/onboardingready"
+	"builder/server/llm"
 	"builder/shared/config"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type interactiveOnboardingRunner struct{}
-
-func (interactiveOnboardingRunner) RunInteractiveOnboarding(ctx context.Context, cfg config.App, authState onboardingready.AuthState) (onboardingready.Result, error) {
-	result, err := runOnboardingFlow(cfg, authState)
-	if err != nil {
-		return onboardingready.Result{}, err
-	}
-	return onboardingready.Result{
-		Completed:            result.Completed,
-		CreatedDefaultConfig: result.CreatedDefaultConfig,
-		SettingsPath:         result.SettingsPath,
-	}, nil
-}
-
-func ensureOnboardingReady(ctx context.Context, cfg config.App, mgr *onboardingready.AuthManager, interactor authInteractor, reloadConfig func() (config.App, error)) (config.App, bool, error) {
-	return onboardingready.Ensure(ctx, onboardingready.Request{
-		Config:       cfg,
-		AuthManager:  mgr,
-		Interactive:  interactor != nil && interactor.Interactive(),
-		ReloadConfig: reloadConfig,
-		Runner:       interactiveOnboardingRunner{},
-	})
-}
-
 func runOnboardingFlow(cfg config.App, authState onboardingready.AuthState) (onboardingResult, error) {
-	providerCaps, err := onboardingProviderCapabilities(authState, cfg.Settings)
+	providerCaps, err := llm.ProviderCapabilitiesForSettings(authState, cfg.Settings)
 	if err != nil {
 		return onboardingResult{}, err
 	}
@@ -65,8 +41,4 @@ func runOnboardingFlow(cfg config.App, authState onboardingready.AuthState) (onb
 		return onboardingResult{}, errors.New("first-time setup canceled")
 	}
 	return finalized.result, nil
-}
-
-func onboardingProviderCapabilities(authState onboardingready.AuthState, settings config.Settings) (onboardingmodel.ProviderCapabilities, error) {
-	return onboardingmodel.ProviderCapabilitiesForSettings(authState, settings)
 }

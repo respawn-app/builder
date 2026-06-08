@@ -7,10 +7,11 @@ import (
 	"builder/shared/clientui"
 	"errors"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestRollbackSelectionUsesAbsoluteTranscriptEntryIndexWhenPaged(t *testing.T) {
@@ -541,7 +542,7 @@ func TestNativeRollbackEditAnchorsToSelectedConversationPoint(t *testing.T) {
 	if !testRollbackEditing(m) || m.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", m.view.Mode(), testRollbackEditing(m))
 	}
-	expected := renderNativeCommittedSnapshot(m.transcriptEntries[:target+1], m.theme, m.nativeReplayRenderWidth())
+	expected := tui.RenderCommittedOngoingSnapshot(m.transcriptEntries[:target+1], m.theme, m.nativeReplayRenderWidth())
 	if m.nativeRenderedSnapshot != expected {
 		t.Fatalf("expected native rendered snapshot anchored through selected entry")
 	}
@@ -693,7 +694,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	if !testAskFreeform(updated) {
 		t.Fatal("expected tab to switch approval prompt to commentary freeform")
 	}
-	lines := updated.renderInputLines(120, uiThemeStyles("dark"))
+	lines := updated.layout().renderInputLines(120, uiThemeStyles("dark"))
 	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Commentary for Allow once:") {
 		t.Fatalf("expected commentary prompt for selected approval option, got %q", plain)

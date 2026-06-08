@@ -10,7 +10,6 @@ import (
 	"builder/shared/testopenai"
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,12 +17,14 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
 func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t 
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -301,7 +302,7 @@ func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
 func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -365,7 +366,7 @@ func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
 func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -423,7 +424,7 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         responseServer.URL,
 		OpenAIBaseURLExplicit: true,
-	}, readyMemoryAuthHandler())
+	}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}

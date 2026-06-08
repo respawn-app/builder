@@ -37,7 +37,7 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	}
 
 	lineStyle := style.input
-	if m.isInputLocked() {
+	if m.isInputSubmitLocked() {
 		lineStyle = style.inputDisabled
 	}
 	return renderFramedEditableInputLines(width, inputContentLineLimit(l.effectiveHeight()), l.mainInputRenderSpec(), lineStyle, l.inputBorderStyle())
@@ -66,7 +66,7 @@ func (l uiViewLayout) renderAskInputLines(width int, style uiStyles) []string {
 			rendered = append(rendered, style.input.Render(padANSIRight(line.Text, width)))
 		}
 	}
-	return l.renderInputFrame(width, rendered)
+	return renderFramedLines(width, rendered, l.inputBorderStyle())
 }
 
 func renderRecommendedAskLine(text string, mutedSuffix string, width int, recommendedStyle lipgloss.Style, noteStyle lipgloss.Style) string {
@@ -88,7 +88,7 @@ func renderRecommendedAskLine(text string, mutedSuffix string, width int, recomm
 }
 
 func (l uiViewLayout) mainInputPrefix() string {
-	if l.model.isInputLocked() {
+	if l.model.isInputSubmitLocked() {
 		return "⨯ "
 	}
 	return "› "
@@ -127,12 +127,8 @@ func (l uiViewLayout) inputPaneCursor(width int) uiInputFieldCursor {
 	return uiInputFieldCursor{Visible: true, Row: cursorLine + 1, Col: cursorCol}
 }
 
-func (l uiViewLayout) wrappedMainInputLines(width int) []string {
-	return wrappedEditableInputLines(width, l.mainInputRenderSpec())
-}
-
 func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, int) {
-	promptLines := l.model.renderAskPromptLines()
+	promptLines := l.model.askController().renderPromptLines()
 	if len(promptLines) == 0 {
 		promptLines = []askPromptLine{{Text: "", Kind: askPromptLineKindQuestion}}
 	}
@@ -268,7 +264,7 @@ func (l uiViewLayout) inputPanelLineCount(width, height int) int {
 	if inputState.Mode == uiInputModeRollbackSelection {
 		return 0
 	}
-	contentLines := len(l.wrappedMainInputLines(width))
+	contentLines := len(wrappedEditableInputLines(width, l.mainInputRenderSpec()))
 	if inputState.ShowsAskInput {
 		wrappedAskLines, _ := l.wrappedAskPromptLines(width)
 		contentLines = len(wrappedAskLines)
@@ -281,10 +277,6 @@ func (l uiViewLayout) inputPanelLineCount(width, height int) int {
 		contentLines = maxContentLines
 	}
 	return contentLines + 2
-}
-
-func (l uiViewLayout) renderInputFrame(width int, lines []string) []string {
-	return renderFramedLines(width, lines, l.inputBorderStyle())
 }
 
 func (l uiViewLayout) inputBorderStyle() lipgloss.Style {

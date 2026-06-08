@@ -24,7 +24,7 @@ func TestDetectShellRenderHintRecognizesSimpleFileViewCommands(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, shellCommandRaw(tc.command), tc.command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, json.RawMessage(`{"command":`+jsonQuoted(tc.command)+`}`), tc.command)
 			if hint == nil {
 				t.Fatalf("expected render hint for command %q", tc.command)
 			}
@@ -50,7 +50,7 @@ func TestDetectShellRenderHintDefaultsToShellForGeneralCommands(t *testing.T) {
 
 	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
-			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, shellCommandRaw(command), command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, json.RawMessage(`{"command":`+jsonQuoted(command)+`}`), command)
 			if hint == nil {
 				t.Fatalf("expected shell render hint for command %q", command)
 			}
@@ -99,7 +99,7 @@ func TestDetectShellRenderHintFallsBackToWindowsCommandDialect(t *testing.T) {
 	hint := detectShellRenderHint(
 		ToolCallContext{GOOS: "windows"},
 		toolspec.ToolExecCommand,
-		shellCommandRaw(command),
+		json.RawMessage(`{"command":`+jsonQuoted(command)+`}`),
 		command,
 	)
 	if hint == nil || hint.Kind != transcript.ToolRenderKindShell {
@@ -124,7 +124,7 @@ func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
 
 	for _, command := range tests {
 		t.Run(command, func(t *testing.T) {
-			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, shellCommandRaw(command), command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, json.RawMessage(`{"command":`+jsonQuoted(command)+`}`), command)
 			if hint == nil {
 				t.Fatalf("expected fallback shell hint for command %q", command)
 			}
@@ -136,10 +136,6 @@ func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
 			}
 		})
 	}
-}
-
-func shellCommandRaw(command string) json.RawMessage {
-	return json.RawMessage(`{"command":` + jsonQuoted(command) + `}`)
 }
 
 func jsonQuoted(value string) string {

@@ -20,13 +20,9 @@ const (
 	testProjectID          = "project-a"
 )
 
-func testSessionContainer(root string) string {
-	return filepath.Join(root, "projects", testProjectID, "sessions")
-}
-
 func createTestSession(t *testing.T, workspace string) *session.Store {
 	t.Helper()
-	return createTestSessionInContainer(t, testSessionContainer(t.TempDir()), testWorkspaceContainer, workspace)
+	return createTestSessionInContainer(t, filepath.Join(t.TempDir(), "projects", testProjectID, "sessions"), testWorkspaceContainer, workspace)
 }
 
 func createTestSessionInContainer(t *testing.T, containerDir, workspaceContainer, workspaceRoot string, options ...session.StoreOption) *session.Store {

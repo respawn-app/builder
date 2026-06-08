@@ -8,6 +8,7 @@ import (
 
 	"builder/cli/tui"
 	tuiinput "builder/cli/tui/input"
+	sharedtheme "builder/shared/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -32,7 +33,7 @@ func newProjectNamePromptModel(defaultName string, theme string) *projectNamePro
 		width:    defaultPickerWidth,
 		height:   defaultPickerHeight,
 		theme:    theme,
-		headerMD: newStartupMarkdownRenderer(theme),
+		headerMD: newStartupMarkdownRendererWithWordWrap(theme, 0),
 		input:    input,
 	}
 }
@@ -52,7 +53,7 @@ func (m *projectNamePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch typed.Type {
 		case tea.KeyEnter:
-			value := strings.TrimSpace(singleLineEditorValue(m.input))
+			value := strings.TrimSpace(m.input.Text())
 			if value == "" {
 				m.error = "project name is required"
 				return m, nil
@@ -76,7 +77,7 @@ func (m *projectNamePromptModel) View() string {
 	out.WriteString(renderStartupEditorField(m.width, m.height, m.theme, m.input, "› ", m.terminalCursor == nil, 0, ""))
 	if trimmed := strings.TrimSpace(m.error); trimmed != "" {
 		out.WriteString("\n\n")
-		out.WriteString(lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(truncateQueuedMessageLine(trimmed, m.width)))
+		out.WriteString(lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true).Render(truncateQueuedMessageLine(trimmed, m.width)))
 	}
 	m.updateTerminalCursor()
 	return out.String()

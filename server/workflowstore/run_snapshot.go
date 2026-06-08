@@ -105,22 +105,18 @@ func transitionParametersFromSnapshot(group transitionContractSnapshot) []workfl
 	return out
 }
 
-func mustJSON(value any) string {
-	return workflowjson.MustMarshalString(value)
-}
-
 func mustInputBindingsJSON(value []workflow.InputBinding) string {
 	if value == nil {
 		value = []workflow.InputBinding{}
 	}
-	return mustJSON(value)
+	return workflowjson.MustMarshalString(value)
 }
 
 func mustOutputRequirementsJSON(value []workflow.OutputRequirement) string {
 	if value == nil {
 		value = []workflow.OutputRequirement{}
 	}
-	return mustJSON(value)
+	return workflowjson.MustMarshalString(value)
 }
 
 func newRunStartSnapshot(def workflow.Definition, record WorkflowRecord, nodeID workflow.NodeID) (runStartSnapshot, error) {

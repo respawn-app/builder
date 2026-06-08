@@ -60,8 +60,6 @@ func (p staticUpdateStatusProvider) Status(context.Context) clientui.UpdateStatu
 	return p.status
 }
 
-func (serviceBlockingTool) Name() toolspec.ID { return toolspec.ToolExecCommand }
-
 func (t serviceBlockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
 	case <-t.started:
@@ -92,7 +90,7 @@ func TestServiceGetSessionMainViewUsesLiveRuntimeWhenAttached(t *testing.T) {
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	eng, err := runtime.New(store, client, tools.NewRegistry(serviceBlockingTool{started: started, release: release}), runtime.Config{Model: "gpt-5"})
+	eng, err := runtime.New(store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: serviceBlockingTool{started: started, release: release}}), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

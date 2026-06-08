@@ -41,7 +41,7 @@ func (m Model) detailWithTreeGuideWithSymbol(role RenderIntent, lines []string, 
 }
 
 func (m Model) ongoingToolWithTreeGuideWithSymbol(role RenderIntent, lines []string, symbolOverride string) []string {
-	if !isToolHeadlineRole(role) || len(lines) < 2 {
+	if !role.IsToolHeadline() || len(lines) < 2 {
 		return lines
 	}
 	out := append([]string(nil), lines...)
@@ -84,17 +84,13 @@ func (m Model) truncateDetailLine(line string) string {
 		width = 1
 	}
 	for overflow := lipgloss.Width(line) - width; overflow > 0; overflow = lipgloss.Width(line) - width {
-		trimmed := removeExtraSpacesFromLongestRun(line, overflow)
+		trimmed := removeExtraSpacesFromLongestRunLongerThan(line, overflow, 1)
 		if trimmed == line {
 			break
 		}
 		line = trimmed
 	}
 	return truncateRenderedLineToWidthWithEllipsis(line, width, false)
-}
-
-func removeExtraSpacesFromLongestRun(line string, count int) string {
-	return removeExtraSpacesFromLongestRunLongerThan(line, count, 1)
 }
 
 func removeExtraSpacesFromLongestRunLongerThan(line string, count int, minLen int) string {
@@ -201,18 +197,18 @@ func (m Model) detailCollapsedToolLinesWithSymbol(role RenderIntent, entry Trans
 		compact = "Tool call"
 	}
 	if summary := strings.TrimSpace(resultSummary); summary != "" {
-		if isShellPreviewRole(role) {
+		if role.IsShellPreview() {
 			compact = attachShellSummaryToFirstLine(compact, summary)
 		} else {
 			lines := m.flattenEntryWithMetaAndSymbol(role, compact, true, entry.ToolCall, symbolOverride)
-			if isToolErrorHeadlineRole(role) {
+			if role.IsToolErrorHeadline() {
 				summaryLines := m.flattenToolErrorText(role, summary, m.entryContinuationPrefix(role, symbolOverride))
 				return m.detailWithTreeGuideWithSymbol(role, append(lines, summaryLines...), false, symbolOverride)
 			}
 			compact += "\n" + summary
 		}
 	}
-	if isToolErrorHeadlineRole(role) {
+	if role.IsToolErrorHeadline() {
 		return m.detailWithTreeGuideWithSymbol(role, m.flattenToolErrorText(role, compact, symbolOverride), false, symbolOverride)
 	}
 	return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, compact, true, entry.ToolCall, symbolOverride), false, symbolOverride)

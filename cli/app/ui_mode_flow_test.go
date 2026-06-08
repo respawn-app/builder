@@ -37,7 +37,7 @@ func (c *recordingTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.Tr
 func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 	m := setTestUITerminalSize(newProjectedStaticUIModel(), 100, 18)
 	m.input = "/"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 	m.syncViewport()
 
 	for i := 1; i <= 20; i++ {
@@ -261,7 +261,7 @@ func TestCtrlTDeferredDetailLoadSkipsDuplicateSeededPageRequest(t *testing.T) {
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: seed}
 	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
-	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
+	_ = m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed, clientui.TranscriptRecoveryCauseNone)
 	m.syncViewport()
 
 	next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
@@ -305,7 +305,7 @@ func TestCtrlTDeferredDetailLoadSkippedKeepsDetailMetricsLazyEndToEnd(t *testing
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: seed}
 	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
-	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
+	_ = m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed, clientui.TranscriptRecoveryCauseNone)
 	m.syncViewport()
 
 	next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
@@ -340,7 +340,7 @@ func TestDeferredDetailLoadRefreshesWhenTranscriptDirty(t *testing.T) {
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: seed}
 	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
-	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
+	_ = m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed, clientui.TranscriptRecoveryCauseNone)
 	m.syncViewport()
 
 	next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
@@ -386,7 +386,7 @@ func TestCtrlTDeferredDetailLoadDoesNotMutateNativeHistoryState(t *testing.T) {
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: detailPage}
 	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	m.syncViewport()

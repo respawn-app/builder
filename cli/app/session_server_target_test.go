@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/app/internal/startupconfig"
 	"builder/server/llm"
 	"builder/server/metadata"
 	"builder/server/serve"
@@ -38,7 +39,7 @@ func TestStartSessionServerHelperDaemonProcess(t *testing.T) {
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestConfiguredDaemonPlanSessionUsesSessionWorkspaceLocalConfig(t *testing.T
 		t.Fatalf("RegisterBinding: %v", err)
 	}
 
-	srv, err := serve.Start(context.Background(), serverstartup.Request{AllowUnauthenticated: true}, readyMemoryAuthHandler(), autoOnboarding{})
+	srv, err := serve.Start(context.Background(), serverstartup.Request{AllowUnauthenticated: true}, readyMemoryAuthHandler(), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestConfiguredDaemonPlanSessionUsesSessionWorkspaceLocalConfig(t *testing.T
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestConfiguredDaemonEnvironmentContextUsesSessionWorkspaceRootForCWD(t *tes
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -180,7 +181,7 @@ func TestConfiguredDaemonEnvironmentContextUsesSessionWorkspaceRootForCWD(t *tes
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -560,7 +561,7 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 		req.OpenAIBaseURLExplicit = true
 	}
 
-	srv, err := serve.Start(context.Background(), req, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	srv, err := serve.Start(context.Background(), req, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -593,7 +594,7 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 		_ = srv.Close()
 	})
 
-	serverA, err := startSessionServer(context.Background(), Options{WorkspaceRoot: fixture.workspaceA, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	serverA, err := startSessionServer(context.Background(), Options{WorkspaceRoot: fixture.workspaceA, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer workspace A: %v", err)
 	}
@@ -606,7 +607,7 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 		t.Fatalf("expected remote app server for workspace A, got %T", fixture.serverA)
 	}
 
-	cfgB, err := loadSessionServerConfig(Options{WorkspaceRoot: fixture.workspaceB, WorkspaceRootExplicit: true})
+	cfgB, err := startupconfig.ResolveSessionConfig(startupConfigRequest(Options{WorkspaceRoot: fixture.workspaceB, WorkspaceRootExplicit: true}))
 	if err != nil {
 		t.Fatalf("loadSessionServerConfig workspace B: %v", err)
 	}
@@ -614,7 +615,7 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 	if err != nil {
 		t.Fatalf("DialRemote workspace B: %v", err)
 	}
-	fixture.serverB = newRemoteAppServer(remoteB, cfgB)
+	fixture.serverB = newRemoteAppServerWithAuth(remoteB, cfgB, nil, false)
 
 	if got, want := fixture.serverA.ProjectID(), fixture.serverB.ProjectID(); got != want {
 		t.Fatalf("project id mismatch across clients: a=%q b=%q", got, want)
@@ -640,10 +641,11 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 func TestShouldBypassRemoteStartupForInteractiveOnboardingOnFirstRun(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	cfg, err := startupconfig.ResolveSessionConfig(startupConfigRequest(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}))
 	if err != nil {
-		t.Fatalf("shouldBypassRemoteStartupForInteractiveOnboarding: %v", err)
+		t.Fatalf("loadSessionServerConfig: %v", err)
 	}
+	bypass := shouldBypassRemoteStartupForInteractiveOnboardingWithConfig(cfg, true)
 	if !bypass {
 		t.Fatal("expected first-run interactive startup to bypass remote onboarding paths")
 	}
@@ -655,10 +657,11 @@ func TestShouldBypassRemoteStartupForInteractiveOnboardingSkipsWhenConfigExists(
 		t.Fatalf("WriteDefaultSettingsFile: %v", err)
 	}
 
-	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	cfg, err := startupconfig.ResolveSessionConfig(startupConfigRequest(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}))
 	if err != nil {
-		t.Fatalf("shouldBypassRemoteStartupForInteractiveOnboarding: %v", err)
+		t.Fatalf("loadSessionServerConfig: %v", err)
 	}
+	bypass := shouldBypassRemoteStartupForInteractiveOnboardingWithConfig(cfg, true)
 	if bypass {
 		t.Fatal("expected configured interactive startup to keep remote onboarding paths enabled")
 	}
@@ -679,7 +682,7 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 	remoteCalled := false
 	daemonCalled := false
 	embeddedCalled := false
-	startInteractiveEmbeddedSessionServer = func(_ context.Context, _ Options, _ authInteractor) (*embeddedAppServer, error) {
+	startInteractiveEmbeddedSessionServer = func(_ context.Context, _ Options, _ authInteractor, _ bool) (*embeddedAppServer, error) {
 		embeddedCalled = true
 		return &embeddedAppServer{}, nil
 	}
@@ -692,7 +695,7 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 		return nil, nil, false, nil
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{}, true)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -716,7 +719,7 @@ func TestStartSessionServerUnregisteredWorkspaceStartsRegistrationCapableServer(
 	workspace := t.TempDir()
 	configureAppTestServerPort(t)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}

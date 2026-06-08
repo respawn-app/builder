@@ -44,12 +44,8 @@ func (p *compactionPlanner) mode(raw string) string {
 	return normalized
 }
 
-func (p *compactionPlanner) autoCompactionEnabled(snapshot compactionPlanningSnapshot) bool {
-	return snapshot.autoCompactionEnabled
-}
-
 func (p *compactionPlanner) autoCompactionAvailable(snapshot compactionPlanningSnapshot) bool {
-	return p.autoCompactionEnabled(snapshot) && p.mode(snapshot.compactionMode) != "none"
+	return snapshot.autoCompactionEnabled && p.mode(snapshot.compactionMode) != "none"
 }
 
 func (p *compactionPlanner) enginePlan(snapshot compactionPlanningSnapshot, caps llm.ProviderCapabilities) compactionEnginePlan {

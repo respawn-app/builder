@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"builder/cli/app/commands"
+	"builder/cli/app/internal/submissionerror"
 	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,10 +52,6 @@ func newQueuedInputItem(text string) queuedInputItem {
 	return queuedInputItem{ID: uuid.NewString(), Text: text}
 }
 
-func (m *uiModel) enqueueInjectedInput(text string) tea.Cmd {
-	return m.enqueueInjectedInputWithApprovalAnswer(text, nil)
-}
-
 func (m *uiModel) enqueueInjectedInputWithApprovalAnswer(text string, answer *clientui.PromptAnswer) tea.Cmd {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -83,7 +80,7 @@ func (m *uiModel) enqueueInjectedInputWithApprovalAnswer(text string, answer *cl
 }
 
 func (m *uiModel) queueInjectedInput(text string) tea.Cmd {
-	cmd := m.enqueueInjectedInput(text)
+	cmd := m.enqueueInjectedInputWithApprovalAnswer(text, nil)
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -93,7 +90,7 @@ func (m *uiModel) queueInjectedInput(text string) tea.Cmd {
 
 func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.Cmd) {
 	m := c.model
-	if m.isInputLocked() {
+	if m.isInputSubmitLocked() {
 		return m, nil
 	}
 	if blocked, blockCmd := c.blockInjectedQueueSubmission(); blocked {
@@ -134,7 +131,7 @@ func (c uiInputController) blockInjectedQueueSubmission() (bool, tea.Cmd) {
 	detailErr := "queued runtime message is still pending; retry or discard it before submitting"
 	m.activity = uiActivityError
 	m.syncViewport()
-	return true, m.inputController().showErrorStatus(detailErr)
+	return true, m.sendTransientStatusWithNoticeID(detailErr, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 }
 
 func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submittedText string) (bool, tea.Cmd) {
@@ -148,11 +145,11 @@ func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submi
 		c.restoreQueuedMessagesIntoInput()
 		m.activity = uiActivityError
 		m.syncViewport()
-		return true, tea.Batch(restoreCmd, m.appendOperatorErrorFeedback(runtimeDisconnectedStatusMessage))
+		return true, tea.Batch(restoreCmd, m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, runtimeDisconnectedStatusMessage, ""))
 	}
 	m.activity = uiActivityError
 	m.syncViewport()
-	return true, m.appendOperatorErrorFeedback(runtimeDisconnectedStatusMessage)
+	return true, m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, runtimeDisconnectedStatusMessage, "")
 }
 
 func (c uiInputController) restoreQueuedMessagesIntoInput() {
@@ -208,10 +205,6 @@ func (c uiInputController) restorePendingInjectedIntoInput() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (c uiInputController) unlockInputAfterSubmissionError() tea.Cmd {
-	return c.releaseLockedInjectedInput(true)
-}
-
 func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) tea.Cmd {
 	m := c.model
 	if !m.isInputSubmitLocked() {
@@ -261,7 +254,9 @@ func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, te
 
 func (c uiInputController) resumeQueuedInputsAfterIdleRuntime() tea.Cmd {
 	m := c.model
-	if m == nil || m.isBusy() || m.ask.hasCurrent() || m.isInputLocked() || m.pendingQueuedDrainAfterHydration || m.processList.actionInFlight {
+	if m == nil || m.isBusy() || m.ask.hasCurrent() ||
+		m.isInputSubmitLocked() ||
+		m.pendingQueuedDrainAfterHydration || m.processList.actionInFlight {
 		return nil
 	}
 	hasQueuedInputs := len(m.queued) > 0
@@ -290,18 +285,20 @@ func (c uiInputController) dispatchQueuedInput(item queuedInputItem) tea.Cmd {
 		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 				if commandResult.Action == commands.ActionCompact {
-					return finalizeSlashCommandCmd(commandResult.Action, c.startQueuedCompaction(commandResult.Args), m.recordPromptHistory(text))
+					return finalizeSlashCommandCmd(commandResult.Action, c.startCompactionWithOrigin(commandResult.Args, uiCompactionOriginQueued), m.recordPromptHistory(text))
 				}
-				_, cmd := c.applyQueuedCommandResult(commandResult)
+				_, cmd := c.applyCommandResultWithPreSubmitQueuePosition(commandResult, preSubmitQueueFront)
 				return finalizeSlashCommandCmd(commandResult.Action, cmd, m.recordPromptHistory(text))
 			}
 		}
 	}
-	return c.startQueuedSubmissionWithPromptHistory(item)
+	return c.startSubmissionWithPromptHistoryAndQueuePositionAndID(item.Text, preSubmitQueueFront, item.ID)
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {
-	if len(m.queued) == 0 || m.isBusy() || m.isInputLocked() || m.exitAction != UIActionNone || m.ask.hasCurrent() || m.processList.actionInFlight {
+	if len(m.queued) == 0 || m.isBusy() ||
+		m.isInputSubmitLocked() ||
+		m.exitAction != UIActionNone || m.ask.hasCurrent() || m.processList.actionInFlight {
 		return false
 	}
 	if m.inputMode() != uiInputModeMain {
@@ -459,9 +456,9 @@ func (c uiInputController) handleInjectedQueueCreateDone(msg injectedQueueCreate
 		m.removePendingInjectedByID(item.LocalID)
 		if item.State == injectedRuntimeQueuePendingCreate {
 			c.restoreInjectedTextIntoInput(item.Text)
-			detailErr := formatSubmissionError(msg.err)
+			detailErr := submissionerror.Format(msg.err)
 			m.activity = uiActivityError
-			appendCmd := m.appendOperatorErrorFeedback(detailErr)
+			appendCmd := m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, detailErr, "")
 			m.logf("queue_create.error err=%q", detailErr)
 			m.removeInjectedQueueItemAt(index)
 			m.syncViewport()
@@ -491,7 +488,8 @@ func (c uiInputController) handleInjectedQueueCreateDone(msg injectedQueueCreate
 		if msg.approvalCommentaryAnswer != nil {
 			return m, m.answerQueuedApprovalCommentary(*msg.approvalCommentaryAnswer)
 		}
-		if !m.isBusy() && !m.isInputLocked() && !m.injectedQueueBlocksDrain() {
+		if !m.isBusy() && !m.isInputSubmitLocked() &&
+			!m.injectedQueueBlocksDrain() {
 			return m, c.startQueuedInjectionSubmission()
 		}
 	case injectedRuntimeQueueCanceledBeforeCreate:
@@ -524,7 +522,8 @@ func (c uiInputController) handleInjectedQueueDiscardDone(msg injectedQueueDisca
 		m.removePendingInjectedByID(item.LocalID)
 		m.removePendingInjectedByID(item.ServerID)
 		m.removeInjectedQueueItemAt(index)
-		if !m.isBusy() && !m.isInputLocked() && !m.injectedQueueBlocksDrain() {
+		if !m.isBusy() && !m.isInputSubmitLocked() &&
+			!m.injectedQueueBlocksDrain() {
 			return m, c.startQueuedInjectionSubmission()
 		}
 		return m, nil
@@ -534,7 +533,7 @@ func (c uiInputController) handleInjectedQueueDiscardDone(msg injectedQueueDisca
 	m.ensurePendingInjectedVisible(item)
 	detailErr := "failed to discard queued runtime user message"
 	m.activity = uiActivityError
-	appendCmd := m.appendOperatorErrorFeedback(detailErr)
+	appendCmd := m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, detailErr, "")
 	m.logf("queue_discard.error queue_item_id=%q", item.ServerID)
 	return m, appendCmd
 }

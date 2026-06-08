@@ -74,16 +74,12 @@ func (s *Service) KillProcess(ctx context.Context, req serverapi.ProcessKillRequ
 		return serverapi.ProcessKillResponse{}, fmt.Errorf("process source is required")
 	}
 	memoReq := killRequestMemoRequest{ProcessID: strings.TrimSpace(req.ProcessID)}
-	return s.kills.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameKillRequestMemoRequest, func(ctx context.Context) (serverapi.ProcessKillResponse, error) {
+	return s.kills.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, func(a killRequestMemoRequest, b killRequestMemoRequest) bool { return a.ProcessID == b.ProcessID }, func(ctx context.Context) (serverapi.ProcessKillResponse, error) {
 		if err := ctx.Err(); err != nil {
 			return serverapi.ProcessKillResponse{}, err
 		}
 		return serverapi.ProcessKillResponse{}, s.processes.Kill(memoReq.ProcessID)
 	})
-}
-
-func sameKillRequestMemoRequest(a killRequestMemoRequest, b killRequestMemoRequest) bool {
-	return a.ProcessID == b.ProcessID
 }
 
 func (s *Service) GetInlineOutput(_ context.Context, req serverapi.ProcessInlineOutputRequest) (serverapi.ProcessInlineOutputResponse, error) {

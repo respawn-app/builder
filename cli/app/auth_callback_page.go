@@ -10,6 +10,8 @@ import (
 
 	"builder/cli/app/internal/authoauth"
 	"builder/cli/app/internal/oauthadapter"
+	sharedtheme "builder/shared/theme"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -85,7 +87,7 @@ func newAuthCallbackPageStyles(theme string) authCallbackPageStyles {
 		body:   lipgloss.NewStyle().Foreground(palette.foreground),
 		meta:   lipgloss.NewStyle().Foreground(palette.muted).Faint(true),
 		url:    lipgloss.NewStyle().Foreground(palette.primary).Underline(true),
-		error:  lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true),
+		error:  lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true),
 		border: lipgloss.NewStyle().Foreground(palette.primary),
 		input:  lipgloss.NewStyle().Foreground(palette.foreground),
 	}

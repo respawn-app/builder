@@ -3,7 +3,7 @@ package onboardingimport
 import (
 	"strings"
 
-	"builder/cli/app/internal/serverbridge"
+	"builder/server/runtime"
 )
 
 type SkillMetadata struct {
@@ -11,7 +11,7 @@ type SkillMetadata struct {
 }
 
 func ParseSkillMetadata(path string) (SkillMetadata, bool) {
-	meta, ok := serverbridge.ParseSkillMetadata(path)
+	meta, ok := runtime.ParseSkillMetadata(path)
 	if !ok {
 		return SkillMetadata{}, false
 	}

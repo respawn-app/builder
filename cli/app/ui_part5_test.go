@@ -6,10 +6,11 @@ import (
 	"builder/server/runtime"
 	shelltool "builder/server/tools/shell"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestViewDuringActiveWorkKeepsCommittedTranscriptVisible(t *testing.T) {
@@ -50,7 +51,7 @@ func TestSlashPickerShowsFastForOpenAIFirstPartyResponsesProvider(t *testing.T) 
 	_, eng := newAppRuntimeEngine(t, statusLineFastClient{}, runtime.Config{})
 	m := newProjectedEngineUIModel(eng)
 	m.input = "/"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	state := m.slashCommandPicker()
 	if !state.visible {
@@ -65,7 +66,7 @@ func TestSlashPickerHidesFastForNonFirstPartyResponsesProvider(t *testing.T) {
 	_, eng := newAppRuntimeEngine(t, statusLineAzureClient{}, runtime.Config{})
 	m := newProjectedEngineUIModel(eng)
 	m.input = "/"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	state := m.slashCommandPicker()
 	if !state.visible {
@@ -82,14 +83,14 @@ func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
 	m.termHeight = 20
 	m.input = "ok"
 
-	base := m.calcChatLines()
+	base := m.layout().calcChatLines()
 	m.queued = queuedInputsForTest("a", "b", "c")
-	withThree := m.calcChatLines()
+	withThree := m.layout().calcChatLines()
 	if withThree != base-3 {
 		t.Fatalf("expected chat lines to shrink by 3, base=%d withThree=%d", base, withThree)
 	}
 	m.queued = queuedInputsForTest("1", "2", "3", "4", "5", "6")
-	withOverflowLine := m.calcChatLines()
+	withOverflowLine := m.layout().calcChatLines()
 	if withOverflowLine != base-6 {
 		t.Fatalf("expected chat lines to shrink by 6 with overflow line, base=%d withOverflowLine=%d", base, withOverflowLine)
 	}

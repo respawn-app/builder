@@ -7,10 +7,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestDebugKeysTransientStatusShowsNormalizationSource(t *testing.T) {
@@ -34,7 +35,7 @@ func TestDebugKeysTransientStatusShowsNormalizationSource(t *testing.T) {
 
 func TestShowErrorStatusSetsErrorNoticeKind(t *testing.T) {
 	m := newProjectedStaticUIModel()
-	cmd := m.inputController().showErrorStatus("boom")
+	cmd := m.sendTransientStatusWithNoticeID("boom", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	if cmd == nil {
 		t.Fatal("expected clear command")
 	}
@@ -48,8 +49,8 @@ func TestShowErrorStatusSetsErrorNoticeKind(t *testing.T) {
 
 func TestTransientStatusQueuePromotesNextNoticeAfterClear(t *testing.T) {
 	m := newProjectedStaticUIModel()
-	first := m.enqueueTransientStatus("first", uiStatusNoticeSuccess)
-	second := m.enqueueTransientStatus("second", uiStatusNoticeError)
+	first := m.sendTransientStatusWithNoticeID("first", uiStatusNoticeSuccess, transientStatusDuration, uiStatusNoticeQueue, "")
+	second := m.sendTransientStatusWithNoticeID("second", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeQueue, "")
 
 	if first == nil {
 		t.Fatal("expected first notice clear command")
@@ -111,8 +112,8 @@ func TestTransientStatusQueueDedupesSameTextKindAndNoticeID(t *testing.T) {
 
 func TestTransientStatusReplaceUpdatesActiveNoticeImmediately(t *testing.T) {
 	m := newProjectedStaticUIModel()
-	first := m.setTransientStatusWithKind("first", uiStatusNoticeSuccess)
-	second := m.setTransientStatusWithKind("second", uiStatusNoticeError)
+	first := m.sendTransientStatusWithNoticeID("first", uiStatusNoticeSuccess, transientStatusDuration, uiStatusNoticeReplace, "")
+	second := m.sendTransientStatusWithNoticeID("second", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 
 	if first == nil || second == nil {
 		t.Fatal("expected replacement notices to schedule clear commands")
@@ -156,7 +157,7 @@ func TestStartupUpdateNoticeShowsAvailableVersionOnce(t *testing.T) {
 
 func TestStartupUpdateNoticeMarksShownOnlyAfterDisplay(t *testing.T) {
 	m := newProjectedStaticUIModel()
-	initialClear := m.setTransientStatusWithKind("busy", uiStatusNoticeNeutral)
+	initialClear := m.sendTransientStatusWithNoticeID("busy", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, "")
 	if initialClear == nil {
 		t.Fatal("expected initial notice clear command")
 	}
@@ -377,8 +378,8 @@ func TestPromptHistoryUpDownBrowseSubmittedPrompts(t *testing.T) {
 	if updated.input != "/resume" {
 		t.Fatalf("expected newest prompt selected first, got %q", updated.input)
 	}
-	if updated.cursorIndex() != len([]rune(updated.input)) {
-		t.Fatalf("expected history recall to place cursor at end, got %d", updated.cursorIndex())
+	if clampCursor(updated.inputCursor, len([]rune(updated.input))) != len([]rune(updated.input)) {
+		t.Fatalf("expected history recall to place cursor at end, got %d", clampCursor(updated.inputCursor, len([]rune(updated.input))))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -584,11 +585,11 @@ func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(
 		t.Fatalf("expected active submit text preserved, got %q", updated.activeSubmit.text)
 	}
 
-	cmd := updated.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+	cmd := updated.runtimeAdapter().applyProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
 		Kind:        runtime.EventUserMessageFlushed,
 		StepID:      "step-1",
 		UserMessage: "say hi",
-	}))
+	}), true).cmd
 	if got := len(updated.transcriptEntries); got != 1 {
 		t.Fatalf("expected one transcript entry after flushed user message, got %d", got)
 	}
@@ -733,9 +734,9 @@ func TestActiveSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testin
 	if len(requests) != 1 {
 		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
 	}
-	for _, message := range requestMessages(requests[0]) {
+	for _, message := range llm.MessagesFromItems(requests[0].Items) {
 		if message.Role == llm.RoleUser && message.Content == "later" {
-			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", llm.MessagesFromItems(requests[0].Items))
 		}
 	}
 }

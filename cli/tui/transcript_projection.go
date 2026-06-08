@@ -3,6 +3,8 @@ package tui
 import (
 	"sort"
 	"strings"
+
+	sharedtheme "builder/shared/theme"
 )
 
 type TranscriptProjection struct {
@@ -514,7 +516,7 @@ func ProjectTranscriptViews(input TranscriptProjectionInput, state TranscriptPro
 		InputRevision:          input.Revision,
 		Ongoing:                ongoing,
 		Detail:                 detail,
-		OngoingLines:           ongoing.Lines(detailDivider()),
+		OngoingLines:           ongoing.Lines(TranscriptDivider),
 		DetailLines:            detail.Lines(detailItemSeparator),
 		OngoingLineOwners:      ongoing.LineOwners(),
 		DetailLineOwners:       detail.LineOwners(),
@@ -539,12 +541,12 @@ func (p *TranscriptViewProjector) CommittedOngoingLines(input TranscriptProjecti
 	if key.Revision > 0 && p != nil && p.ongoingSet && p.ongoingKey == key {
 		return p.ongoingLines, p.ongoingGroup
 	}
-	renderer := committedOngoingProjectionRenderer(key.Theme, key.Width, key.BaseOffset)
+	renderer := transcriptProjectionRenderer(key.Theme, key.Width, key.BaseOffset)
 	renderer.compactDetail = key.CompactDetail
 	renderer.selectedTranscriptEntry = key.SelectedEntry
 	renderer.selectedTranscriptActive = key.SelectedEntryIsActive
 	projection := projectCommittedOngoingTranscriptWithRenderer(renderer, input.Entries)
-	lines := projection.Lines(detailDivider())
+	lines := projection.Lines(TranscriptDivider)
 	lastGroup := ""
 	if blockCount := len(projection.Blocks); blockCount > 0 {
 		lastGroup = projection.Blocks[blockCount-1].DividerGroup
@@ -565,7 +567,7 @@ func (p *TranscriptViewProjector) StreamingOngoingLines(text string, state Trans
 	}
 	key := ongoingStreamingProjectionKey{
 		Text:  text,
-		Theme: normalizeTheme(state.Theme),
+		Theme: sharedtheme.Resolve(state.Theme),
 		Width: state.ViewportWidth,
 	}
 	if key.Width <= 0 {
@@ -608,7 +610,7 @@ func (p *TranscriptViewProjector) StreamingDetailAssistantLines(text string, sta
 	}
 	key := ongoingStreamingProjectionKey{
 		Text:  text,
-		Theme: normalizeTheme(state.Theme),
+		Theme: sharedtheme.Resolve(state.Theme),
 		Width: state.ViewportWidth,
 	}
 	if key.Width <= 0 {
@@ -786,7 +788,7 @@ func NewTranscriptViewProjectionKey(input TranscriptProjectionInput, state Trans
 		EntryCount:            len(input.Entries),
 		ViewportWidth:         width,
 		ViewportLines:         lines,
-		Theme:                 normalizeTheme(state.Theme),
+		Theme:                 sharedtheme.Resolve(state.Theme),
 		CompactDetail:         state.CompactDetail,
 		SelectedEntry:         state.SelectedEntry,
 		SelectedEntryIsActive: state.SelectedEntryIsActive,
@@ -839,7 +841,7 @@ func (p *CommittedOngoingProjector) Project(entries []TranscriptEntry, key Commi
 	if cacheable && p != nil && p.projectionSet && p.key == key {
 		return p.projection.Clone()
 	}
-	renderer := committedOngoingProjectionRenderer(key.Theme, key.Width, key.BaseOffset)
+	renderer := transcriptProjectionRenderer(key.Theme, key.Width, key.BaseOffset)
 	if p != nil {
 		renderer = p.rendererFor(key.Theme, key.Width, key.BaseOffset)
 	}
@@ -853,7 +855,7 @@ func (p *CommittedOngoingProjector) Project(entries []TranscriptEntry, key Commi
 }
 
 func normalizeCommittedOngoingProjectionKey(key CommittedOngoingProjectionKey, entryCount int) CommittedOngoingProjectionKey {
-	key.Theme = normalizeTheme(key.Theme)
+	key.Theme = sharedtheme.Resolve(key.Theme)
 	if key.Width <= 0 {
 		key.Width = 120
 	}
@@ -864,22 +866,18 @@ func normalizeCommittedOngoingProjectionKey(key CommittedOngoingProjectionKey, e
 }
 
 func (p *CommittedOngoingProjector) rendererFor(theme string, width int, baseOffset int) Model {
-	theme = normalizeTheme(theme)
+	theme = sharedtheme.Resolve(theme)
 	if width <= 0 {
 		width = 120
 	}
 	if !p.rendererSet || p.rendererTheme != theme || p.rendererWidth != width {
-		p.renderer = committedOngoingProjectionRenderer(theme, width, baseOffset)
+		p.renderer = transcriptProjectionRenderer(theme, width, baseOffset)
 		p.rendererSet = true
 		p.rendererTheme = theme
 		p.rendererWidth = width
 	}
 	p.renderer.transcriptInput.BaseOffset = baseOffset
 	return p.renderer
-}
-
-func committedOngoingProjectionRenderer(theme string, width int, baseOffset int) Model {
-	return transcriptProjectionRenderer(theme, width, baseOffset)
 }
 
 func transcriptProjectionRenderer(theme string, width int, baseOffset int) Model {
@@ -1046,7 +1044,7 @@ func PendingToolEntries(entries []TranscriptEntry) []TranscriptEntry {
 	consumedResults := make(map[int]struct{})
 	resultIndex := buildToolResultIndex(tail)
 	for idx, entry := range tail {
-		if roleFromEntry(entry) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
@@ -1080,7 +1078,7 @@ func RenderCommittedOngoingSnapshot(entries []TranscriptEntry, theme string, wid
 func nonEmptyTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {
 	filtered := make([]TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
-		if roleFromEntry(entry).IsToolResult() &&
+		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)).IsToolResult() &&
 			strings.TrimSpace(entry.Text) == "" &&
 			strings.TrimSpace(entry.OngoingText) == "" {
 			// Successful patch/edit calls intentionally emit an empty tool_result
@@ -1104,7 +1102,7 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 		if entry.Transient {
 			return committedOngoingPrefixEndBefore(entries, idx, resultIndex)
 		}
-		if roleFromEntry(entry) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
@@ -1123,7 +1121,7 @@ func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, re
 	consumedResults := make(map[int]struct{})
 	for idx := boundary - 1; idx >= 0; idx-- {
 		entry := entries[idx]
-		if roleFromEntry(entry) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {

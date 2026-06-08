@@ -24,7 +24,7 @@ func TestLoadWorkflowConfigDefaults(t *testing.T) {
 }
 
 func TestDefaultSettingsTOMLRendersWorkflowDefaults(t *testing.T) {
-	rendered := defaultSettingsTOML()
+	rendered := settingsTOMLWithRenderingOptions(configRegistry.defaultState().Settings, true, nil, nil)
 	if !strings.Contains(rendered, "[workflow]") {
 		t.Fatalf("default TOML missing workflow section:\n%s", rendered)
 	}

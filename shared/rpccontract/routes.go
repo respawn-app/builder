@@ -98,12 +98,8 @@ type Route struct {
 	ValidatesRequest   bool
 }
 
-func typeOf[T any]() reflect.Type {
-	return reflect.TypeOf((*T)(nil)).Elem()
-}
-
 func unary[Req any, Resp any](method string, auth AuthPolicy, scope ScopePolicy, connection ConnectionStrategy, dependency Dependency) Route {
-	reqType := typeOf[Req]()
+	reqType := reflect.TypeOf((*Req)(nil)).Elem()
 	return Route{
 		Method:           method,
 		Kind:             KindUnary,
@@ -112,7 +108,7 @@ func unary[Req any, Resp any](method string, auth AuthPolicy, scope ScopePolicy,
 		Connection:       connection,
 		Dependency:       dependency,
 		RequestType:      reqType,
-		ResponseType:     typeOf[Resp](),
+		ResponseType:     reflect.TypeOf((*Resp)(nil)).Elem(),
 		ValidatesRequest: implementsValidator(reqType),
 	}
 }
@@ -124,7 +120,7 @@ func dedicatedUnary[Req any, Resp any](method string, requestID string, scope Sc
 }
 
 func subscription[Req any, Event any](method string, auth AuthPolicy, scope ScopePolicy, dependency Dependency, eventMethod string, completeMethod string) Route {
-	reqType := typeOf[Req]()
+	reqType := reflect.TypeOf((*Req)(nil)).Elem()
 	return Route{
 		Method:           method,
 		Kind:             KindSubscription,
@@ -133,17 +129,17 @@ func subscription[Req any, Event any](method string, auth AuthPolicy, scope Scop
 		Connection:       ConnectionSubscription,
 		Dependency:       dependency,
 		RequestType:      reqType,
-		ResponseType:     typeOf[protocol.SubscribeResponse](),
+		ResponseType:     reflect.TypeOf((*protocol.SubscribeResponse)(nil)).Elem(),
 		EventMethod:      eventMethod,
-		EventType:        typeOf[Event](),
+		EventType:        reflect.TypeOf((*Event)(nil)).Elem(),
 		CompleteMethod:   completeMethod,
-		CompleteType:     typeOf[protocol.StreamCompleteParams](),
+		CompleteType:     reflect.TypeOf((*protocol.StreamCompleteParams)(nil)).Elem(),
 		ValidatesRequest: implementsValidator(reqType),
 	}
 }
 
 func progress[Req any, Resp any, Event any](method string, scope ScopePolicy, dependency Dependency, eventMethod string) Route {
-	reqType := typeOf[Req]()
+	reqType := reflect.TypeOf((*Req)(nil)).Elem()
 	return Route{
 		Method:           method,
 		Kind:             KindProgress,
@@ -152,9 +148,9 @@ func progress[Req any, Resp any, Event any](method string, scope ScopePolicy, de
 		Connection:       ConnectionProgress,
 		Dependency:       dependency,
 		RequestType:      reqType,
-		ResponseType:     typeOf[Resp](),
+		ResponseType:     reflect.TypeOf((*Resp)(nil)).Elem(),
 		EventMethod:      eventMethod,
-		EventType:        typeOf[Event](),
+		EventType:        reflect.TypeOf((*Event)(nil)).Elem(),
 		ValidatesRequest: implementsValidator(reqType),
 	}
 }
@@ -167,7 +163,7 @@ func notification[Event any](method string) Route {
 		Scope:       ScopeNotification,
 		Connection:  ConnectionNotification,
 		Dependency:  DependencyStreamNotification,
-		RequestType: typeOf[Event](),
+		RequestType: reflect.TypeOf((*Event)(nil)).Elem(),
 	}
 }
 

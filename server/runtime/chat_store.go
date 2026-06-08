@@ -161,11 +161,6 @@ func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
 	if err := json.Unmarshal(payload, &completion); err != nil {
 		return fmt.Errorf("decode tool_completed event: %w", err)
 	}
-	s.recordStoredToolCompletion(completion)
-	return nil
-}
-
-func (s *chatStore) recordStoredToolCompletion(completion storedToolCompletion) {
 	s.recordToolCompletionWithProviderItems(tools.Result{
 		CallID:       completion.CallID,
 		Name:         toolspec.ID(completion.Name),
@@ -175,10 +170,7 @@ func (s *chatStore) recordStoredToolCompletion(completion storedToolCompletion) 
 		OngoingText:  completion.OngoingText,
 		Presentation: completion.Presentation,
 	}, completion.ProviderItems)
-}
-
-func (s *chatStore) recordToolCompletion(res tools.Result) {
-	s.recordToolCompletionWithProviderItems(res, nil)
+	return nil
 }
 
 func (s *chatStore) recordToolCompletionWithProviderItems(res tools.Result, providerItems []llm.ResponseItem) {
@@ -230,22 +222,6 @@ func (s *chatStore) clearOngoingError() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ongoingError = ""
-}
-
-func (s *chatStore) appendLocalEntry(role, text string) {
-	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, "", transcript.EntryVisibilityAuto)
-}
-
-func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText string) {
-	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, ongoingText, transcript.EntryVisibilityAuto)
-}
-
-func (s *chatStore) appendLocalEntryWithVisibility(role, text string, visibility transcript.EntryVisibility) {
-	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, "", visibility)
-}
-
-func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ongoingText string, visibility transcript.EntryVisibility) {
-	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)})
 }
 
 func (s *chatStore) appendLocalEntryRecord(entry ChatEntry) {
@@ -303,10 +279,6 @@ func (s *chatStore) cachedLastCommittedAssistantFinalAnswer() string {
 func (s *chatStore) snapshotMessages() []llm.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.snapshotMessagesLocked()
-}
-
-func (s *chatStore) snapshotMessagesLocked() []llm.Message {
 	return llm.MessagesFromItems(s.snapshotProviderItemsLocked())
 }
 
@@ -471,10 +443,6 @@ func (s *chatStore) applyLastCommittedAssistantFinalAnswerLocked(msg llm.Message
 	s.lastCommittedAssistantFinalAnswer = ""
 }
 
-func (s *chatStore) snapshot() ChatSnapshot {
-	return s.snapshotWithMetadata().Snapshot
-}
-
 func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -619,8 +587,4 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 		ToolCallID: strings.TrimSpace(call.ID),
 		ToolCall:   meta,
 	}
-}
-
-func formatToolResult(result tools.Result) string {
-	return tools.FormatToolResultForTranscript(result)
 }

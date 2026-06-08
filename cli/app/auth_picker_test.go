@@ -13,6 +13,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
+
 	tea "github.com/charmbracelet/bubbletea"
 	ansi "github.com/charmbracelet/x/ansi"
 )
@@ -483,7 +484,7 @@ func TestRunOAuthBrowserAutoClosesListenerAfterWaitFailure(t *testing.T) {
 		stderr:      io.Discard,
 	}
 
-	_, err := interactor.runOAuthBrowserAuto(context.Background(), auth.OpenAIOAuthOptions{}, "dark")
+	_, err := interactor.authOAuthRunner("dark").BrowserAuto(context.Background(), auth.OpenAIOAuthOptions{})
 	if err == nil || err.Error() != "wait failed" {
 		t.Fatalf("expected wait failure, got %v", err)
 	}
@@ -538,10 +539,10 @@ func TestRunOAuthBrowserAutoClosesListenerAfterSuccessfulCompletion(t *testing.T
 		stderr: io.Discard,
 	}
 
-	method, err := interactor.runOAuthBrowserAuto(context.Background(), auth.OpenAIOAuthOptions{
+	method, err := interactor.authOAuthRunner("dark").BrowserAuto(context.Background(), auth.OpenAIOAuthOptions{
 		ClientID:   clientID,
 		HTTPClient: rewriteOAuthIssuerClient(callbackServer),
-	}, "dark")
+	})
 	if err != nil {
 		t.Fatalf("expected successful browser auth, got %v", err)
 	}

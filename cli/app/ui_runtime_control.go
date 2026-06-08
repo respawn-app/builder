@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"builder/cli/app/internal/submissionerror"
 	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -119,10 +120,6 @@ func (m *uiModel) clearRuntimeGoal() (*clientui.RuntimeGoal, error) {
 		return goal, err
 	}
 	return nil, nil
-}
-
-func (m *uiModel) appendRuntimeLocalEntry(role, text string) error {
-	return m.appendRuntimeLocalEntryWithNoticeID(role, text, "")
 }
 
 func (m *uiModel) appendRuntimeLocalEntryWithNoticeID(role, text, noticeID string) error {
@@ -366,8 +363,11 @@ func (m *uiModel) applyRuntimeControlDone(msg runtimeControlDoneMsg) tea.Cmd {
 	m.observeRuntimeRequestResult(msg.err)
 	if msg.err != nil {
 		m.clearRuntimeControlPending(msg.operation)
-		errText := formatSubmissionError(msg.err)
-		return m.inputController().appendErrorFeedbackWithStatus(errText, m.setTransientStatusWithKind(errText, uiStatusNoticeError))
+		errText := submissionerror.Format(msg.err)
+		return sequenceCmds(
+			m.appendLocalEntryWithNoticeID("error", errText, ""),
+			m.sendTransientStatusWithNoticeID(errText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""),
+		)
 	}
 	var followUpCmd tea.Cmd
 	if runtimeControlOperationUsesEnabledTarget(msg.operation) {
@@ -393,10 +393,10 @@ func (m *uiModel) applyRuntimeControlDone(msg runtimeControlDoneMsg) tea.Cmd {
 	switch msg.operation {
 	case runtimeControlSetSessionName:
 		m.sessionName = strings.TrimSpace(msg.text)
-		return sequenceCmds(tea.SetWindowTitle(m.windowTitle()), followUpCmd)
+		return sequenceCmds(tea.SetWindowTitle(sessionTitle(m.sessionName)), followUpCmd)
 	case runtimeControlSetThinkingLevel:
 		m.thinkingLevel = strings.TrimSpace(msg.text)
-		return sequenceCmds(m.inputController().appendSystemFeedback("Thinking level set to "+m.thinkingLevel), followUpCmd)
+		return sequenceCmds(m.appendLocalEntryWithNoticeID("system", "Thinking level set to "+m.thinkingLevel, ""), followUpCmd)
 	case runtimeControlSetFastMode:
 		m.fastModeEnabled = msg.enabled
 		status := fastModeToggleStatusMessage(m.fastModeEnabled, msg.changed)

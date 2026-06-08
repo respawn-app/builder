@@ -279,7 +279,7 @@ func (p *launchPlanner) sessionPickerHeaderInfo(cfg config.App) sessionPickerHea
 		PersistenceRoot:   strings.TrimSpace(cfg.PersistenceRoot),
 		Settings:          cfg.Settings,
 		Source:            cfg.Source,
-		AuthCacheIdentity: statusAuthCacheIdentity(authState.Resolver),
+		AuthCacheIdentity: statuscollect.AuthCacheIdentity(authState.Resolver),
 		AuthStatus:        p.server.AuthStatusClient(),
 		AuthStatePath:     strings.TrimSpace(authState.Path),
 		ModelName:         strings.TrimSpace(cfg.Settings.Model),

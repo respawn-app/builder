@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 
 	"builder/cli/app/internal/runtimeattach"
@@ -42,7 +43,14 @@ func prepareSharedRuntime(ctx context.Context, source runtimeAttachmentSource, p
 	if err != nil {
 		return nil, err
 	}
-	activities, err := subscribeSharedRuntimeActivities(ctx, clients, plan.SessionID, lease.ID)
+	activities, err := runtimeattach.SubscribeActivities(ctx, runtimeattach.ActivityRequest{
+		SessionID:       plan.SessionID,
+		Runtime:         clients.SessionRuntime,
+		LeaseID:         lease.ID,
+		ReadOnly:        strings.TrimSpace(lease.ID) == "",
+		SessionActivity: clients.SessionActivity,
+		PromptActivity:  clients.PromptActivity,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -84,17 +92,6 @@ func activateSharedRuntime(ctx context.Context, clients runtimeAttachmentClients
 	return lease, leaseManager, nil
 }
 
-func subscribeSharedRuntimeActivities(ctx context.Context, clients runtimeAttachmentClients, sessionID string, leaseID string) (runtimeattach.Activities, error) {
-	return runtimeattach.SubscribeActivities(ctx, runtimeattach.ActivityRequest{
-		SessionID:       sessionID,
-		Runtime:         clients.SessionRuntime,
-		LeaseID:         leaseID,
-		ReadOnly:        strings.TrimSpace(leaseID) == "",
-		SessionActivity: clients.SessionActivity,
-		PromptActivity:  clients.PromptActivity,
-	})
-}
-
 func prepareSharedRuntimeWiring(ctx context.Context, clients runtimeAttachmentClients, plan sessionLaunchPlan, activities runtimeattach.Activities, leaseManager *controllerLeaseManager, logger *runLogger) (*runtimeWiring, func(), func()) {
 	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, clients.SessionViews, clients.RuntimeControls).(*sessionRuntimeClient)
 	if leaseManager != nil {
@@ -109,7 +106,7 @@ func prepareSharedRuntimeWiring(ctx context.Context, clients runtimeAttachmentCl
 		logger.Logf("%s", line)
 	})
 	terminalFocus := newTerminalFocusState()
-	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
+	turnQueueHook := newBellHooks(newTerminalNotifier(plan.ActiveSettings.NotificationMethod, os.Stdout, os.LookupEnv), func() string {
 		if runtimeClient != nil {
 			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {
 				return sessionName

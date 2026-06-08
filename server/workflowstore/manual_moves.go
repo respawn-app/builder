@@ -9,6 +9,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 func (s *Store) ManualMoveTask(ctx context.Context, req ManualMoveRequest) (ManualMoveResult, error) {
@@ -102,7 +103,7 @@ func (s *Store) ManualMoveTask(ctx context.Context, req ManualMoveRequest) (Manu
 	if transitionState == "pending_approval" && sourceRunID == "" && !req.AllowMissingEdge {
 		return ManualMoveResult{}, errors.New("manual move requiring approval needs a source run")
 	}
-	outputValuesJSON, err := marshalJSON(outputValues)
+	outputValuesJSON, err := workflowjson.MarshalString(outputValues)
 	if err != nil {
 		return ManualMoveResult{}, err
 	}
@@ -253,7 +254,7 @@ func manualMoveEdgeSnapshot(edge workflow.Edge, sourceNode workflow.Node, target
 func (s *Store) latestRunForPlacement(ctx context.Context, placementID workflow.PlacementID) (workflow.RunID, string, error) {
 	var runID string
 	var sessionID sql.NullString
-	err := s.db.QueryRowContext(ctx, workflowStoreQuery(latestRunForPlacementQuery), string(placementID)).Scan(&runID, &sessionID)
+	err := s.db.QueryRowContext(ctx, strings.TrimSuffix(latestRunForPlacementQuery, "\n"), string(placementID)).Scan(&runID, &sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", nil
 	}
@@ -276,7 +277,7 @@ func (s *Store) backwardManualMoveEdge(ctx context.Context, sourcePlacement work
 	var inputBindingsJSON string
 	var outputRequirementsJSON string
 	var metadataJSON string
-	err := s.db.QueryRowContext(ctx, workflowStoreQuery(manualMovePreviousTransitionQuery), string(sourcePlacement), string(targetNode.ID)).Scan(&groupID, &transitionID, &transitionDisplayName, &outputValuesJSON, &sourceRunID, &workflowEdgeID, &edgeKey, &contextMode, &requiresApproval, &inputBindingsJSON, &outputRequirementsJSON, &metadataJSON)
+	err := s.db.QueryRowContext(ctx, strings.TrimSuffix(manualMovePreviousTransitionQuery, "\n"), string(sourcePlacement), string(targetNode.ID)).Scan(&groupID, &transitionID, &transitionDisplayName, &outputValuesJSON, &sourceRunID, &workflowEdgeID, &edgeKey, &contextMode, &requiresApproval, &inputBindingsJSON, &outputRequirementsJSON, &metadataJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return workflow.TransitionGroup{}, workflow.Edge{}, nil, "", "", false, nil
 	}
@@ -284,20 +285,20 @@ func (s *Store) backwardManualMoveEdge(ctx context.Context, sourcePlacement work
 		return workflow.TransitionGroup{}, workflow.Edge{}, nil, "", "", false, err
 	}
 	outputValues := map[string]string{}
-	if err := unmarshalJSON(outputValuesJSON, &outputValues); err != nil {
+	if err := workflowjson.UnmarshalString(outputValuesJSON, &outputValues); err != nil {
 		return workflow.TransitionGroup{}, workflow.Edge{}, nil, "", "", false, err
 	}
 	inputs := []workflow.InputBinding{}
-	if err := unmarshalJSON(inputBindingsJSON, &inputs); err != nil {
+	if err := workflowjson.UnmarshalString(inputBindingsJSON, &inputs); err != nil {
 		return workflow.TransitionGroup{}, workflow.Edge{}, nil, "", "", false, err
 	}
 	requirements := []workflow.OutputRequirement{}
-	if err := unmarshalJSON(outputRequirementsJSON, &requirements); err != nil {
+	if err := workflowjson.UnmarshalString(outputRequirementsJSON, &requirements); err != nil {
 		return workflow.TransitionGroup{}, workflow.Edge{}, nil, "", "", false, err
 	}
 	metadata := workflowRunMetadata{}
 	if strings.TrimSpace(metadataJSON) != "" {
-		if err := unmarshalJSON(metadataJSON, &metadata); err != nil {
+		if err := workflowjson.UnmarshalString(metadataJSON, &metadata); err != nil {
 			return workflow.TransitionGroup{}, workflow.Edge{}, nil, "", "", false, err
 		}
 	}

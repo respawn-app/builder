@@ -23,7 +23,7 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}}
 
 	var seenFlushed bool
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" {
 				seenFlushed = true
@@ -102,7 +102,7 @@ func TestQueuedUserMessageFlushDoesNotEmitConversationUpdatedForInjectedMessage(
 		eventIndex int
 		flushIndex = -1
 	)
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
 			eventIndex++
@@ -135,7 +135,7 @@ func TestDirectUserMessageFlushDoesNotEmitConversationUpdated(t *testing.T) {
 		eventIndex int
 		flushIndex = -1
 	)
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
 			eventIndex++
@@ -172,7 +172,7 @@ func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
 		flushCount int
 		flushed    Event
 	)
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventUserMessageFlushed {
 				flushCount++
@@ -227,7 +227,7 @@ func TestRequestMessagesPreserveANSIEscapes(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: seedContent}); err != nil {
 		t.Fatalf("append seed message: %v", err)
@@ -274,7 +274,7 @@ func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
 		},
 	}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "one"); err != nil {
 		t.Fatalf("first submit: %v", err)
@@ -342,7 +342,7 @@ func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
 }
 
 func TestDiscardQueuedUserMessageRemovesExactQueuedEntry(t *testing.T) {
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	first := eng.QueueUserMessage("same")
 	eng.QueueUserMessage("other")
@@ -361,7 +361,7 @@ func TestDiscardQueuedUserMessageRemovesExactQueuedEntry(t *testing.T) {
 func TestContextUsageUsesLastUsageWhenAvailable(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	eng.setLastUsage(llm.Usage{InputTokens: 1234, OutputTokens: 66, WindowTokens: 399_000})
 
 	usage := eng.ContextUsage()
@@ -374,7 +374,7 @@ func TestContextUsageUsesLastUsageWhenAvailable(t *testing.T) {
 }
 
 func TestContextUsageFallsBackToEstimatedTokens(t *testing.T) {
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "estimate me"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestContextUsageFallsBackToEstimatedTokens(t *testing.T) {
 }
 
 func TestContextUsageTracksWeightedCacheHitPercentageFromModelUsage(t *testing.T) {
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 
 	if usage := eng.ContextUsage(); usage.HasCacheHitPercentage {
 		t.Fatalf("expected cache hit percentage to be unavailable before model usage, got %+v", usage)
@@ -409,7 +409,7 @@ func TestContextUsageTracksWeightedCacheHitPercentageFromModelUsage(t *testing.T
 }
 
 func TestContextUsageUsesEstimatedTokensWhenLastUsageIsStale(t *testing.T) {
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	eng.setLastUsage(llm.Usage{InputTokens: 100, OutputTokens: 0, WindowTokens: 410_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("x", 1600)}); err != nil {
 		t.Fatalf("append message: %v", err)
@@ -428,7 +428,7 @@ func TestContextUsageUsesEstimatedTokensWhenLastUsageIsStale(t *testing.T) {
 }
 
 func TestContextUsageAddsOnlyPostCheckpointEstimateDelta(t *testing.T) {
-	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, mustCreateTestSession(t), &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("seed-", 100)}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestContextUsageAddsOnlyPostCheckpointEstimateDelta(t *testing.T) {
 
 func TestReopenedSessionRestoresUsageCheckpointDeltaAccounting(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("seed-", 100)}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestReopenedSessionRestoresUsageCheckpointDeltaAccounting(t *testing.T) {
 	}
 
 	reopenedStore := mustOpenTestSession(t, store.Dir())
-	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 
 	currentEstimate := estimateItemsTokens(restored.snapshotItems())
 	deltaEstimate := currentEstimate - checkpointEstimate
@@ -485,7 +485,7 @@ func TestReopenedSessionRestoresUsageCheckpointDeltaAccounting(t *testing.T) {
 
 func TestHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	if err := eng.appendPersistedDiagnosticEntry("step-1", preciseTokenCountFailureDiagnostic, "error", "first fallback"); err != nil {
 		t.Fatalf("append first diagnostic: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 
 func TestReopenedSessionHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	if err := eng.appendPersistedDiagnosticEntry("step-1", preciseTokenCountFailureDiagnostic, "error", "first fallback"); err != nil {
 		t.Fatalf("append first diagnostic: %v", err)
 	}
@@ -529,7 +529,7 @@ func TestReopenedSessionHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 	}
 
 	reopenedStore := mustOpenTestSession(t, store.Dir())
-	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{ContextWindowTokens: 410_000})
+	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{ContextWindowTokens: 410_000})
 	if err := restored.appendPersistedDiagnosticEntry("step-2", preciseTokenCountFailureDiagnostic, "error", "second fallback"); err != nil {
 		t.Fatalf("append second diagnostic after reopen: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestEstimateItemsTokensDoesNotTreatInlineImagePayloadAsPlainText(t *testing
 func TestContextUsageDoesNotInflateInlineImagePayloadByBase64Length(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	eng.setLastUsage(llm.Usage{InputTokens: 100, OutputTokens: 0, WindowTokens: 410_000})
 	if err := eng.appendMessage("", llm.Message{
 		Role:       llm.RoleTool,
@@ -601,7 +601,7 @@ func TestContextUsageDoesNotInflateInlineImagePayloadByBase64Length(t *testing.T
 func TestShouldAutoCompactAccountsForMessagesAppendedAfterLastUsage(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   410_000,
 		AutoCompactTokenLimit: 300,
@@ -620,7 +620,7 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 900,

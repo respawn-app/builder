@@ -507,7 +507,7 @@ func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps .
 	if err != nil {
 		t.Fatalf("workflowstore.New: %v", err)
 	}
-	view, err := newWorkflowView(metadataStore)
+	view, err := workflowview.New(metadataStore)
 	if err != nil {
 		t.Fatalf("workflowview.New: %v", err)
 	}
@@ -939,10 +939,4 @@ func (c *blockingClient) waitForReturn(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for fake model return")
 	}
-}
-
-func newWorkflowView(store *metadata.Store) (interface {
-	GetTask(context.Context, string) (serverapi.WorkflowTaskDetail, error)
-}, error) {
-	return workflowview.New(store)
 }

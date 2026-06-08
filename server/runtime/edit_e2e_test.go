@@ -49,7 +49,7 @@ func TestEditAliasCompletionDiffAndReviewerEditsFlow(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(editTool), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolEdit, Handler: editTool}), Config{
 		Model:        "claude",
 		EnabledTools: []toolspec.ID{toolspec.ToolEdit},
 		Reviewer: ReviewerConfig{

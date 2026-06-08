@@ -48,10 +48,6 @@ func newOSC9TerminalNotifier(out io.Writer) *osc9TerminalNotifier {
 	return &osc9TerminalNotifier{out: out}
 }
 
-func defaultTerminalNotifier(method string) terminalNotifier {
-	return newTerminalNotifier(method, os.Stdout, os.LookupEnv)
-}
-
 func newTerminalNotifier(method string, out io.Writer, lookup func(string) (string, bool)) terminalNotifier {
 	normalized := strings.ToLower(strings.TrimSpace(method))
 	if normalized == "" {

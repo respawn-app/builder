@@ -12,17 +12,6 @@ import (
 	"builder/shared/config"
 )
 
-type stubRunner struct {
-	run func(context.Context, config.App, auth.State) (Result, error)
-}
-
-func (r stubRunner) RunInteractiveOnboarding(ctx context.Context, cfg config.App, authState auth.State) (Result, error) {
-	if r.run == nil {
-		return Result{}, nil
-	}
-	return r.run(ctx, cfg, authState)
-}
-
 func TestEnsureReadySkipsWhenSettingsFileExists(t *testing.T) {
 	cfg := config.App{Source: config.SourceReport{SettingsFileExists: true, SettingsPath: "/tmp/settings.toml"}}
 	reloaded, changed, err := EnsureReady(context.Background(), cfg, nil, false, func() (config.App, error) {
@@ -43,7 +32,9 @@ func TestEnsureReadySkipsWhenSettingsFileExists(t *testing.T) {
 func TestEnsureReadyRequiresAuthManagerForInteractive(t *testing.T) {
 	_, _, err := EnsureReady(context.Background(), config.App{}, nil, true, func() (config.App, error) {
 		return config.App{}, nil
-	}, stubRunner{})
+	}, func(context.Context, config.App, auth.State) (Result, error) {
+		return Result{}, nil
+	})
 	if err == nil || err.Error() != "auth manager is required for onboarding" {
 		t.Fatalf("expected missing auth manager error, got %v", err)
 	}
@@ -63,9 +54,9 @@ func TestEnsureReadyReturnsCanceledWhenInteractiveFlowNotCompleted(t *testing.T)
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 	_, _, err := EnsureReady(context.Background(), config.App{}, mgr, true, func() (config.App, error) {
 		return config.App{}, nil
-	}, stubRunner{run: func(context.Context, config.App, auth.State) (Result, error) {
+	}, func(context.Context, config.App, auth.State) (Result, error) {
 		return Result{Completed: false}, nil
-	}})
+	})
 	if !errors.Is(err, ErrOnboardingCanceled) {
 		t.Fatalf("expected onboarding canceled, got %v", err)
 	}
@@ -76,12 +67,12 @@ func TestEnsureReadyInteractiveReloadsResultMetadata(t *testing.T) {
 	reloadedCfg := config.App{}
 	reloaded, changed, err := EnsureReady(context.Background(), config.App{}, mgr, true, func() (config.App, error) {
 		return reloadedCfg, nil
-	}, stubRunner{run: func(ctx context.Context, cfg config.App, state auth.State) (Result, error) {
+	}, func(ctx context.Context, cfg config.App, state auth.State) (Result, error) {
 		if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-test" {
 			t.Fatalf("unexpected auth state: %+v", state.Method)
 		}
 		return Result{Completed: true, CreatedDefaultConfig: true, SettingsPath: "/tmp/settings.toml"}, nil
-	}})
+	})
 	if err != nil {
 		t.Fatalf("ensure ready: %v", err)
 	}

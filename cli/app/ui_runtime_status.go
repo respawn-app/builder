@@ -226,7 +226,7 @@ func (m *uiModel) localRuntimeStatus() clientui.RuntimeStatus {
 func localLastCommittedAssistantFinalAnswer(entries []tui.TranscriptEntry) string {
 	answer := ""
 	for _, entry := range entries {
-		if !transcriptEntryCommittedForApp(entry) {
+		if entry.Transient && !entry.Committed {
 			break
 		}
 		if !transcriptEntryAffectsCommittedAssistantFinalAnswer(entry) {

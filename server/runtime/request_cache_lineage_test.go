@@ -291,7 +291,7 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 		caps:      llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true},
 		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}}},
 	}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolExecCommand}})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolExecCommand}})
 	eng.compactionRuntimeState().SetCount(1)
 	input := llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "alpha"}, {Role: llm.RoleAssistant, Content: "beta"}})
 	if _, err := eng.localCompactionSummary(context.Background(), input, compactionInstructions("keep API details"), compactionModeManual); err != nil {
@@ -368,7 +368,7 @@ func TestOpenAIResponsesPayload_UsesExpectedCacheKeyShapesAcrossConversationSupe
 	if got, want := reviewerReq.SessionID, reviewerSessionID(store.Meta().SessionID); got != want {
 		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
 	}
-	if got, want := stringValue(reviewerPayload["prompt_cache_key"]), reviewerPromptCacheKey(store.Meta().SessionID, 1); got != want {
+	if got, want := stringValue(reviewerPayload["prompt_cache_key"]), conversationPromptCacheKey(reviewerSessionID(store.Meta().SessionID), 1); got != want {
 		t.Fatalf("reviewer prompt_cache_key = %q, want %q", got, want)
 	}
 
@@ -470,7 +470,7 @@ func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConve
 	if got, want := reviewerBefore.sessionID, reviewerSessionID(store.Meta().SessionID); got != want {
 		t.Fatalf("reviewer before session_id header = %q, want %q", got, want)
 	}
-	if got, want := stringValue(reviewerBefore.payload["prompt_cache_key"]), reviewerPromptCacheKey(store.Meta().SessionID, 0); got != want {
+	if got, want := stringValue(reviewerBefore.payload["prompt_cache_key"]), conversationPromptCacheKey(reviewerSessionID(store.Meta().SessionID), 0); got != want {
 		t.Fatalf("reviewer before prompt_cache_key = %q, want %q", got, want)
 	}
 
@@ -495,7 +495,7 @@ func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConve
 	if got, want := reviewerAfter.sessionID, reviewerSessionID(store.Meta().SessionID); got != want {
 		t.Fatalf("reviewer after session_id header = %q, want %q", got, want)
 	}
-	if got, want := stringValue(reviewerAfter.payload["prompt_cache_key"]), reviewerPromptCacheKey(store.Meta().SessionID, 1); got != want {
+	if got, want := stringValue(reviewerAfter.payload["prompt_cache_key"]), conversationPromptCacheKey(reviewerSessionID(store.Meta().SessionID), 1); got != want {
 		t.Fatalf("reviewer after prompt_cache_key = %q, want %q", got, want)
 	}
 
@@ -531,7 +531,7 @@ func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConve
 	if got, want := reopenedReviewer.sessionID, reviewerSessionID(reopened.Meta().SessionID); got != want {
 		t.Fatalf("reopened reviewer session_id header = %q, want %q", got, want)
 	}
-	if got, want := stringValue(reopenedReviewer.payload["prompt_cache_key"]), reviewerPromptCacheKey(reopened.Meta().SessionID, reopenedEng.compactionCountSnapshot()); got != want {
+	if got, want := stringValue(reopenedReviewer.payload["prompt_cache_key"]), conversationPromptCacheKey(reviewerSessionID(reopened.Meta().SessionID), reopenedEng.compactionCountSnapshot()); got != want {
 		t.Fatalf("reopened reviewer prompt_cache_key = %q, want %q", got, want)
 	}
 }
@@ -576,7 +576,7 @@ func TestReviewerSuggestions_UsesReviewerClientPromptCacheCapability(t *testing.
 	if got, want := reviewerClient.calls[0].SessionID, reviewerSessionID(store.Meta().SessionID); got != want {
 		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
 	}
-	if got, want := reviewerClient.calls[0].PromptCacheKey, reviewerPromptCacheKey(store.Meta().SessionID, eng.compactionCountSnapshot()); got != want {
+	if got, want := reviewerClient.calls[0].PromptCacheKey, conversationPromptCacheKey(reviewerSessionID(store.Meta().SessionID), eng.compactionCountSnapshot()); got != want {
 		t.Fatalf("reviewer PromptCacheKey = %q, want %q", got, want)
 	}
 	if reviewerClient.calls[0].PromptCacheScope != cachewarn.ScopeReviewer {
@@ -613,7 +613,7 @@ func TestReviewerSuggestions_PromptCacheKeyStaysOnReviewerSessionAfterConversati
 	if got, want := reviewerClient.calls[0].SessionID, reviewerSessionID(reopened.Meta().SessionID); got != want {
 		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
 	}
-	if got, want := reviewerClient.calls[0].PromptCacheKey, reviewerPromptCacheKey(reopened.Meta().SessionID, eng.compactionCountSnapshot()); got != want {
+	if got, want := reviewerClient.calls[0].PromptCacheKey, conversationPromptCacheKey(reviewerSessionID(reopened.Meta().SessionID), eng.compactionCountSnapshot()); got != want {
 		t.Fatalf("reviewer PromptCacheKey = %q, want %q", got, want)
 	}
 }

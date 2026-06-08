@@ -153,7 +153,7 @@ func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 }
 
 func TestNormalizeSettingsForPersistence_AllowsDisabledThinkingWithReviewerInheritance(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.Model = "gpt-5.5"
 	settings.ThinkingLevel = ""
 	settings.Reviewer = ReviewerSettings{
@@ -177,7 +177,7 @@ func TestNormalizeSettingsForPersistence_AllowsDisabledThinkingWithReviewerInher
 }
 
 func TestNormalizeSettingsForPersistence_AllowsProviderOverrideWithExplicitPersistedModel(t *testing.T) {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	settings.Model = "my-team-alias"
 	settings.ProviderOverride = "openai"
 

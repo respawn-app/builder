@@ -1,5 +1,7 @@
 package tui
 
+import "builder/shared/theme"
+
 type StyleIntent uint16
 
 const (
@@ -91,14 +93,15 @@ func applyANSIStyleIntents(text string, palette ansiIntentPalette, intents Style
 	return applyANSIStyleTransform(text, transform)
 }
 
-func themeANSIIntentPalette(theme string) ansiIntentPalette {
+func themeANSIIntentPalette(themeName string) ansiIntentPalette {
+	tokens := theme.ResolvePalette(themeName)
 	return ansiIntentPalette{
-		ThemeForeground:   themeForegroundColor(theme),
-		SubduedForeground: themePreviewColor(theme),
-		PrimaryForeground: themePrimaryColor(theme),
-		SuccessForeground: themeSuccessColor(theme),
-		WarningForeground: themeWarningColor(theme),
-		ErrorForeground:   themeErrorColor(theme),
+		ThemeForeground:   rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
+		SubduedForeground: rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
+		PrimaryForeground: rgbColorFromHex(tokens.App.Primary.TrueColor),
+		SuccessForeground: rgbColorFromHex(tokens.Transcript.Success.TrueColor),
+		WarningForeground: rgbColorFromHex(tokens.Transcript.Warning.TrueColor),
+		ErrorForeground:   rgbColorFromHex(tokens.Transcript.Error.TrueColor),
 	}
 }
 

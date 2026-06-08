@@ -1,10 +1,6 @@
 package workflowstore
 
-import (
-	"strings"
-
-	_ "embed"
-)
+import _ "embed"
 
 var (
 	//go:embed queries/interrupt_task_run_candidates.sql
@@ -82,11 +78,3 @@ var (
 	//go:embed queries/manual_move_previous_transition.sql
 	manualMovePreviousTransitionQuery string
 )
-
-func workflowStoreQuery(query string) string {
-	return strings.TrimSuffix(query, "\n")
-}
-
-func workflowStoreQueryWithClause(query string, clause string) string {
-	return strings.Replace(workflowStoreQuery(query), "{{clause}}", clause, 1)
-}

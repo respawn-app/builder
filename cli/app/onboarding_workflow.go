@@ -4,97 +4,18 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/cli/app/internal/onboardingmodel"
+	"builder/server/llm"
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
 )
 
-type onboardingStepDefinition interface {
-	ID() string
-	Visible(*onboardingFlowState) bool
-	Build(*onboardingFlowState) onboardingScreen
-	ApplyChoice(*onboardingFlowState, string) error
-	ApplyInput(*onboardingFlowState, string) error
-	ApplyMultiSelect(*onboardingFlowState, map[string]bool) error
-}
-
-type onboardingChoiceStep struct {
-	id      string
-	visible func(*onboardingFlowState) bool
-	build   func(*onboardingFlowState) onboardingScreen
-	apply   func(*onboardingFlowState, string) error
-}
-
-func (s onboardingChoiceStep) ID() string { return s.id }
-func (s onboardingChoiceStep) Visible(state *onboardingFlowState) bool {
-	if s.visible == nil {
-		return true
-	}
-	return s.visible(state)
-}
-func (s onboardingChoiceStep) Build(state *onboardingFlowState) onboardingScreen {
-	return s.build(state)
-}
-func (s onboardingChoiceStep) ApplyChoice(state *onboardingFlowState, choiceID string) error {
-	if s.apply == nil {
-		return nil
-	}
-	return s.apply(state, choiceID)
-}
-func (onboardingChoiceStep) ApplyInput(*onboardingFlowState, string) error                { return nil }
-func (onboardingChoiceStep) ApplyMultiSelect(*onboardingFlowState, map[string]bool) error { return nil }
-
-type onboardingInputStep struct {
-	id      string
-	visible func(*onboardingFlowState) bool
-	build   func(*onboardingFlowState) onboardingScreen
-	apply   func(*onboardingFlowState, string) error
-}
-
-func (s onboardingInputStep) ID() string { return s.id }
-func (s onboardingInputStep) Visible(state *onboardingFlowState) bool {
-	if s.visible == nil {
-		return true
-	}
-	return s.visible(state)
-}
-func (s onboardingInputStep) Build(state *onboardingFlowState) onboardingScreen {
-	return s.build(state)
-}
-func (onboardingInputStep) ApplyChoice(*onboardingFlowState, string) error { return nil }
-func (s onboardingInputStep) ApplyInput(state *onboardingFlowState, value string) error {
-	if s.apply == nil {
-		return nil
-	}
-	return s.apply(state, value)
-}
-func (onboardingInputStep) ApplyMultiSelect(*onboardingFlowState, map[string]bool) error { return nil }
-
-type onboardingMultiSelectStep struct {
-	id      string
-	visible func(*onboardingFlowState) bool
-	build   func(*onboardingFlowState) onboardingScreen
-	apply   func(*onboardingFlowState, map[string]bool) error
-}
-
-func (s onboardingMultiSelectStep) ID() string { return s.id }
-func (s onboardingMultiSelectStep) Visible(state *onboardingFlowState) bool {
-	if s.visible == nil {
-		return true
-	}
-	return s.visible(state)
-}
-func (s onboardingMultiSelectStep) Build(state *onboardingFlowState) onboardingScreen {
-	return s.build(state)
-}
-func (onboardingMultiSelectStep) ApplyChoice(*onboardingFlowState, string) error { return nil }
-func (onboardingMultiSelectStep) ApplyInput(*onboardingFlowState, string) error  { return nil }
-func (s onboardingMultiSelectStep) ApplyMultiSelect(state *onboardingFlowState, value map[string]bool) error {
-	if s.apply == nil {
-		return nil
-	}
-	return s.apply(state, value)
+type onboardingStepDefinition struct {
+	id               string
+	visible          func(*onboardingFlowState) bool
+	build            func(*onboardingFlowState) onboardingScreen
+	apply            func(*onboardingFlowState, string) error
+	applyMultiSelect func(*onboardingFlowState, map[string]bool) error
 }
 
 type onboardingWorkflow struct {
@@ -104,7 +25,7 @@ type onboardingWorkflow struct {
 func (w onboardingWorkflow) visibleSteps(state *onboardingFlowState) []onboardingStepDefinition {
 	visible := make([]onboardingStepDefinition, 0, len(w.steps))
 	for _, step := range w.steps {
-		if step.Visible(state) {
+		if step.visible == nil || step.visible(state) {
 			visible = append(visible, step)
 		}
 	}
@@ -113,7 +34,7 @@ func (w onboardingWorkflow) visibleSteps(state *onboardingFlowState) []onboardin
 
 func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 	return onboardingWorkflow{steps: []onboardingStepDefinition{
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "theme",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				defaultOption := theme.Resolve(state.settings.Theme)
@@ -135,7 +56,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "entry",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				return onboardingScreen{
@@ -154,7 +75,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingInputStep{
+		onboardingStepDefinition{
 			id: "model",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				return onboardingScreen{ID: "model", Kind: onboardingScreenInput, Title: "Choose a default model", Helper: "Press Enter to continue.", InputValue: state.settings.Model}
@@ -163,13 +84,13 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return applyOnboardingModel(state, value)
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "context_window",
 			visible: func(state *onboardingFlowState) bool {
-				return onboardingmodel.SupportsLargeContextWindowModel(state.settings.Model)
+				return llm.SupportsLargeContextWindowModel(state.settings.Model)
 			},
 			build: func(state *onboardingFlowState) onboardingScreen {
-				meta, _ := onboardingmodel.LookupModelMetadata(state.settings.Model)
+				meta, _ := llm.LookupModelMetadata(state.settings.Model)
 				body := fmt.Sprintf("%s supports larger context windows. The larger window costs about 50%% more. Quality degrades as the model gets closer to its limit. If automatic compaction is off, Builder can still go above the limit anyway, so the smaller default is recommended.", state.settings.Model)
 				return onboardingScreen{ID: "context_window", Kind: onboardingScreenChoice, Title: "Choose a context window", Body: body, DefaultOptionID: "default", Options: []onboardingOption{{ID: "default", Title: fmt.Sprintf("Default window: %s", formatTokenWindow(meta.ContextWindowTokens))}, {ID: "large", Title: fmt.Sprintf("Higher window: %s", formatTokenWindow(meta.LargeContextWindowTokens))}}}
 			},
@@ -178,13 +99,13 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "thinking",
 			visible: func(state *onboardingFlowState) bool {
-				return onboardingmodel.SupportsReasoningEffortModel(state.settings.Model)
+				return llm.SupportsReasoningEffortModel(state.settings.Model)
 			},
 			build: func(state *onboardingFlowState) onboardingScreen {
-				levels := onboardingmodel.SupportedThinkingLevelsModel(state.settings.Model)
+				levels := llm.SupportedThinkingLevelsModel(state.settings.Model)
 				options := []onboardingOption{{ID: "disable", Title: "Disable", Description: thinkingLevelEstimate("disable")}}
 				for _, level := range levels {
 					options = append(options, onboardingOption{ID: level, Title: titleCaseThinking(level)})
@@ -214,7 +135,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingInputStep{
+		onboardingStepDefinition{
 			id: "thinking_custom",
 			visible: func(state *onboardingFlowState) bool {
 				return state.customThinking || (strings.TrimSpace(state.settings.ThinkingLevel) != "" && !isKnownThinkingLevel(state.settings.ThinkingLevel))
@@ -237,13 +158,13 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "verbosity",
 			visible: func(state *onboardingFlowState) bool {
-				return onboardingmodel.SupportsVerbosityModel(state.settings.Model)
+				return llm.SupportsVerbosityModel(state.settings.Model)
 			},
 			build: func(state *onboardingFlowState) onboardingScreen {
-				levels := onboardingmodel.SupportedVerbosityLevelsModel(state.settings.Model)
+				levels := llm.SupportedVerbosityLevelsModel(state.settings.Model)
 				options := make([]onboardingOption, 0, len(levels))
 				for _, level := range levels {
 					options = append(options, onboardingOption{ID: level, Title: titleCaseASCII(level)})
@@ -255,7 +176,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "ask_question",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				defaultChoice := "no"
@@ -269,7 +190,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "reviewer",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				return onboardingScreen{ID: "reviewer", Kind: onboardingScreenChoice, Title: "Enable Supervisor?", Body: "Supervisor reviews the model's output independently, like an always-on code reviewer. It usually improves results, but it costs about 20% more and takes extra time. You can adjust the supervisor model and thinking level later in config.toml.", Options: []onboardingOption{{ID: "all", Title: "Yes, always"}, {ID: "edits", Title: "Yes, after edits"}, {ID: "off", Title: "No"}}, DefaultOptionID: state.settings.Reviewer.Frequency}
@@ -280,7 +201,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingInputStep{
+		onboardingStepDefinition{
 			id: "reviewer_model",
 			visible: func(state *onboardingFlowState) bool {
 				return reviewerEnabled(state)
@@ -302,7 +223,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				}
 				state.settings.Reviewer.Model = trimmed
 				state.reviewerCustomModel = trimmed != strings.TrimSpace(state.settings.Model)
-				if !onboardingmodel.SupportsReasoningEffortModel(trimmed) {
+				if !llm.SupportsReasoningEffortModel(trimmed) {
 					state.reviewerCustomThinking = false
 					state.settings.Reviewer.ThinkingLevel = ""
 					return nil
@@ -311,13 +232,13 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "reviewer_thinking",
 			visible: func(state *onboardingFlowState) bool {
-				return reviewerEnabled(state) && onboardingmodel.SupportsReasoningEffortModel(state.settings.Reviewer.Model)
+				return reviewerEnabled(state) && llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model)
 			},
 			build: func(state *onboardingFlowState) onboardingScreen {
-				levels := onboardingmodel.SupportedThinkingLevelsModel(state.settings.Reviewer.Model)
+				levels := llm.SupportedThinkingLevelsModel(state.settings.Reviewer.Model)
 				options := []onboardingOption{{ID: "disable", Title: "Disable", Description: thinkingLevelEstimate("disable")}}
 				for _, level := range levels {
 					options = append(options, onboardingOption{ID: level, Title: titleCaseThinking(level)})
@@ -352,10 +273,10 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingInputStep{
+		onboardingStepDefinition{
 			id: "reviewer_thinking_custom",
 			visible: func(state *onboardingFlowState) bool {
-				return reviewerEnabled(state) && onboardingmodel.SupportsReasoningEffortModel(state.settings.Reviewer.Model) && (state.reviewerCustomThinkingInput || (strings.TrimSpace(state.settings.Reviewer.ThinkingLevel) != "" && !isKnownThinkingLevel(state.settings.Reviewer.ThinkingLevel)))
+				return reviewerEnabled(state) && llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) && (state.reviewerCustomThinkingInput || (strings.TrimSpace(state.settings.Reviewer.ThinkingLevel) != "" && !isKnownThinkingLevel(state.settings.Reviewer.ThinkingLevel)))
 			},
 			build: func(state *onboardingFlowState) onboardingScreen {
 				value := state.settings.Reviewer.ThinkingLevel
@@ -376,7 +297,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "compaction",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				options := []onboardingOption{{ID: string(config.CompactionModeLocal), Title: "Local", Description: "Builder's high-quality, slow, costlier, proprietary compaction algorithm."}}
@@ -391,7 +312,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "skills_import",
 			visible: func(state *onboardingFlowState) bool {
 				return state.imports.pending || state.imports.err != nil || (!state.imports.skipSkills && state.imports.hasSkillCandidates())
@@ -401,17 +322,17 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return applyImportChoice(&state.skillImport, choiceID)
 			},
 		},
-		onboardingMultiSelectStep{
+		onboardingStepDefinition{
 			id:      "skills_enabled",
 			visible: func(state *onboardingFlowState) bool { return len(skillSelectionCandidates(state)) > 0 },
 			build:   func(state *onboardingFlowState) onboardingScreen { return buildSkillSelectionScreen(state) },
-			apply: func(state *onboardingFlowState, selection map[string]bool) error {
+			applyMultiSelect: func(state *onboardingFlowState, selection map[string]bool) error {
 				state.skillSelection = cloneSelection(selection)
 				state.settings.SkillToggles = buildSkillToggles(state, selection)
 				return nil
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "commands_import",
 			visible: func(state *onboardingFlowState) bool {
 				return state.imports.pending || state.imports.err != nil || (!state.imports.skipCommands && state.imports.hasCommandCandidates())
@@ -423,7 +344,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				return applyImportChoice(&state.commandImport, choiceID)
 			},
 		},
-		onboardingChoiceStep{
+		onboardingStepDefinition{
 			id: "review",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				return onboardingScreen{ID: "review", Kind: onboardingScreenChoice, Title: "Review setup", Body: "Review your first-time setup choices.", Options: []onboardingOption{{ID: "finish", Title: "Finish setup"}, {ID: "restart", Title: "Start over"}}, DefaultOptionID: "finish"}

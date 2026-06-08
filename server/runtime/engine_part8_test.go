@@ -34,7 +34,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}}), Config{Model: "gpt-5"})
 
 	submitDone := make(chan struct {
 		assistant llm.Message
@@ -143,8 +143,8 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 		},
 	}}
 	registry := tools.NewRegistry(
-		shelltool.NewExecCommandTool(store.Meta().WorkspaceRoot, 16_000, manager, store.Meta().SessionID),
-		shelltool.NewWriteStdinTool(16_000, manager),
+		tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: shelltool.NewExecCommandTool(store.Meta().WorkspaceRoot, 16_000, manager, store.Meta().SessionID)},
+		tools.HandlerRegistration{ID: toolspec.ToolWriteStdin, Handler: shelltool.NewWriteStdinTool(16_000, manager)},
 	)
 	eng := mustNewTestEngine(t, store, client, registry, Config{Model: "gpt-5"})
 	manager.SetEventHandler(func(evt shelltool.Event) {
@@ -208,7 +208,7 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 		chmodDone  bool
 		chmodError error
 	)
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -298,7 +298,7 @@ func TestNewNormalizesPersistedInFlightStepOnReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if reopenedStore.Meta().InFlightStep {
 		t.Fatal("expected reopen path to clear persisted in-flight flag")
 	}
@@ -437,7 +437,7 @@ func testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t *testing.T, c
 func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	result, err := eng.SubmitUserShellCommand(context.Background(), "pwd")
 	if err != nil {
@@ -559,10 +559,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		},
 	}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(
-		fakeTool{name: toolspec.ToolExecCommand, delay: 40 * time.Millisecond},
-		fakeTool{name: toolspec.ToolPatch, delay: 1 * time.Millisecond},
-	), Config{Model: "gpt-5", Temperature: 1})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand, delay: 40 * time.Millisecond}}, tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: fakeTool{name: toolspec.ToolPatch, delay: 1 * time.Millisecond}}), Config{Model: "gpt-5", Temperature: 1})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "run tools"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -634,8 +631,8 @@ func TestParallelToolCompletionAppearsInChatSnapshotBeforeAllToolsFinish(t *test
 	slow := blockingTool{name: toolspec.ToolExecCommand, started: make(chan struct{}), release: make(chan struct{})}
 	toolCompleted := make(chan tools.Result, 4)
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(
-		slow,
-		fakeTool{name: toolspec.ToolPatch, delay: 1 * time.Millisecond},
+		tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: slow},
+		tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: fakeTool{name: toolspec.ToolPatch, delay: 1 * time.Millisecond}},
 	), Config{
 		Model:       "gpt-5",
 		Temperature: 1,
@@ -715,7 +712,7 @@ func TestPersistedAssistantToolCallsContainNoUIDisplayMarkers(t *testing.T) {
 		},
 	}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "run tool"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -771,7 +768,7 @@ func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
 		},
 		{
 			name:     "registered tool handler",
-			registry: tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}),
+			registry: tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}),
 			callName: string(toolspec.ToolExecCommand),
 		},
 	}

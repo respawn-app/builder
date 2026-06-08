@@ -129,10 +129,6 @@ func (f uiRenderFrame) renderLines() []string {
 	return allLines
 }
 
-func (f uiRenderFrame) render() string {
-	return f.renderWithCursorVisibility(true)
-}
-
 func (f uiRenderFrame) renderWithCursorVisibility(hideCursor bool) string {
 	rendered := strings.Join(f.renderLines(), "\n")
 	if hideCursor {
@@ -305,7 +301,7 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 		return nil
 	}
 	lines := make([]string, 0, maxLines)
-	includeDivider := len(nativeCommittedEntries(l.model.transcriptEntries)) > 0 && !l.model.nativeStreamingDividerFlushed
+	includeDivider := len(committedTranscriptEntriesForApp(l.model.transcriptEntries)) > 0 && !l.model.nativeStreamingDividerFlushed
 	if includeDivider {
 		lines = append(lines, style.meta.Render(strings.Repeat("─", width)))
 	}
@@ -368,7 +364,7 @@ func nativeProjectionLineTexts(lines []tui.TranscriptProjectionLine) []string {
 
 func (l uiViewLayout) renderNativePendingLines(width int) []string {
 	rendered := renderNativePendingToolSnapshot(l.model.transcriptEntries, l.model.theme, width, l.model.spinnerFrame)
-	pendingEntries := nativePendingEntries(l.model.transcriptEntries)
+	pendingEntries := tui.PendingOngoingEntries(l.model.transcriptEntries)
 	for _, entry := range pendingEntries {
 		if isNativePendingToolRole(tui.TranscriptRoleToWire(entry.Role)) {
 			continue
@@ -406,7 +402,7 @@ func (l uiViewLayout) computeNativeLiveRegionState() nativeLiveRegionState {
 	}
 	streamingActiveNow := strings.TrimSpace(m.view.OngoingStreamingText()) != "" || strings.TrimSpace(m.view.OngoingErrorText()) != ""
 	current := l.nativeOngoingLineCount()
-	if len(nativeCommittedEntries(m.transcriptEntries)) == 0 {
+	if len(committedTranscriptEntriesForApp(m.transcriptEntries)) == 0 {
 		pad := l.effectiveHeight() - current
 		if pad < 0 {
 			pad = 0

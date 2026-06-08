@@ -33,7 +33,7 @@ func TestSetReviewerEnabledConcurrentWithBusyStep(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch, delay: 50 * time.Millisecond}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: fakeTool{name: toolspec.ToolPatch, delay: 50 * time.Millisecond}}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "off",
@@ -86,7 +86,7 @@ func TestSetReviewerDisabledConcurrentWithBusyStepSkipsReviewerForCurrentRun(t *
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch, delay: 50 * time.Millisecond}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: fakeTool{name: toolspec.ToolPatch, delay: 50 * time.Millisecond}}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -247,7 +247,7 @@ func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 		IsOpenAIFirstParty:            true,
 	}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:         "gpt-5",
 		WebSearchMode: "native",
 		EnabledTools:  []toolspec.ID{toolspec.ToolWebSearch},
@@ -336,7 +336,7 @@ func TestSubmitUserMessageFinalAnswerWithHostedToolCallMaterializesToolBeforeFin
 		IsOpenAIFirstParty:            true,
 	}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:         "gpt-5",
 		WebSearchMode: "native",
 		EnabledTools:  []toolspec.ID{toolspec.ToolWebSearch},
@@ -425,7 +425,7 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 		},
 	}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
 	if err != nil {
@@ -476,7 +476,7 @@ func TestSubmitUserMessage_ExposesViewImageToolForVisionModels(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolViewImage}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolViewImage, Handler: fakeTool{name: toolspec.ToolViewImage}}), Config{
 		Model:        "gpt-5.3-codex",
 		EnabledTools: []toolspec.ID{toolspec.ToolViewImage},
 	})
@@ -507,7 +507,7 @@ func TestSubmitUserMessage_HidesViewImageToolForTextOnlyModels(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolViewImage}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolViewImage, Handler: fakeTool{name: toolspec.ToolViewImage}}), Config{
 		Model:        "gpt-3.5-turbo",
 		EnabledTools: []toolspec.ID{toolspec.ToolViewImage},
 	})
@@ -533,7 +533,7 @@ func TestSubmitUserMessage_HidesViewImageToolForCodexSpark(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 128000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolViewImage}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolViewImage, Handler: fakeTool{name: toolspec.ToolViewImage}}), Config{
 		Model:        "gpt-5.3-codex-spark",
 		EnabledTools: []toolspec.ID{toolspec.ToolViewImage},
 	})
@@ -566,7 +566,7 @@ func TestSubmitUserMessage_ExposesViewImageToolForUnlistedVisionModelWithOverrid
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolViewImage}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolViewImage, Handler: fakeTool{name: toolspec.ToolViewImage}}), Config{
 		Model:             "gpt-4.1-2026-01-15",
 		ModelCapabilities: session.LockedModelCapabilities{SupportsVisionInputs: true},
 		EnabledTools:      []toolspec.ID{toolspec.ToolViewImage},
@@ -605,7 +605,7 @@ func TestEnsureLocked_DoesNotPersistFallbackProviderContractOnTransientFailure(t
 		}},
 	}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5.3-codex"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5.3-codex"})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -668,7 +668,7 @@ func TestEnsureLocked_PersistsProviderCapabilityOverrideOverTransportMetadata(t 
 		IsOpenAIFirstParty:            true,
 	}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:                        "gpt-5.4",
 		ProviderCapabilitiesOverride: override,
 		EnabledTools:                 []toolspec.ID{toolspec.ToolExecCommand},
@@ -732,7 +732,7 @@ func TestSubmitUserMessageMissingPhaseDefaultsToCommentaryAndWarns(t *testing.T)
 		},
 	}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
 	if err != nil {
@@ -797,7 +797,7 @@ func TestSubmitUserMessageMissingPhaseLegacyClientRemainsTerminal(t *testing.T) 
 	}}
 	client.caps = llm.ProviderCapabilities{ProviderID: "anthropic", SupportsResponsesAPI: false, IsOpenAIFirstParty: false}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
 	if err != nil {
@@ -844,7 +844,7 @@ func TestSubmitUserMessageMissingPhaseLegacyClientEmitsAssistantEventOnce(t *tes
 		mu     sync.Mutex
 		events []Event
 	)
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()

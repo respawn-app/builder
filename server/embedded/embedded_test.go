@@ -63,19 +63,6 @@ func readyEmbeddedAuthHandler() *testAuthHandler {
 	return &testAuthHandler{state: &state}
 }
 
-type testOnboardingHandler struct {
-	called bool
-	ensure func(context.Context, OnboardingRequest) (config.App, error)
-}
-
-func (h *testOnboardingHandler) EnsureOnboardingReady(ctx context.Context, req OnboardingRequest) (config.App, error) {
-	h.called = true
-	if h.ensure != nil {
-		return h.ensure(ctx, req)
-	}
-	return req.Config, nil
-}
-
 func registerEmbeddedWorkspace(t *testing.T, workspace string) {
 	t.Helper()
 	cfg, err := config.Load(workspace, config.LoadOptions{})
@@ -95,8 +82,11 @@ func newRegisteredEmbeddedWorkspace(t *testing.T) string {
 	return workspace
 }
 
-func defaultEmbeddedOnboardingHandler() *testOnboardingHandler {
-	return &testOnboardingHandler{ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
+func defaultEmbeddedOnboardingHandler(called *bool) OnboardingHandler {
+	return func(_ context.Context, req OnboardingRequest) (config.App, error) {
+		if called != nil {
+			*called = true
+		}
 		path, created, err := config.WriteDefaultSettingsFile()
 		if err != nil {
 			return config.App{}, err
@@ -109,7 +99,7 @@ func defaultEmbeddedOnboardingHandler() *testOnboardingHandler {
 		reloaded.Source.SettingsPath = path
 		reloaded.Source.SettingsFileExists = true
 		return reloaded, nil
-	}}
+	}
 }
 
 func startReadyEmbeddedServer(t *testing.T, req Request) *Server {
@@ -119,17 +109,13 @@ func startReadyEmbeddedServer(t *testing.T, req Request) *Server {
 	}
 	server, err := Start(context.Background(), req, StartHooks{
 		Auth:       readyEmbeddedAuthHandler(),
-		Onboarding: defaultEmbeddedOnboardingHandler(),
+		Onboarding: defaultEmbeddedOnboardingHandler(nil),
 	})
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
 	t.Cleanup(func() { _ = server.Close() })
 	return server
-}
-
-func embeddedProjectSessionsRoot(server *Server) string {
-	return config.ProjectSessionsRoot(server.Config(), server.ProjectID())
 }
 
 func createEmbeddedProjectSession(t *testing.T, server *Server, workspace string) *session.Store {
@@ -142,7 +128,7 @@ func createEmbeddedProjectSession(t *testing.T, server *Server, workspace string
 	// Keep the metadata store alive for the lifetime of the session store so
 	// persistence observer writes continue to succeed during the test.
 	store, err := session.Create(
-		embeddedProjectSessionsRoot(server),
+		config.ProjectSessionsRoot(server.Config(), server.ProjectID()),
 		filepath.Base(filepath.Clean(workspace)),
 		workspace,
 		metadataStore.AuthoritativeSessionStoreOptions()...,
@@ -188,7 +174,8 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 		return generated.Sync(ctx, opts)
 	})
 	defer restoreGeneratedSync()
-	onboarding := defaultEmbeddedOnboardingHandler()
+	onboardingCalled := false
+	onboarding := defaultEmbeddedOnboardingHandler(&onboardingCalled)
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
@@ -208,7 +195,7 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 		t.Fatalf("generated sync calls = %d, want 1", generatedCalls)
 	}
 
-	if !onboarding.called {
+	if !onboardingCalled {
 		t.Fatal("expected onboarding handler to run")
 	}
 	if got := server.OAuthOptions().Issuer; got != auth.DefaultOpenAIIssuer {
@@ -217,7 +204,7 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	if got := server.OAuthOptions().ClientID; got != "client-test" {
 		t.Fatalf("oauth client id = %q", got)
 	}
-	wantContainerDir := embeddedProjectSessionsRoot(server)
+	wantContainerDir := config.ProjectSessionsRoot(server.Config(), server.ProjectID())
 	if server.ContainerDir() != wantContainerDir {
 		t.Fatalf("container dir = %q, want %q", server.ContainerDir(), wantContainerDir)
 	}
@@ -400,7 +387,11 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 func TestStartPropagatesAuthFailureBeforeOnboarding(t *testing.T) {
 	workspace := newRegisteredEmbeddedWorkspace(t)
 	authHandler := &testAuthHandler{lookupEnv: os.Getenv}
-	onboarding := &testOnboardingHandler{}
+	onboardingCalled := false
+	onboarding := OnboardingHandler(func(_ context.Context, req OnboardingRequest) (config.App, error) {
+		onboardingCalled = true
+		return req.Config, nil
+	})
 
 	_, err := Start(context.Background(), Request{WorkspaceRoot: workspace, LookupEnv: os.Getenv}, StartHooks{Auth: authHandler, Onboarding: onboarding})
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
@@ -409,7 +400,7 @@ func TestStartPropagatesAuthFailureBeforeOnboarding(t *testing.T) {
 	if !authHandler.interactCalled {
 		t.Fatal("expected auth handler interaction")
 	}
-	if onboarding.called {
+	if onboardingCalled {
 		t.Fatal("did not expect onboarding after auth failure")
 	}
 }

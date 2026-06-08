@@ -13,6 +13,7 @@ import (
 	"builder/cli/app/internal/servecommand"
 	"builder/cli/app/internal/serverattach"
 	"builder/cli/app/internal/startupconfig"
+	"builder/server/serve"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -26,7 +27,9 @@ var dialConfiguredProjectViewRemote = func(ctx context.Context, cfg config.App) 
 var resolveDaemonExecutablePath = servecommand.ExecutablePath
 var buildServeArgsFunc = func(_ string, _ Options) []string { return servecommand.Args() }
 var buildServeEnvFunc = servecommand.Env
-var releaseServeReservationFunc = servecommand.ReleaseReservation
+var releaseServeReservationFunc = func(cfg config.App) {
+	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
+}
 
 var configuredRemoteAttachTimeout = 500 * time.Millisecond
 var configuredRemoteWorkspaceDiscoveryTimeout = 5 * time.Second
@@ -66,7 +69,7 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 			return serverattach.Target[runprompttarget.Target]{Value: target.Value, Close: target.Close}, nil
 		},
 		StartEmbedded: func(ctx context.Context) (serverattach.Target[runprompttarget.Target], error) {
-			server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
+			server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor(), false)
 			if err != nil {
 				return serverattach.Target[runprompttarget.Target]{}, err
 			}
@@ -77,7 +80,7 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 				Target: resolution.Value,
 				Config: cfg,
 				EnsureAuthReady: func(ctx context.Context, auth client.AuthBootstrapClient) error {
-					return ensureRemoteAuthReady(ctx, auth, cfg.Settings, newHeadlessAuthInteractor())
+					return ensureRemoteAuthReady(ctx, auth, cfg.Settings, newHeadlessAuthInteractor(), false)
 				},
 			}); err != nil {
 				return serverattach.AuthReadinessUnchecked, err
@@ -111,7 +114,7 @@ func validateRunPromptAgentRole(settings config.Settings, rawRole string, builde
 	}
 	role, exists := settings.Subagents[roleName]
 	if !exists && roleName != config.BuiltInSubagentRoleFast {
-		return unrecognizedRunPromptRoleError(roleName, config.AvailableSubagentRoleNames(settings, builderSessionCaller))
+		return errors.New("Unrecognized role " + strconv.Quote(roleName) + ". It may have been removed by the user during the session. Available roles: [" + strings.Join(config.AvailableSubagentRoleNames(settings, builderSessionCaller), ", ") + "]")
 	}
 	if builderSessionCaller && !config.SubagentRoleCallable(role) {
 		return errors.New(nonCallableSubagentRoleMessage)
@@ -126,16 +129,12 @@ func validateContextAgentRoleCallable(settings config.Settings, rawRole string) 
 	}
 	role, exists := settings.Subagents[roleName]
 	if !exists && roleName != config.BuiltInSubagentRoleFast {
-		return unrecognizedRunPromptRoleError(roleName, config.AvailableSubagentRoleNames(settings, true))
+		return errors.New("Unrecognized role " + strconv.Quote(roleName) + ". It may have been removed by the user during the session. Available roles: [" + strings.Join(config.AvailableSubagentRoleNames(settings, true), ", ") + "]")
 	}
 	if !config.SubagentRoleCallable(role) {
 		return errors.New(nonCallableSubagentRoleMessage)
 	}
 	return nil
-}
-
-func unrecognizedRunPromptRoleError(role string, available []string) error {
-	return errors.New("Unrecognized role " + strconv.Quote(role) + ". It may have been removed by the user during the session. Available roles: [" + strings.Join(available, ", ") + "]")
 }
 
 type embeddedRunPromptAttachment interface {
@@ -156,32 +155,12 @@ func runPromptTargetForEmbeddedAttachment(server embeddedRunPromptAttachment) (s
 	return serverattach.Target[runprompttarget.Target]{Value: target.Value, Close: target.Close}, nil
 }
 
-func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*client.Remote, bool, error) {
-	return tryDialMatchingConfiguredRunPromptRemote(ctx, opts, nil)
-}
-
 func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
 	workspaceConfig, err := resolveRunPromptWorkspaceConfig(opts)
 	if err != nil {
 		return nil, false, err
 	}
-	return tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx, workspaceConfig.Options, workspaceConfig.Config, accept)
-}
-
-func tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx context.Context, _ Options, cfg config.App, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
-	return serverattach.DialRemote(ctx, serverattach.ModeHeadless, serverAttachRemotePolicy(cfg, remoteattach.SupportsRunPrompt, true), accept)
-}
-
-func tryDialConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
-	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, nil, true)
-}
-
-func tryDialMatchingConfiguredRemoteAllowUnregistered(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
-	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, accept, false)
-}
-
-func tryDialMatchingConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
-	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, accept, true)
+	return serverattach.DialRemote(ctx, serverattach.ModeHeadless, serverAttachRemotePolicy(workspaceConfig.Config, remoteattach.SupportsRunPrompt, true), accept)
 }
 
 func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool, requireRegistered bool) (*client.Remote, bool) {
@@ -213,7 +192,7 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 		Args:           buildServeArgsFunc("", opts),
 		Env:            buildServeEnvFunc(cfg),
 		Dial: func(ctx context.Context, childPID int) (*client.Remote, bool, error) {
-			return tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx, opts, cfg, func(identity protocol.ServerIdentity) bool {
+			return serverattach.DialRemote(ctx, serverattach.ModeHeadless, serverAttachRemotePolicy(cfg, remoteattach.SupportsRunPrompt, true), func(identity protocol.ServerIdentity) bool {
 				return identity.PID == childPID
 			})
 		},

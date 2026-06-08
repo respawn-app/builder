@@ -20,10 +20,6 @@ func handledUIFeatureUpdate(model *uiModel, cmd tea.Cmd) uiFeatureUpdateResult {
 	return uiFeatureUpdateResult{model: model, cmd: cmd, handled: true}
 }
 
-func (r uiFeatureUpdateResult) bubbleTea() (tea.Model, tea.Cmd) {
-	return r.model, r.cmd
-}
-
 func (m *uiModel) reduceFeatureMessage(msg tea.Msg) uiFeatureUpdateResult {
 	reducers := []uiFeatureReducer{
 		m.keyReducer(),
@@ -70,7 +66,7 @@ func (r uiStatusFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		if msg.err != nil {
 			m.status.error = msg.err.Error()
 			m.syncViewport()
-			return handledUIFeatureUpdate(m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError))
+			return handledUIFeatureUpdate(m, m.sendTransientStatusWithNoticeID(msg.err.Error(), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
 		m.status.error = ""
 		m.status.snapshot = msg.snapshot

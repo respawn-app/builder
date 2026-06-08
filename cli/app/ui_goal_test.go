@@ -34,7 +34,7 @@ func TestGoalCommandOpensGoalOverlay(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyGoalCmdMessagesForTest(t, next.(*uiModel), cmd)
-	if !updated.goal.isOpen() {
+	if !updated.goal.open {
 		t.Fatal("expected /goal to open goal overlay")
 	}
 	if updated.inputMode() != uiInputModeGoal {
@@ -65,7 +65,7 @@ func TestGoalCommandOpensGoalOverlayWhileBusy(t *testing.T) {
 	m.input = "/goal"
 
 	updated := updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !updated.goal.isOpen() {
+	if !updated.goal.open {
 		t.Fatal("expected /goal to open goal overlay while busy")
 	}
 	if updated.inputMode() != uiInputModeGoal {
@@ -276,7 +276,7 @@ func TestGoalLifecycleCommandsDoNotAppendDuplicateLocalFeedback(t *testing.T) {
 			if client.appendedRole != "" || client.appendedText != "" {
 				t.Fatalf("did not expect duplicate local goal feedback, got role=%q text=%q", client.appendedRole, client.appendedText)
 			}
-			status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+			status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 			for _, forbidden := range []string{"Goal set", "Goal paused", "Goal resumed", "Goal cleared"} {
 				if strings.Contains(status, forbidden) {
 					t.Fatalf("did not expect duplicate transient goal status %q, got %q", forbidden, status)
@@ -303,7 +303,7 @@ func TestGoalClearActiveGoalRequiresConfirmation(t *testing.T) {
 	m.input = "/goal clear"
 
 	updated := updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !updated.goal.isOpen() || updated.goal.confirmMode != "clear" {
+	if !updated.goal.open || updated.goal.confirmMode != "clear" {
 		t.Fatalf("expected clear confirmation overlay, got %+v", updated.goal)
 	}
 	if client.clearGoalCalls != 0 {
@@ -314,7 +314,7 @@ func TestGoalClearActiveGoalRequiresConfirmation(t *testing.T) {
 	}
 
 	updated = updateGoalForTest(t, updated, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	if updated.goal.isOpen() {
+	if updated.goal.open {
 		t.Fatal("expected goal overlay closed after confirm")
 	}
 	if client.clearGoalCalls != 1 {
@@ -328,7 +328,7 @@ func TestGoalClearSuspendedActiveGoalSkipsConfirmation(t *testing.T) {
 	m.input = "/goal clear"
 
 	updated := updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if updated.goal.isOpen() {
+	if updated.goal.open {
 		t.Fatalf("expected suspended active clear to skip confirmation, got %+v", updated.goal)
 	}
 	if client.clearGoalCalls != 1 {
@@ -343,7 +343,7 @@ func TestGoalConfirmationEnterUsesSelectedAction(t *testing.T) {
 
 	updated := updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	updated = updateGoalForTest(t, updated, tea.KeyMsg{Type: tea.KeyEnter})
-	if updated.goal.isOpen() {
+	if updated.goal.open {
 		t.Fatal("expected default cancel selection to close overlay")
 	}
 	if client.clearGoalCalls != 0 {
@@ -355,7 +355,7 @@ func TestGoalConfirmationEnterUsesSelectedAction(t *testing.T) {
 	updated = updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	updated = updateGoalForTest(t, updated, tea.KeyMsg{Type: tea.KeyTab})
 	updated = updateGoalForTest(t, updated, tea.KeyMsg{Type: tea.KeyEnter})
-	if updated.goal.isOpen() {
+	if updated.goal.open {
 		t.Fatal("expected confirm selection to close overlay")
 	}
 	if client.clearGoalCalls != 1 {
@@ -371,7 +371,7 @@ func TestGoalSetWhileBusyCanReplaceActiveGoalWithConfirmation(t *testing.T) {
 	m.input = "/goal new goal"
 
 	updated := updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !updated.goal.isOpen() || updated.goal.confirmMode != "replace" || updated.goal.pendingObjective != "new goal" {
+	if !updated.goal.open || updated.goal.confirmMode != "replace" || updated.goal.pendingObjective != "new goal" {
 		t.Fatalf("expected busy replace confirmation overlay, got %+v", updated.goal)
 	}
 	if client.setGoalArg != "" {
@@ -379,7 +379,7 @@ func TestGoalSetWhileBusyCanReplaceActiveGoalWithConfirmation(t *testing.T) {
 	}
 
 	updated = updateGoalForTest(t, updated, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	if updated.goal.isOpen() {
+	if updated.goal.open {
 		t.Fatal("expected goal overlay closed after confirm")
 	}
 	if client.setGoalArg != "new goal" {
@@ -460,7 +460,7 @@ func TestGoalReplaceActiveGoalRequiresConfirmation(t *testing.T) {
 	m.input = "/goal new goal"
 
 	updated := updateGoalForTest(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !updated.goal.isOpen() || updated.goal.confirmMode != "replace" || updated.goal.pendingObjective != "new goal" {
+	if !updated.goal.open || updated.goal.confirmMode != "replace" || updated.goal.pendingObjective != "new goal" {
 		t.Fatalf("expected replace confirmation overlay, got %+v", updated.goal)
 	}
 	if client.setGoalArg != "" {
@@ -471,7 +471,7 @@ func TestGoalReplaceActiveGoalRequiresConfirmation(t *testing.T) {
 	}
 
 	updated = updateGoalForTest(t, updated, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	if updated.goal.isOpen() {
+	if updated.goal.open {
 		t.Fatal("expected goal overlay closed after confirm")
 	}
 	if client.setGoalArg != "new goal" {

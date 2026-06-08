@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/app/internal/serverbridge"
 	appstatus "builder/cli/app/internal/status"
+	"builder/server/generated"
+	"builder/server/runtime"
 	"builder/shared/auth"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -201,12 +202,12 @@ func (Collector) CollectEnvironment(_ context.Context, req appstatus.Request, _ 
 	result := appstatus.EnvironmentStageResult{}
 	warnings := make([]string, 0, 3)
 	workspaceRoot := appstatus.EnvironmentRoot(req.WorkspaceRoot, appstatus.ExecutionTarget(req))
-	if recovered, err := serverbridge.RecoveredRootNonEmpty(); err != nil {
+	if recovered, err := generated.RecoveredRootNonEmpty(); err != nil {
 		warnings = append(warnings, "generated: "+err.Error())
 	} else if recovered {
-		warnings = append(warnings, serverbridge.RecoveredWarning())
+		warnings = append(warnings, generated.RecoveredWarning())
 	}
-	inspectedSkills, skillsErr := serverbridge.InspectSkills(workspaceRoot, config.DisabledSkillToggles(req.Settings))
+	inspectedSkills, skillsErr := runtime.InspectSkills(workspaceRoot, config.DisabledSkillToggles(req.Settings))
 	if skillsErr != nil {
 		warnings = append(warnings, "skills: "+skillsErr.Error())
 	} else {
@@ -214,7 +215,7 @@ func (Collector) CollectEnvironment(_ context.Context, req appstatus.Request, _ 
 		result.Skills = skills
 		result.SkillTokenCounts = EstimateSkillTokens(skills)
 	}
-	agentsPaths, agentsErr := serverbridge.InstalledAgentsPaths(workspaceRoot)
+	agentsPaths, agentsErr := runtime.InstalledAgentsPaths(workspaceRoot)
 	if agentsErr != nil {
 		warnings = append(warnings, "agents: "+agentsErr.Error())
 	} else {

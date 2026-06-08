@@ -25,7 +25,6 @@ import (
 
 	"builder/server/tools"
 	patchtool "builder/server/tools/patch"
-	"builder/shared/toolspec"
 )
 
 const maxFileSizeBytes int64 = 800 << 10
@@ -122,10 +121,6 @@ func New(workspaceRoot string, supported bool, opts ...Option) (*Tool, error) {
 	return t, nil
 }
 
-func (t *Tool) Name() toolspec.ID {
-	return toolspec.ToolViewImage
-}
-
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if !t.supported {
 		return tools.ErrorResult(c, "view_image is not allowed because this model does not support image/file inputs"), nil
@@ -151,11 +146,11 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return tools.ErrorResult(c, err.Error()), nil
 	}
 	defer func() { _ = file.Close() }()
-	if isPDFPath(resolvedPath) && info.Size() > maxFileSizeBytes {
-		return tools.ErrorResult(c, maxAttachmentSizeError(resolvedPath, info.Size())), nil
+	if strings.EqualFold(filepath.Ext(resolvedPath), ".pdf") && info.Size() > maxFileSizeBytes {
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", resolvedPath, info.Size(), maxFileSizeBytes)), nil
 	}
 	if in.Raw && info.Size() > maxFileSizeBytes {
-		return tools.ErrorResult(c, rawAttachmentSizeError(resolvedPath, info.Size())), nil
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", resolvedPath, info.Size(), maxFileSizeBytes)+". raw=true bypasses compression and postprocessing, but the 800 KiB cap still applies; retry without raw=true to allow optimization"), nil
 	}
 	if info.Size() > maxOriginalRasterSizeBytes {
 		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max readable size is %d bytes (10 MiB). resize or compress the image or PDF and try again", resolvedPath, info.Size(), maxOriginalRasterSizeBytes)), nil
@@ -165,11 +160,11 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if err != nil {
 		return tools.ErrorResult(c, fmt.Sprintf("unable to read file at %q: %v", resolvedPath, err)), nil
 	}
-	if isPDFPath(resolvedPath) && int64(len(data)) > maxFileSizeBytes {
-		return tools.ErrorResult(c, maxAttachmentSizeError(resolvedPath, int64(len(data)))), nil
+	if strings.EqualFold(filepath.Ext(resolvedPath), ".pdf") && int64(len(data)) > maxFileSizeBytes {
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", resolvedPath, int64(len(data)), maxFileSizeBytes)), nil
 	}
 	if in.Raw && int64(len(data)) > maxFileSizeBytes {
-		return tools.ErrorResult(c, rawAttachmentSizeError(resolvedPath, int64(len(data)))), nil
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", resolvedPath, int64(len(data)), maxFileSizeBytes)+". raw=true bypasses compression and postprocessing, but the 800 KiB cap still applies; retry without raw=true to allow optimization"), nil
 	}
 	mimeType := detectFileMIME(resolvedPath, data)
 	contentData, contentMIME, prepareErr := prepareFileForAttachment(resolvedPath, mimeType, data, in.Raw)
@@ -177,7 +172,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return tools.ErrorResult(c, prepareErr.Error()), nil
 	}
 	if int64(len(contentData)) > maxFileSizeBytes {
-		return tools.ErrorResult(c, maxAttachmentSizeError(resolvedPath, int64(len(contentData)))), nil
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", resolvedPath, int64(len(contentData)), maxFileSizeBytes)), nil
 	}
 
 	items, buildErr := buildContentItemsForFile(resolvedPath, contentMIME, contentData)
@@ -381,7 +376,7 @@ func readImageOutsideWorkspacePath(req patchtool.OutsideWorkspaceRequest) string
 }
 
 func buildContentItemsForFile(path, mimeType string, data []byte) ([]contentItem, error) {
-	if mimeType == "application/pdf" || isPDFPath(path) {
+	if mimeType == "application/pdf" || strings.EqualFold(filepath.Ext(path), ".pdf") {
 		filename := filepath.Base(path)
 		if strings.TrimSpace(filename) == "" {
 			filename = "document.pdf"
@@ -408,7 +403,7 @@ func buildContentItemsForFile(path, mimeType string, data []byte) ([]contentItem
 }
 
 func prepareFileForAttachment(path, mimeType string, data []byte, raw bool) ([]byte, string, error) {
-	if mimeType == "application/pdf" || isPDFPath(path) {
+	if mimeType == "application/pdf" || strings.EqualFold(filepath.Ext(path), ".pdf") {
 		return data, "application/pdf", nil
 	}
 
@@ -527,16 +522,4 @@ func optimizeRasterImage(img image.Image) ([]byte, string, bool) {
 		}
 	}
 	return nil, "", false
-}
-
-func maxAttachmentSizeError(path string, size int64) string {
-	return fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", path, size, maxFileSizeBytes)
-}
-
-func rawAttachmentSizeError(path string, size int64) string {
-	return maxAttachmentSizeError(path, size) + ". raw=true bypasses compression and postprocessing, but the 800 KiB cap still applies; retry without raw=true to allow optimization"
-}
-
-func isPDFPath(path string) bool {
-	return strings.EqualFold(filepath.Ext(path), ".pdf")
 }

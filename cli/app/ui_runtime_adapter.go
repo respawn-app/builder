@@ -21,14 +21,6 @@ type runtimeEventApplyResult struct {
 	awaitsHydration   bool
 }
 
-func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cmd {
-	return a.applyProjectedRuntimeEvent(evt, true).cmd
-}
-
-func (a uiRuntimeAdapter) handleProjectedRuntimeEventsBatch(events []clientui.Event) tea.Cmd {
-	return a.applyProjectedRuntimeEventsBatch(events).cmd
-}
-
 func (a uiRuntimeAdapter) applyProjectedRuntimeEventsBatch(events []clientui.Event) runtimeEventApplyResult {
 	cmds := make([]tea.Cmd, 0, len(events)+1)
 	transcriptMutated := false
@@ -75,7 +67,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	})
 	m.markActiveSubmitFlushed(evt)
 	m.applyRuntimeEventStatus(evt)
-	if !m.processList.isOpen() {
+	if !m.processList.open {
 		m.applyBackgroundProcessEventToCache(evt.Background)
 	}
 	cmds := make([]tea.Cmd, 0, 5)
@@ -154,7 +146,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		if reduction.Notices.BackgroundNotice.Kind == runtimestate.BackgroundNoticeError {
 			kind = uiStatusNoticeError
 		}
-		cmds = append(cmds, m.setTransientStatusWithKind(reduction.Notices.BackgroundNotice.Message, kind))
+		cmds = append(cmds, m.sendTransientStatusWithNoticeID(reduction.Notices.BackgroundNotice.Message, kind, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 	if reduction.PendingInput.PromptHistoryCommand != nil && strings.TrimSpace(reduction.PendingInput.PromptHistoryCommand.Text) != "" {
 		cmds = append(cmds, m.recordPromptHistory(reduction.PendingInput.PromptHistoryCommand.Text))
@@ -179,7 +171,7 @@ func runtimeTranscriptSyncReasonLabel(sync runtimestate.RuntimeTranscriptSyncCom
 func (a uiRuntimeAdapter) syncConversationFromRuntimeTranscriptCommand(sync runtimestate.RuntimeTranscriptSyncCommand) runtimeTranscriptSyncDecision {
 	switch sync.Reason {
 	case runtimestate.RuntimeTranscriptSyncRecovery, runtimestate.RuntimeTranscriptSyncStreamGap:
-		return a.model.startRuntimeTranscriptPageRequestDecision(a.model.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseContinuityRecovery, sync.RecoveryCause)
+		return a.model.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(a.model.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseContinuityRecovery, sync.RecoveryCause))
 	case runtimestate.RuntimeTranscriptSyncCommittedAdvance, runtimestate.RuntimeTranscriptSyncOngoingErrorUpdated:
 		return a.syncConversationFromEngine()
 	default:
@@ -192,7 +184,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() runtimeTranscriptSyncDeci
 	if !m.hasRuntimeClient() {
 		return runtimeTranscriptSyncDecision{}
 	}
-	return m.startRuntimeTranscriptPageRequestDecision(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedConversation, clientui.TranscriptRecoveryCauseNone)
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedConversation, clientui.TranscriptRecoveryCauseNone))
 }
 
 func waitAskEvent(ch <-chan askEvent) tea.Cmd {

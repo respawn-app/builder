@@ -74,7 +74,7 @@ func (r SessionPersistInputDraftRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {
 		return errors.New("client_request_id is required")
 	}
-	if err := validateLifecycleSessionID(r.SessionID); err != nil {
+	if err := validateScopedSessionID(r.SessionID); err != nil {
 		return err
 	}
 	return validateControllerLeaseID(r.ControllerLeaseID)
@@ -84,14 +84,14 @@ func (r SessionInitialInputRequest) Validate() error {
 	if strings.TrimSpace(r.SessionID) == "" {
 		return nil
 	}
-	return validateLifecycleSessionID(r.SessionID)
+	return validateScopedSessionID(r.SessionID)
 }
 
 func (r SessionRetargetWorkspaceRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {
 		return errors.New("client_request_id is required")
 	}
-	if err := validateLifecycleSessionID(r.SessionID); err != nil {
+	if err := validateScopedSessionID(r.SessionID); err != nil {
 		return err
 	}
 	if strings.TrimSpace(r.WorkspaceRoot) == "" {
@@ -105,7 +105,7 @@ func (r SessionResolveTransitionRequest) Validate() error {
 		return errors.New("client_request_id is required")
 	}
 	if strings.TrimSpace(r.SessionID) != "" {
-		if err := validateLifecycleSessionID(r.SessionID); err != nil {
+		if err := validateScopedSessionID(r.SessionID); err != nil {
 			return err
 		}
 		if err := validateControllerLeaseID(r.ControllerLeaseID); err != nil {
@@ -116,8 +116,4 @@ func (r SessionResolveTransitionRequest) Validate() error {
 		return errors.New("transition.action is required")
 	}
 	return nil
-}
-
-func validateLifecycleSessionID(sessionID string) error {
-	return validateScopedSessionID(sessionID)
 }

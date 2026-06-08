@@ -9,6 +9,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 type workflowRunMetadata struct {
@@ -58,7 +59,7 @@ func (s *Store) resolveContextSourceRun(ctx context.Context, tx *sql.Tx, taskID 
 			return resolvedContextSourceRun{}, fmt.Errorf("selected context source node %q missing from run snapshot", source.NodeKey)
 		}
 		var runID string
-		err := tx.QueryRowContext(ctx, workflowStoreQuery(resolveContextSourceRunQuery), taskID, string(node.ID), beforeUnixMs).Scan(&runID)
+		err := tx.QueryRowContext(ctx, strings.TrimSuffix(resolveContextSourceRunQuery, "\n"), taskID, string(node.ID), beforeUnixMs).Scan(&runID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return resolvedContextSourceRun{}, fmt.Errorf("selected context source node %q has no completed run for task", source.NodeKey)
 		}
@@ -116,7 +117,7 @@ func contextSourceBatchScope(ctx context.Context, tx *sql.Tx, sourcePlacementID 
 
 func queryLatestCompletedContextSourceRun(ctx context.Context, tx *sql.Tx, taskID string, nodeID string, beforeUnixMs int64, batchID string, batchScoped bool) *sql.Row {
 	if !batchScoped {
-		return tx.QueryRowContext(ctx, workflowStoreQuery(resolveContextSourceRunQuery), taskID, nodeID, beforeUnixMs)
+		return tx.QueryRowContext(ctx, strings.TrimSuffix(resolveContextSourceRunQuery, "\n"), taskID, nodeID, beforeUnixMs)
 	}
 	return tx.QueryRowContext(ctx, `
 SELECT r.id
@@ -179,7 +180,7 @@ func latestTransitionParameterValue(ctx context.Context, tx *sql.Tx, taskID stri
 		return "", err
 	}
 	outputValues := map[string]string{}
-	if err := unmarshalJSON(outputValuesJSON, &outputValues); err != nil {
+	if err := workflowjson.UnmarshalString(outputValuesJSON, &outputValues); err != nil {
 		return "", err
 	}
 	value := outputValues[parameterKey]
@@ -212,7 +213,7 @@ LIMIT 1`, taskID, transitionKey, batchID, beforeUnixMs).Scan(&scopedOutputValues
 		}
 	}
 	var outputValuesJSON string
-	err := tx.QueryRowContext(ctx, workflowStoreQuery(latestTransitionOutputValuesQuery), taskID, transitionKey, beforeUnixMs).Scan(&outputValuesJSON)
+	err := tx.QueryRowContext(ctx, strings.TrimSuffix(latestTransitionOutputValuesQuery, "\n"), taskID, transitionKey, beforeUnixMs).Scan(&outputValuesJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("prior transition %q has no completed output for task", transitionKey)
 	}
@@ -220,18 +221,6 @@ LIMIT 1`, taskID, transitionKey, batchID, beforeUnixMs).Scan(&scopedOutputValues
 		return "", err
 	}
 	return outputValuesJSON, nil
-}
-
-func targetRunMetadata(edge edgeContractSnapshot, source resolvedContextSourceRun, priorParameterValues map[string]map[string]string) (string, error) {
-	return marshalJSON(workflowRunMetadata{
-		ContextMode:          string(edge.ContextMode),
-		ContextSource:        workflow.CanonicalContextSource(edge.ContextSource),
-		SourceRunID:          source.runID,
-		SourceSessionID:      source.sessionID,
-		PromptTemplate:       strings.TrimSpace(edge.PromptTemplate),
-		Parameters:           append([]workflow.Parameter(nil), edge.Parameters...),
-		PriorParameterValues: clonePriorParameterValues(priorParameterValues),
-	})
 }
 
 func clonePriorParameterValues(values map[string]map[string]string) map[string]map[string]string {

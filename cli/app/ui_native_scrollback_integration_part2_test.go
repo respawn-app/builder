@@ -4,15 +4,18 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/tools"
 	sharedclient "builder/shared/client"
 	"builder/shared/clientui"
+	"builder/shared/toolspec"
 	"bytes"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestNativePSOverlayEscBalancesAltScreenWithoutAlternateScroll(t *testing.T) {
@@ -42,7 +45,7 @@ func TestNativePSOverlayEscBalancesAltScreenWithoutAlternateScroll(t *testing.T)
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForTestCondition(t, 2*time.Second, "/ps overlay to close", func() bool {
-		return !model.processList.isOpen() && model.surface() != uiSurfaceProcessList && model.view.Mode() == tui.ModeOngoing
+		return !model.processList.open && model.surface() != uiSurfaceProcessList && model.view.Mode() == tui.ModeOngoing
 	})
 	program.QuitAndWait(2 * time.Second)
 
@@ -521,16 +524,16 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 	model.lockedInjectID = "queue-test-0"
 	model.setInputSubmitLocked(true)
 
-	_ = model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = model.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:     clientui.EventRunStateChanged,
 		StepID:   "step-1",
 		RunState: &clientui.RunState{Lifecycle: clientui.RunningRunLifecycle(clientui.RunModeTurn)},
-	})
-	_ = model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	}, true).cmd
+	_ = model.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:           clientui.EventAssistantDelta,
 		StepID:         "step-1",
 		AssistantDelta: "foreground done",
-	})
+	}, true).cmd
 	if got := model.view.OngoingStreamingText(); !strings.Contains(got, "foreground done") {
 		t.Fatalf("expected live deferred final delta visible, got %q", got)
 	}
@@ -544,7 +547,7 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 		t.Fatalf("expected ongoing mode active before final commit, got %q", model.view.Mode())
 	}
 
-	_ = model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = model.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		StepID:                       "step-1",
 		CommittedTranscriptChanged:   true,
@@ -554,8 +557,8 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 		UserMessageBatch:             []string{"steer now"},
 		UserMessageBatchQueueItemIDs: []string{"queue-test-0"},
 		TranscriptEntries:            []clientui.ChatEntry{{Role: "user", Text: "steer now"}},
-	})
-	assistantCommitCmd := model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	}, true).cmd
+	assistantCommitCmd := model.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -564,7 +567,7 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 		TranscriptRevision:         2,
 		CommittedEntryCount:        2,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "foreground done", Phase: string(llm.MessagePhaseFinal)}},
-	})
+	}, true).cmd
 	for _, msg := range collectCmdMessages(t, assistantCommitCmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect hydration after assistant caught up with deferred user flush, got %+v", msg)
@@ -598,7 +601,7 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 				runtimeEvents <- evt
 			},
 		},
-		blockingTool,
+		tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: blockingTool},
 	)
 
 	out := newLockedBuffer()

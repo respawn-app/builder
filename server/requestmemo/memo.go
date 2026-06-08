@@ -55,7 +55,7 @@ func (m *Memo[Req, Resp]) Do(ctx context.Context, requestID string, req Req, sam
 			m.mu.Unlock()
 			select {
 			case <-done:
-				if shouldMemoize(existing.err) {
+				if existing.err == nil {
 					return existing.resp, existing.err
 				}
 				continue
@@ -77,7 +77,7 @@ func (m *Memo[Req, Resp]) Do(ctx context.Context, requestID string, req Req, sam
 		m.mu.Lock()
 		e.resp = resp
 		e.err = err
-		if shouldMemoize(err) {
+		if err == nil {
 			e.completedAt = m.now()
 		} else {
 			delete(m.entries, requestID)
@@ -124,10 +124,6 @@ func (m *Memo[Req, Resp]) ensureCapacityForInsertLocked() bool {
 	}
 	delete(m.entries, oldestKey)
 	return len(m.entries) < m.maxEntries
-}
-
-func shouldMemoize(err error) bool {
-	return err == nil
 }
 
 func oldestCompletedEntryKey[Req any, Resp any](entries map[string]*entry[Req, Resp]) (string, bool) {

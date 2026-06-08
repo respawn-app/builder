@@ -3,9 +3,10 @@ package app
 import (
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestWorktreeDeleteCommandOpensDeleteDialogInOverlay(t *testing.T) {
@@ -137,7 +138,7 @@ func TestWorktreeSwitchCommandRemainsDirectShortcut(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if updated.worktrees.isOpen() {
+	if updated.worktrees.open {
 		t.Fatal("did not expect overlay for direct switch")
 	}
 	if len(client.switchRequests) != 1 || client.switchRequests[0].WorktreeID != "wt-main" {
@@ -249,7 +250,7 @@ func TestWorktreeOverlayStaysOpenWhileSwitchIsPending(t *testing.T) {
 
 	next, closeCmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.worktrees.isOpen() {
+	if !updated.worktrees.open {
 		t.Fatal("expected overlay to stay open while switch pending")
 	}
 	if closeCmd != nil {
@@ -387,7 +388,7 @@ func TestWorktreeOverlayEnterSwitchesSelectedItemAndCloses(t *testing.T) {
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if updated.worktrees.isOpen() {
+	if updated.worktrees.open {
 		t.Fatal("expected overlay closed after switch")
 	}
 	if len(client.switchRequests) != 1 || client.switchRequests[0].WorktreeID != "wt-feature" {
@@ -412,8 +413,8 @@ func TestWorktreeCreateDialogSubmitsAndClosesOnSuccess(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	setSingleLineEditorValue(&updated.worktrees.create.baseRef, "HEAD")
-	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/branch")
+	updated.worktrees.create.baseRef.Replace(strings.NewReplacer("\r", "", "\n", "").Replace("HEAD"))
+	updated.worktrees.create.branchTarget.Replace(strings.NewReplacer("\r", "", "\n", "").Replace("feature/branch"))
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()
@@ -421,7 +422,7 @@ func TestWorktreeCreateDialogSubmitsAndClosesOnSuccess(t *testing.T) {
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if updated.worktrees.isOpen() {
+	if updated.worktrees.open {
 		t.Fatal("expected overlay closed after create")
 	}
 	if len(client.createRequests) != 1 {
@@ -451,7 +452,7 @@ func TestWorktreeCreateDialogDetachedRefResolutionCreatesWithoutBranch(t *testin
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "HEAD~1")
+	updated.worktrees.create.branchTarget.Replace(strings.NewReplacer("\r", "", "\n", "").Replace("HEAD~1"))
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()
@@ -484,7 +485,7 @@ func TestWorktreeDeleteDialogStaysOpenAfterSuccess(t *testing.T) {
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if !updated.worktrees.isOpen() {
+	if !updated.worktrees.open {
 		t.Fatal("expected overlay to stay open after delete")
 	}
 	if updated.worktrees.phase != uiWorktreeOverlayPhaseList {

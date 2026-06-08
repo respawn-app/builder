@@ -212,10 +212,6 @@ type RuntimeGoalClearRequest struct {
 	Actor             string `json:"actor"`
 }
 
-func validateRuntimeSessionID(sessionID string) error {
-	return validateRequiredSessionID(sessionID)
-}
-
 func validateControllerLeaseID(leaseID string) error {
 	if strings.TrimSpace(leaseID) == "" {
 		return errors.New("controller_lease_id is required")
@@ -243,7 +239,7 @@ func validateRuntimeControllerRequest(clientRequestID string, sessionID string, 
 	if err := validateClientRequestID(clientRequestID); err != nil {
 		return err
 	}
-	if err := validateRuntimeSessionID(sessionID); err != nil {
+	if err := validateRequiredSessionID(sessionID); err != nil {
 		return err
 	}
 	return validateControllerLeaseID(controllerLeaseID)
@@ -253,7 +249,7 @@ func validateRuntimeGoalActionRequest(clientRequestID string, sessionID string, 
 	if err := validateClientRequestID(clientRequestID); err != nil {
 		return err
 	}
-	if err := validateRuntimeSessionID(sessionID); err != nil {
+	if err := validateRequiredSessionID(sessionID); err != nil {
 		return err
 	}
 	return validateGoalActor(actor)
@@ -284,7 +280,7 @@ func (r RuntimeAppendLocalEntryRequest) Validate() error {
 	return nil
 }
 func (r RuntimeShouldCompactBeforeUserMessageRequest) Validate() error {
-	return validateRuntimeSessionID(r.SessionID)
+	return validateRequiredSessionID(r.SessionID)
 }
 func (r RuntimeSubmitUserMessageRequest) Validate() error {
 	return validateRuntimeControllerRequest(r.ClientRequestID, r.SessionID, r.ControllerLeaseID)
@@ -302,7 +298,7 @@ func (r RuntimeCompactContextForPreSubmitRequest) Validate() error {
 	return validateRuntimeControllerRequest(r.ClientRequestID, r.SessionID, r.ControllerLeaseID)
 }
 func (r RuntimeHasQueuedUserWorkRequest) Validate() error {
-	return validateRuntimeSessionID(r.SessionID)
+	return validateRequiredSessionID(r.SessionID)
 }
 func (r RuntimeSubmitQueuedUserMessagesRequest) Validate() error {
 	return validateRuntimeControllerRequest(r.ClientRequestID, r.SessionID, r.ControllerLeaseID)
@@ -326,13 +322,13 @@ func (r RuntimeRecordPromptHistoryRequest) Validate() error {
 	return validateRuntimeControllerRequest(r.ClientRequestID, r.SessionID, r.ControllerLeaseID)
 }
 func (r RuntimeGoalShowRequest) Validate() error {
-	return validateRuntimeSessionID(r.SessionID)
+	return validateRequiredSessionID(r.SessionID)
 }
 func (r RuntimeGoalSetRequest) Validate() error {
 	if err := validateClientRequestID(r.ClientRequestID); err != nil {
 		return err
 	}
-	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
 		return err
 	}
 	if strings.TrimSpace(r.Objective) == "" {

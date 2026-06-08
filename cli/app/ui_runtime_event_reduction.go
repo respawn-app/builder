@@ -56,10 +56,10 @@ func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction runtimestate.Runt
 	var cmd tea.Cmd
 	if reduction.RunState.Err != nil {
 		m.activity = uiActivityError
-		cmd = m.setTransientStatusWithKind("invalid runtime lifecycle: "+reduction.RunState.Err.Error(), uiStatusNoticeError)
+		cmd = m.sendTransientStatusWithNoticeID("invalid runtime lifecycle: "+reduction.RunState.Err.Error(), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	} else if err := m.setRunLifecycle(reduction.RunState.State.Run); err != nil {
 		m.activity = uiActivityError
-		cmd = m.setTransientStatusWithKind("invalid runtime lifecycle: "+err.Error(), uiStatusNoticeError)
+		cmd = m.sendTransientStatusWithNoticeID("invalid runtime lifecycle: "+err.Error(), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	m.setCompacting(reduction.RunState.State.Compaction.IsRunning())
 	m.setReviewerRunning(reduction.RunState.State.Reviewer.IsRunning())
@@ -84,7 +84,7 @@ func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction runtimestate.Runt
 	}
 	switch reduction.BackgroundProcesses.Command {
 	case runtimestate.RuntimeBackgroundProcessRefresh:
-		if m.processList.isOpen() {
+		if m.processList.open {
 			cmd = tea.Batch(cmd, m.requestProcessListRefresh())
 		}
 	}

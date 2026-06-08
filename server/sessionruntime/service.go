@@ -375,7 +375,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	current := s.handles[sessionID]
 	if current == nil || current != handle || strings.TrimSpace(current.controllerLeaseID) != leaseID {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, invalidControllerLeaseError(sessionID)
+		return serverapi.SessionRuntimeReleaseResponse{}, errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(sessionID)))
 	}
 	if leaseErr != nil {
 		s.mu.Unlock()
@@ -432,7 +432,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 			if primaryLease != nil {
 				primaryLease.Release()
 			}
-			return serverapi.SessionRuntimeReleaseResponse{}, invalidControllerLeaseError(sessionID)
+			return serverapi.SessionRuntimeReleaseResponse{}, errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(sessionID)))
 		}
 	}
 	current.closing = true
@@ -444,7 +444,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 			primaryLease.Release()
 		}
 	}()
-	finishRuntimeTakeover(takeover, "", invalidControllerLeaseError(sessionID))
+	finishRuntimeTakeover(takeover, "", errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(sessionID))))
 	if closeFn != nil {
 		closeFn()
 	}
@@ -672,7 +672,7 @@ func (s *Service) closeReleasedRuntimeHandle(sessionID string, handle *runtimeHa
 	closeFn := current.close
 	takeover := current.takeover
 	s.mu.Unlock()
-	finishRuntimeTakeover(takeover, "", invalidControllerLeaseError(trimmedSessionID))
+	finishRuntimeTakeover(takeover, "", errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID))))
 	if closeFn != nil {
 		closeFn()
 	}
@@ -695,7 +695,7 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	handle := s.handles[trimmedSessionID]
 	s.mu.Unlock()
 	if handle == nil {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 		return err
@@ -704,16 +704,16 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	current := s.handles[trimmedSessionID]
 	if current == nil || current != handle {
 		s.mu.Unlock()
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	activationErr := current.activationErr
 	controllerLeaseID := strings.TrimSpace(current.controllerLeaseID)
 	s.mu.Unlock()
 	if activationErr != nil {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	if controllerLeaseID != trimmedLeaseID {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	if s.metadataStore != nil {
 		if _, err := s.validateRuntimeLease(ctx, trimmedSessionID, trimmedLeaseID); err != nil {
@@ -737,7 +737,7 @@ func (s *Service) RebindLocalTools(ctx context.Context, sessionID string, leaseI
 	handle := s.handles[trimmedSessionID]
 	s.mu.Unlock()
 	if handle == nil {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 		return err
@@ -784,13 +784,13 @@ func (s *Service) ensureCurrentControllerLeaseLocked(sessionID string, leaseID s
 	trimmedLeaseID := strings.TrimSpace(leaseID)
 	current := s.handles[trimmedSessionID]
 	if current == nil {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	if handle != nil && current != handle {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	if strings.TrimSpace(current.controllerLeaseID) != trimmedLeaseID {
-		return invalidControllerLeaseError(trimmedSessionID)
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(trimmedSessionID)))
 	}
 	return nil
 }
@@ -1113,10 +1113,6 @@ func finishRuntimeTakeover(takeover *runtimeTakeover, leaseID string, err error)
 			close(takeover.ready)
 		}
 	})
-}
-
-func invalidControllerLeaseError(sessionID string) error {
-	return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(sessionID)))
 }
 
 func (s *Service) resolveExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {

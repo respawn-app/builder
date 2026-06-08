@@ -2,13 +2,15 @@ package tui
 
 import (
 	"builder/shared/clientui"
+	"builder/shared/theme"
 	"builder/shared/transcript"
 	"builder/shared/uiglyphs"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
-	xansi "github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
@@ -203,7 +205,7 @@ func TestCompactDetailSelectedSpacerRowsAreVisualOnlyWithTallExpandedEntry(t *te
 	if centerLine := xansi.Strip(lines[center]); !strings.HasPrefix(centerLine, uiglyphs.SelectionRailGlyph) || !strings.Contains(centerLine, "target-command") {
 		t.Fatalf("expected selected target at center, got %q in %q", centerLine, xansi.Strip(raw))
 	}
-	modeBg := themeModeBackgroundColor("dark")
+	modeBg := rgbColorFromHex(theme.ResolvePalette("dark").App.ModeBg.TrueColor)
 	assertRailBearingSpacerLine(t, lines[center-1], modeBg, m.palette().primaryColor)
 	assertRailBearingSpacerLine(t, lines[center+1], modeBg, m.palette().primaryColor)
 }

@@ -193,7 +193,7 @@ func startBlockingRuntimeRun(t *testing.T) (*session.Store, *runtime.Engine, cha
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	engine, err := runtime.New(store, client, tools.NewRegistry(serviceBlockingTool{started: started, release: release}), runtime.Config{Model: "gpt-5"})
+	engine, err := runtime.New(store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: serviceBlockingTool{started: started, release: release}}), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -335,10 +335,6 @@ func normalizedRunView(run *clientui.RunView) *clientui.RunView {
 func assertEqual(t *testing.T, label string, got, want any) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("%s mismatch\nlive=%s\ndormant=%s", label, formatComparable(got), formatComparable(want))
+		t.Fatalf("%s mismatch\nlive=%s\ndormant=%s", label, strings.TrimSpace(fmt.Sprintf("%+v", got)), strings.TrimSpace(fmt.Sprintf("%+v", want)))
 	}
-}
-
-func formatComparable(value any) string {
-	return strings.TrimSpace(fmt.Sprintf("%+v", value))
 }

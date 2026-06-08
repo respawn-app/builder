@@ -6,18 +6,19 @@ import (
 	"builder/server/runtime"
 	"builder/shared/clientui"
 	"bytes"
-	tea "github.com/charmbracelet/bubbletea"
-	xansi "github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestNativeHistoryFlushesPreserveScheduledOrderWhenDeliveredOutOfOrder(t *testing.T) {
 	out := &bytes.Buffer{}
 	model := newProjectedStaticUIModel()
-	firstCmd := model.emitNativeRenderedText("assistant final\n")
-	secondCmd := model.emitNativeRenderedText("queued user\n")
+	firstCmd := model.emitNativeRenderedTextWithOptions("assistant final\n", false)
+	secondCmd := model.emitNativeRenderedTextWithOptions("queued user\n", false)
 	if firstCmd == nil || secondCmd == nil {
 		t.Fatal("expected native history flush commands")
 	}

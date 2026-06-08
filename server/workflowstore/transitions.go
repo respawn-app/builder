@@ -9,6 +9,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 func (s *Store) ListTransitions(ctx context.Context, taskID workflow.TaskID) ([]TransitionRecord, error) {
@@ -19,7 +20,7 @@ func (s *Store) ListTransitions(ctx context.Context, taskID workflow.TaskID) ([]
 	out := make([]TransitionRecord, 0, len(rows))
 	for _, row := range rows {
 		outputs := map[string]string{}
-		if err := unmarshalJSON(row.OutputValuesJson, &outputs); err != nil {
+		if err := workflowjson.UnmarshalString(row.OutputValuesJson, &outputs); err != nil {
 			return nil, err
 		}
 		out = append(out, TransitionRecord{ID: workflow.TransitionID(row.ID), TaskID: workflow.TaskID(row.TaskID), TransitionID: row.TransitionID, State: row.State, Commentary: row.Commentary, OutputValues: outputs, CreatedAt: row.CreatedAtUnixMs})
@@ -53,7 +54,7 @@ func (s *Store) TaskIdentityForTransition(ctx context.Context, transitionID work
 	if id == "" {
 		return "", "", "", errors.New("transition id is required")
 	}
-	err = s.db.QueryRowContext(ctx, workflowStoreQuery(taskIdentityForTransitionQuery), id).Scan(&taskID, &projectID, &workflowID)
+	err = s.db.QueryRowContext(ctx, strings.TrimSuffix(taskIdentityForTransitionQuery, "\n"), id).Scan(&taskID, &projectID, &workflowID)
 	return taskID, projectID, workflowID, err
 }
 
@@ -95,7 +96,7 @@ WHERE id = ?`, id).Scan(&taskID, &sourceRunID, &state, &revision, &transitionCre
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
-		if err := unmarshalJSON(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
+		if err := workflowjson.UnmarshalString(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
 			return CompleteRunResult{}, err
 		}
 	}
@@ -191,7 +192,7 @@ WHERE id = ? AND state = 'pending'`, targetPlacementID, edge.ID); err != nil {
 			}
 			targetSnapshot = *edgeMetadata.TargetRunStartSnapshot
 		}
-		targetSnapshotJSON, err := marshalJSON(targetSnapshot)
+		targetSnapshotJSON, err := workflowjson.MarshalString(targetSnapshot)
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
@@ -205,7 +206,15 @@ WHERE id = ? AND state = 'pending'`, targetPlacementID, edge.ID); err != nil {
 				return CompleteRunResult{}, err
 			}
 		}
-		targetMetadataJSON, err := targetRunMetadata(targetEdge, source, edgeMetadata.PriorParameterValues)
+		targetMetadataJSON, err := workflowjson.MarshalString(workflowRunMetadata{
+			ContextMode:          string(targetEdge.ContextMode),
+			ContextSource:        workflow.CanonicalContextSource(targetEdge.ContextSource),
+			SourceRunID:          source.runID,
+			SourceSessionID:      source.sessionID,
+			PromptTemplate:       strings.TrimSpace(targetEdge.PromptTemplate),
+			Parameters:           append([]workflow.Parameter(nil), targetEdge.Parameters...),
+			PriorParameterValues: clonePriorParameterValues(edgeMetadata.PriorParameterValues),
+		})
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
@@ -311,11 +320,11 @@ ORDER BY created_at_unix_ms, id`, strings.TrimSpace(edge.TargetPlacementID.Strin
 
 func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdgeRecord) (edgeContractSnapshot, error) {
 	inputs := []workflow.InputBinding{}
-	if err := unmarshalJSON(edge.InputBindingsJson, &inputs); err != nil {
+	if err := workflowjson.UnmarshalString(edge.InputBindingsJson, &inputs); err != nil {
 		return edgeContractSnapshot{}, err
 	}
 	requirements := []workflow.OutputRequirement{}
-	if err := unmarshalJSON(edge.OutputRequirementsJson, &requirements); err != nil {
+	if err := workflowjson.UnmarshalString(edge.OutputRequirementsJson, &requirements); err != nil {
 		return edgeContractSnapshot{}, err
 	}
 	metadata, err := transitionEdgeMetadata(edge)
@@ -344,26 +353,18 @@ func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdgeRec
 func transitionEdgeMetadata(edge sqlitegen.TaskTransitionEdgeRecord) (workflowRunMetadata, error) {
 	metadata := workflowRunMetadata{}
 	if strings.TrimSpace(edge.MetadataJson) != "" {
-		if err := unmarshalJSON(edge.MetadataJson, &metadata); err != nil {
+		if err := workflowjson.UnmarshalString(edge.MetadataJson, &metadata); err != nil {
 			return workflowRunMetadata{}, err
 		}
 	}
 	return metadata, nil
 }
 
-func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, transitionID string, edge edgeContractSnapshot, targetPlacementID string, state string, source resolvedContextSourceRun) error {
-	return insertTransitionEdgeSnapshotWithMetadata(ctx, q, transitionID, edge, targetPlacementID, state, workflowRunMetadata{
-		ContextSource:   workflow.CanonicalContextSource(edge.ContextSource),
-		SourceRunID:     source.runID,
-		SourceSessionID: source.sessionID,
-	})
-}
-
 func insertTransitionEdgeSnapshotWithMetadata(ctx context.Context, q *sqlitegen.Queries, transitionID string, edge edgeContractSnapshot, targetPlacementID string, state string, metadata workflowRunMetadata) error {
 	metadata.ContextSource = workflow.CanonicalContextSource(edge.ContextSource)
 	metadata.PromptTemplate = strings.TrimSpace(edge.PromptTemplate)
 	metadata.Parameters = append([]workflow.Parameter(nil), edge.Parameters...)
-	metadataJSON, err := marshalJSON(metadata)
+	metadataJSON, err := workflowjson.MarshalString(metadata)
 	if err != nil {
 		return err
 	}

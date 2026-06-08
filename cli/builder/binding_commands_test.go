@@ -133,9 +133,7 @@ func (bindingCommandMemoryAuthHandler) LookupEnv(string) string {
 	return ""
 }
 
-type bindingCommandAutoOnboarding struct{}
-
-func (bindingCommandAutoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
+var bindingCommandAutoOnboarding = serverstartup.OnboardingHandler(func(_ context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
 	path, created, err := config.WriteDefaultSettingsFile()
 	if err != nil {
 		return config.App{}, err
@@ -148,7 +146,7 @@ func (bindingCommandAutoOnboarding) EnsureOnboardingReady(_ context.Context, req
 	reloaded.Source.SettingsPath = path
 	reloaded.Source.SettingsFileExists = true
 	return reloaded, nil
-}
+})
 
 func configureBindingCommandTestServerPort(t *testing.T) {
 	t.Helper()
@@ -238,7 +236,7 @@ func startBindingCommandServer(t *testing.T, workspace string) func() {
 		Scope:     auth.ScopeGlobal,
 		Method:    auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}},
 		UpdatedAt: time.Now().UTC(),
-	}}, bindingCommandAutoOnboarding{})
+	}}, bindingCommandAutoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}

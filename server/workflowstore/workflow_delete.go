@@ -83,10 +83,10 @@ func (s *Store) DeleteWorkflow(ctx context.Context, req WorkflowDeleteRequest) (
 	}
 
 	now := s.now().UnixMilli()
-	if _, err := tx.ExecContext(ctx, workflowStoreQuery(deleteWorkflowTasksQuery), string(req.WorkflowID)); err != nil {
+	if _, err := tx.ExecContext(ctx, strings.TrimSuffix(deleteWorkflowTasksQuery, "\n"), string(req.WorkflowID)); err != nil {
 		return WorkflowDeleteResult{}, fmt.Errorf("delete workflow tasks: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, workflowStoreQuery(clearDeletedWorkflowDefaultProjectLinksQuery), now, string(req.WorkflowID)); err != nil {
+	if _, err := tx.ExecContext(ctx, strings.TrimSuffix(clearDeletedWorkflowDefaultProjectLinksQuery, "\n"), now, string(req.WorkflowID)); err != nil {
 		return WorkflowDeleteResult{}, fmt.Errorf("clear workflow default links: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM project_workflow_links WHERE workflow_id = ?`, string(req.WorkflowID)); err != nil {

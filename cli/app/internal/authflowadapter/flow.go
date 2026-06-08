@@ -1,13 +1,14 @@
 package authflowadapter
 
 import (
-	"builder/cli/app/internal/serverbridge"
+	serverauth "builder/server/auth"
+	"builder/server/authflow"
 	"builder/shared/auth"
 )
 
-type InteractionRequest = serverbridge.InteractionRequest
-type InteractionOutcome = serverbridge.InteractionOutcome
-type Store = serverbridge.AuthStore
+type InteractionRequest = authflow.InteractionRequest
+type InteractionOutcome = authflow.InteractionOutcome
+type Store = serverauth.Store
 type Method = auth.Method
 
 const (
@@ -17,11 +18,3 @@ const (
 	EnvAPIKeyPreferencePreferEnv   = auth.EnvAPIKeyPreferencePreferEnv
 	EnvAPIKeyPreferencePreferSaved = auth.EnvAPIKeyPreferencePreferSaved
 )
-
-func WrapStoreWithEnvAPIKeyOverride(base Store, lookupEnv func(string) string) Store {
-	return serverbridge.WrapStoreWithEnvAPIKeyOverride(base, lookupEnv)
-}
-
-func EnsureEmptyStartupReady() error {
-	return serverbridge.EnsureEmptyStartupReady()
-}

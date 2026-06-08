@@ -9,9 +9,10 @@ import (
 	"builder/shared/transcript"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestMainInputViewportTracksCursorLine(t *testing.T) {
@@ -23,7 +24,7 @@ func TestMainInputViewportTracksCursorLine(t *testing.T) {
 	m.inputCursor = 1
 	m.syncViewport()
 
-	plain := stripANSIAndTrimRight(strings.Join(m.renderInputLines(20, uiThemeStyles("dark")), "\n"))
+	plain := stripANSIAndTrimRight(strings.Join(m.layout().renderInputLines(20, uiThemeStyles("dark")), "\n"))
 	if !strings.Contains(plain, "› first") || !strings.Contains(plain, "second") {
 		t.Fatalf("expected viewport to keep cursor line visible, got %q", plain)
 	}
@@ -878,9 +879,9 @@ func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
 	}
-	for _, message := range requestMessages(requests[0]) {
+	for _, message := range llm.MessagesFromItems(requests[0].Items) {
 		if message.Role == llm.RoleUser && message.Content == "restored steering" {
-			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", llm.MessagesFromItems(requests[0].Items))
 		}
 	}
 }
@@ -1069,9 +1070,9 @@ func TestCtrlCRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
 	}
-	for _, message := range requestMessages(requests[0]) {
+	for _, message := range llm.MessagesFromItems(requests[0].Items) {
 		if message.Role == llm.RoleUser && message.Content == "restored steering" {
-			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", llm.MessagesFromItems(requests[0].Items))
 		}
 	}
 }
@@ -1474,10 +1475,10 @@ func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
 	m.termHeight = 12
 
 	m.input = "short"
-	chatShort := m.calcChatLines()
+	chatShort := m.layout().calcChatLines()
 
 	m.input = strings.Repeat("x", 120)
-	chatLong := m.calcChatLines()
+	chatLong := m.layout().calcChatLines()
 
 	if chatLong >= chatShort {
 		t.Fatalf("expected wrapped input to reduce chat lines: short=%d long=%d", chatShort, chatLong)
@@ -1490,15 +1491,15 @@ func TestCalcChatLinesUsesFullHeightInDetailMode(t *testing.T) {
 	m.termHeight = 12
 	m.input = strings.Repeat("x", 80)
 	m.queued = queuedInputsForTest("one", "two", "three", "four", "five", "six")
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
-	base := m.calcChatLines()
+	base := m.layout().calcChatLines()
 	if base >= m.termHeight-1 {
 		t.Fatalf("expected ongoing chat lines to reserve non-chat panes, got %d", base)
 	}
 
 	m.forwardToView(tui.ToggleModeMsg{})
-	detail := m.calcChatLines()
+	detail := m.layout().calcChatLines()
 	if detail != m.termHeight-1 {
 		t.Fatalf("expected detail chat lines to use full height minus status line: got %d want %d", detail, m.termHeight-1)
 	}
@@ -1516,7 +1517,7 @@ func TestCalcChatLinesRemainsViewportBasedDuringActiveWork(t *testing.T) {
 	m.setBusy(true)
 	m.sawAssistantDelta = true
 
-	if got := m.calcChatLines(); got <= 1 {
+	if got := m.layout().calcChatLines(); got <= 1 {
 		t.Fatalf("expected viewport-based ongoing mode to keep multi-line chat area during active work, got %d", got)
 	}
 }

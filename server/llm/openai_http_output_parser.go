@@ -6,12 +6,13 @@ import (
 	"slices"
 	"strings"
 
+	"builder/shared/clientui"
 	"builder/shared/textutil"
+
 	"github.com/openai/openai-go/v3/responses"
 )
 
 type responseOutputItemParser interface {
-	ItemType() string
 	Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem
 }
 
@@ -27,26 +28,27 @@ type responseOutputItemParsers struct {
 	byType map[string]responseOutputItemParser
 }
 
-func newResponseOutputItemParsers(parsers ...responseOutputItemParser) responseOutputItemParsers {
-	byType := make(map[string]responseOutputItemParser, len(parsers))
-	for _, parser := range parsers {
-		byType[parser.ItemType()] = parser
+type responseOutputItemParserRegistration struct {
+	itemType string
+	parser   responseOutputItemParser
+}
+
+func newResponseOutputItemParsers(registrations ...responseOutputItemParserRegistration) responseOutputItemParsers {
+	byType := make(map[string]responseOutputItemParser, len(registrations))
+	for _, registration := range registrations {
+		byType[registration.itemType] = registration.parser
 	}
 	return responseOutputItemParsers{byType: byType}
 }
 
-func defaultResponseOutputItemParsers() responseOutputItemParsers {
-	return newResponseOutputItemParsers(
-		messageOutputItemParser{},
-		functionCallOutputItemParser{},
-		customToolCallOutputItemParser{},
-		reasoningOutputItemParser{},
-		compactionOutputItemParser{},
-	)
-}
-
 func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem, string, MessagePhase, []ToolCall, []ReasoningEntry, []ReasoningItem) {
-	parsers := defaultResponseOutputItemParsers()
+	parsers := newResponseOutputItemParsers(
+		responseOutputItemParserRegistration{itemType: "message", parser: messageOutputItemParser{}},
+		responseOutputItemParserRegistration{itemType: "function_call", parser: functionCallOutputItemParser{}},
+		responseOutputItemParserRegistration{itemType: "custom_tool_call", parser: customToolCallOutputItemParser{}},
+		responseOutputItemParserRegistration{itemType: "reasoning", parser: reasoningOutputItemParser{}},
+		responseOutputItemParserRegistration{itemType: "compaction", parser: compactionOutputItemParser{}},
+	)
 	canonical := make([]ResponseItem, 0, len(items))
 	assistantSegments := make([]assistantOutputSegment, 0, len(items))
 	toolCalls := make([]ToolCall, 0, len(items))
@@ -89,8 +91,6 @@ func stampParsedOutputIndex(parsed *parsedResponseOutputItem, outputIndex int64)
 
 type messageOutputItemParser struct{}
 
-func (messageOutputItemParser) ItemType() string { return "message" }
-
 func (messageOutputItemParser) Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem {
 	role := Role(strings.TrimSpace(string(item.Role)))
 	if role == "" {
@@ -103,7 +103,7 @@ func (messageOutputItemParser) Parse(item responses.ResponseOutputItemUnion) par
 		}
 	}
 	text := strings.Join(textParts, "")
-	phase := normalizeMessagePhase(string(item.Phase))
+	phase := clientui.NormalizeMessagePhase(string(item.Phase))
 	raw := json.RawMessage(item.RawJSON())
 	parsed := parsedResponseOutputItem{
 		CanonicalItems: []ResponseItem{{
@@ -122,8 +122,6 @@ func (messageOutputItemParser) Parse(item responses.ResponseOutputItemUnion) par
 }
 
 type functionCallOutputItemParser struct{}
-
-func (functionCallOutputItemParser) ItemType() string { return "function_call" }
 
 func (functionCallOutputItemParser) Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem {
 	call := item.AsFunctionCall()
@@ -155,8 +153,6 @@ type reasoningOutputItemParser struct{}
 
 type customToolCallOutputItemParser struct{}
 
-func (customToolCallOutputItemParser) ItemType() string { return "custom_tool_call" }
-
 func (customToolCallOutputItemParser) Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem {
 	call := item.AsCustomToolCall()
 	callID := textutil.FirstNonEmpty(strings.TrimSpace(call.CallID), strings.TrimSpace(call.ID))
@@ -183,8 +179,6 @@ func (customToolCallOutputItemParser) Parse(item responses.ResponseOutputItemUni
 		}},
 	}
 }
-
-func (reasoningOutputItemParser) ItemType() string { return "reasoning" }
 
 func (reasoningOutputItemParser) Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem {
 	reasoningItem := item.AsReasoning()
@@ -219,8 +213,6 @@ func (reasoningOutputItemParser) Parse(item responses.ResponseOutputItemUnion) p
 }
 
 type compactionOutputItemParser struct{}
-
-func (compactionOutputItemParser) ItemType() string { return "compaction" }
 
 func (compactionOutputItemParser) Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem {
 	compactionItem := item.AsCompaction()

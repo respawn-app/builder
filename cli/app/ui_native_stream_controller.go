@@ -213,7 +213,7 @@ func nativeStreamReferenceDefinitionLabel(line string) string {
 	if label == "" || strings.Contains(label, "]") {
 		return ""
 	}
-	return normalizeNativeStreamReferenceLabel(label)
+	return strings.Join(strings.Fields(strings.ToLower(label)), " ")
 }
 
 func nativeStreamReferenceLinkLabels(line string) []string {
@@ -250,7 +250,7 @@ func nativeStreamReferenceLinkLabels(line string) []string {
 				secondLabel = firstLabel
 			}
 			if secondLabel != "" && !strings.HasPrefix(secondLabel, "^") {
-				labels = append(labels, normalizeNativeStreamReferenceLabel(secondLabel))
+				labels = append(labels, strings.Join(strings.Fields(strings.ToLower(secondLabel)), " "))
 			}
 			idx = secondEnd
 			continue
@@ -259,7 +259,7 @@ func nativeStreamReferenceLinkLabels(line string) []string {
 			idx = firstEnd
 			continue
 		}
-		labels = append(labels, normalizeNativeStreamReferenceLabel(firstLabel))
+		labels = append(labels, strings.Join(strings.Fields(strings.ToLower(firstLabel)), " "))
 		idx = firstEnd
 	}
 	return labels
@@ -290,10 +290,6 @@ func isNativeStreamTaskMarker(line string, openIdx int, closeIdx int) bool {
 	}
 	prefix := strings.TrimSpace(line[:openIdx])
 	return strings.HasSuffix(prefix, "-") || strings.HasSuffix(prefix, "*") || strings.HasSuffix(prefix, "+")
-}
-
-func normalizeNativeStreamReferenceLabel(label string) string {
-	return strings.Join(strings.Fields(strings.ToLower(label)), " ")
 }
 
 func nativeStreamCanBecomeSetextHeading(line string) bool {

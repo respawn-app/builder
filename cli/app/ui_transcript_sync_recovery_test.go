@@ -58,7 +58,7 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 		t.Fatalf("expected stream-gap recovery cause, got %+v", evt)
 	}
 
-	firstCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(evt)
+	firstCmd := m.runtimeAdapter().applyProjectedRuntimeEvent(evt, true).cmd
 	if firstCmd == nil {
 		t.Fatal("expected first authoritative refresh command")
 	}
@@ -236,12 +236,12 @@ func newSupervisorTerminalFenceRepro(t *testing.T) (*uiModel, string) {
 	m.windowSizeKnown = true
 	m.activity = uiActivityRunning
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 100})
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, clientui.TranscriptPage{
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     11,
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)}},
-	}); cmd != nil {
+	}, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		m = applyRuntimeEventBatchMessagesFromCommand(t, m, cmd)
 	}
 

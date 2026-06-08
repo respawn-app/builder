@@ -241,10 +241,10 @@ type dormantSessionSnapshotSource struct {
 
 func newDormantSessionSnapshotSource(cacheWarningMode func() config.CacheWarningMode) *dormantSessionSnapshotSource {
 	source := &dormantSessionSnapshotSource{cacheWarningMode: cacheWarningMode}
-	source.dormant = newDormantTranscriptCache(func(ctx context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
+	source.dormant = newDormantTranscriptCacheWithLimit(dormantTranscriptCacheMaxEntries, func(ctx context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
 		return source.buildCacheEntry(ctx, store)
 	})
-	source.dormantPages = newDormantTranscriptPageCache()
+	source.dormantPages = newDormantTranscriptPageCacheWithLimit(dormantTranscriptPageCacheMaxEntries)
 	return source
 }
 
@@ -334,7 +334,7 @@ func (s dormantSessionSnapshot) TranscriptPage(ctx context.Context, req clientui
 		return clientui.TranscriptPage{}, err
 	}
 	if req.Window == clientui.TranscriptWindowOngoingTail {
-		return entry.transcriptPageFromTail(meta, freshness, req), nil
+		return runtimeview.TranscriptPageFromOngoingTailWindow(meta.SessionID, meta.Name, freshness, meta.LastSequence, entry.ongoingTail, req), nil
 	}
 	offset := req.Offset
 	limit := req.Limit

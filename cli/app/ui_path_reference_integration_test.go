@@ -155,7 +155,7 @@ func TestPathReferencePickerSharedAcrossFramesAndViewport(t *testing.T) {
 	if wantChat < 1 {
 		wantChat = 1
 	}
-	if got := m.calcChatLines(); got != wantChat {
+	if got := m.layout().calcChatLines(); got != wantChat {
 		t.Fatalf("calcChatLines() = %d, want %d", got, wantChat)
 	}
 }

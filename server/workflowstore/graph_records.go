@@ -5,6 +5,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 func currentWorkflowGraphSavePrepared(ctx context.Context, q *sqlitegen.Queries, workflowID workflow.WorkflowID) (preparedWorkflowGraphSave, error) {
@@ -37,15 +38,15 @@ func currentWorkflowGraphSavePrepared(ctx context.Context, q *sqlitegen.Queries,
 	}
 	for _, node := range nodes {
 		inputFields := []workflow.InputField{}
-		if err := unmarshalJSON(node.InputFieldsJson, &inputFields); err != nil {
+		if err := workflowjson.UnmarshalString(node.InputFieldsJson, &inputFields); err != nil {
 			return preparedWorkflowGraphSave{}, err
 		}
 		joinProviders := []workflow.JoinInputProvider{}
-		if err := unmarshalJSON(node.JoinInputProvidersJson, &joinProviders); err != nil {
+		if err := workflowjson.UnmarshalString(node.JoinInputProvidersJson, &joinProviders); err != nil {
 			return preparedWorkflowGraphSave{}, err
 		}
 		outputFields := []workflow.OutputField{}
-		if err := unmarshalJSON(node.OutputFieldsJson, &outputFields); err != nil {
+		if err := workflowjson.UnmarshalString(node.OutputFieldsJson, &outputFields); err != nil {
 			return preparedWorkflowGraphSave{}, err
 		}
 		groupID := ""
@@ -60,14 +61,14 @@ func currentWorkflowGraphSavePrepared(ctx context.Context, q *sqlitegen.Queries,
 	for _, edge := range edges {
 		parameters := []workflow.Parameter{}
 		inputs := []workflow.InputBinding{}
-		if err := unmarshalJSON(edge.ParametersJson, &parameters); err != nil {
+		if err := workflowjson.UnmarshalString(edge.ParametersJson, &parameters); err != nil {
 			return preparedWorkflowGraphSave{}, err
 		}
-		if err := unmarshalJSON(edge.InputBindingsJson, &inputs); err != nil {
+		if err := workflowjson.UnmarshalString(edge.InputBindingsJson, &inputs); err != nil {
 			return preparedWorkflowGraphSave{}, err
 		}
 		requirements := []workflow.OutputRequirement{}
-		if err := unmarshalJSON(edge.OutputRequirementsJson, &requirements); err != nil {
+		if err := workflowjson.UnmarshalString(edge.OutputRequirementsJson, &requirements); err != nil {
 			return preparedWorkflowGraphSave{}, err
 		}
 		prepared.edges = append(prepared.edges, EdgeRecord{

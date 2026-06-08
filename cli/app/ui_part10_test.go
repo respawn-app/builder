@@ -3,10 +3,11 @@ package app
 import (
 	"builder/shared/theme"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestLockedInputEditKeysDismissHelpAndStillNoOp(t *testing.T) {

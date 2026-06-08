@@ -58,13 +58,9 @@ type uiPathReferenceState struct {
 	corpusGeneration uint64
 }
 
-type uiPathReferenceSearchEvent interface {
-	pathReferenceSearchEvent()
-}
+type uiPathReferenceSearchEvent = any
 
-type uiPathReferenceSearchRequestMessage interface {
-	pathReferenceSearchRequestMessage()
-}
+type uiPathReferenceSearchRequestMessage = any
 
 type uiPathReferenceSearchRequest struct {
 	WorkspaceRoot   string
@@ -73,22 +69,16 @@ type uiPathReferenceSearchRequest struct {
 	NormalizedQuery string
 }
 
-func (uiPathReferenceSearchRequest) pathReferenceSearchRequestMessage() {}
-
 type uiPathReferenceCorpusReadyMsg struct {
 	WorkspaceRoot    string
 	CorpusGeneration uint64
 }
-
-func (uiPathReferenceCorpusReadyMsg) pathReferenceSearchEvent() {}
 
 type uiPathReferenceCorpusFailedMsg struct {
 	WorkspaceRoot    string
 	CorpusGeneration uint64
 	Err              error
 }
-
-func (uiPathReferenceCorpusFailedMsg) pathReferenceSearchEvent() {}
 
 type uiPathReferenceMatchResultMsg struct {
 	WorkspaceRoot    string
@@ -99,8 +89,6 @@ type uiPathReferenceMatchResultMsg struct {
 	Matches          []uiPathReferenceCandidate
 }
 
-func (uiPathReferenceMatchResultMsg) pathReferenceSearchEvent() {}
-
 type uiPathReferenceLoadingDelayMsg struct {
 	WorkspaceRoot    string
 	CorpusGeneration uint64
@@ -109,10 +97,6 @@ type uiPathReferenceLoadingDelayMsg struct {
 	NormalizedQuery  string
 }
 
-func (uiPathReferenceLoadingDelayMsg) pathReferenceSearchEvent() {}
-
 type uiPathReferencePrewarmRequest struct {
 	workspaceRoot string
 }
-
-func (uiPathReferencePrewarmRequest) pathReferenceSearchRequestMessage() {}

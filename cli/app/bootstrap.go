@@ -5,10 +5,11 @@ import (
 	"errors"
 
 	"builder/cli/app/internal/embeddedstartup"
+	"builder/cli/app/internal/onboardingready"
 	"builder/shared/config"
 )
 
-func startEmbeddedServer(ctx context.Context, opts Options, interactor authInteractor) (*embeddedAppServer, error) {
+func startEmbeddedServer(ctx context.Context, opts Options, interactor authInteractor, interactive bool) (*embeddedAppServer, error) {
 	if interactor == nil {
 		return nil, errors.New("auth interactor is required")
 	}
@@ -26,21 +27,31 @@ func startEmbeddedServer(ctx context.Context, opts Options, interactor authInter
 			ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
 			Tools:               opts.Tools,
 		},
-	}, interactor, frontendOnboardingHandler{inner: interactor})
+	}, interactor, func(ctx context.Context, req embeddedstartup.OnboardingRequest) (config.App, error) {
+		cfg, _, err := onboardingready.Ensure(ctx, onboardingready.Request{
+			Config:       req.Config,
+			AuthManager:  req.AuthManager,
+			Interactive:  interactive,
+			ReloadConfig: req.ReloadConfig,
+			Runner: func(ctx context.Context, cfg config.App, authState onboardingready.AuthState) (onboardingready.Result, error) {
+				result, err := runOnboardingFlow(cfg, authState)
+				if err != nil {
+					return onboardingready.Result{}, err
+				}
+				return onboardingready.Result{
+					Completed:            result.Completed,
+					CreatedDefaultConfig: result.CreatedDefaultConfig,
+					SettingsPath:         result.SettingsPath,
+				}, nil
+			},
+		})
+		if err != nil {
+			return config.App{}, err
+		}
+		return cfg, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 	return newEmbeddedAppServer(server), nil
-}
-
-type frontendOnboardingHandler struct {
-	inner authInteractor
-}
-
-func (h frontendOnboardingHandler) EnsureOnboardingReady(ctx context.Context, req embeddedstartup.OnboardingRequest) (config.App, error) {
-	cfg, _, err := ensureOnboardingReady(ctx, req.Config, req.AuthManager, h.inner, req.ReloadConfig)
-	if err != nil {
-		return config.App{}, err
-	}
-	return cfg, nil
 }

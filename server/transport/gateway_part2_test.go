@@ -463,7 +463,7 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 	store := createGatewayAuthoritativeSession(t, appCore)
 	controllerLeaseID := activateGatewayController(t, appCore, store.Meta().SessionID)
 	defer releaseGatewayController(t, appCore, store.Meta().SessionID, controllerLeaseID)
-	eng, err := runtime.New(store, &gatewayTestStreamingClient{}, tools.NewRegistry(gatewayTestShellTool{}), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
+	eng, err := runtime.New(store, &gatewayTestStreamingClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: gatewayTestShellTool{}}), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
 	}})
 	if err != nil {
@@ -620,8 +620,6 @@ func (c *gatewayTestStreamingClient) ProviderCapabilities(context.Context) (llm.
 }
 
 type gatewayTestShellTool struct{}
-
-func (gatewayTestShellTool) Name() toolspec.ID { return toolspec.ToolExecCommand }
 
 func (gatewayTestShellTool) Call(_ context.Context, call tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: call.ID, Name: call.Name, Output: json.RawMessage(`{"output":"/tmp\n"}`)}, nil

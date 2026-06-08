@@ -101,10 +101,6 @@ func (s uiAskState) hasCurrent() bool {
 	return s.current != nil
 }
 
-func (s uiProcessListState) isOpen() bool {
-	return s.open
-}
-
 func (s uiRollbackState) isSelecting() bool {
 	return s.phase == uiRollbackPhaseSelection
 }
@@ -115,14 +111,6 @@ func (s uiRollbackState) isEditing() bool {
 
 func (s uiRollbackState) isActive() bool {
 	return s.phase != uiRollbackPhaseInactive
-}
-
-func (s uiStatusOverlayState) isOpen() bool {
-	return s.open
-}
-
-func (s uiGoalOverlayState) isOpen() bool {
-	return s.open
 }
 
 type uiInputModeState struct {
@@ -164,8 +152,10 @@ func (m *uiModel) restorePrimaryInputMode() {
 func (m *uiModel) inputModeState() uiInputModeState {
 	mode := m.inputMode()
 	return uiInputModeState{
-		Mode:           mode,
-		InputLocked:    m != nil && m.isInputLocked(),
+		Mode: mode,
+		InputLocked: m != nil &&
+			m.isInputSubmitLocked(),
+
 		Busy:           m != nil && m.isBusy(),
 		ShowsMainInput: mode.showsMainInput(),
 		ShowsAskInput:  mode.showsAskInput(),

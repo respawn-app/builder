@@ -144,14 +144,6 @@ func (m *uiModel) closeProcessList() {
 	m.restorePrimaryInputMode()
 }
 
-func (m *uiModel) pushProcessOverlayIfNeeded() tea.Cmd {
-	return m.activateSurface(uiSurfaceProcessList)
-}
-
-func (m *uiModel) popProcessOverlayIfNeeded() tea.Cmd {
-	return m.restoreTranscriptSurface()
-}
-
 func (m *uiModel) moveProcessSelection(delta int) {
 	if len(m.processList.entries) == 0 {
 		m.processList.selection = 0
@@ -212,7 +204,7 @@ func (m *uiModel) nextProcessActionToken() uint64 {
 }
 
 func (m *uiModel) requestProcessListRefresh() tea.Cmd {
-	if m == nil || !m.processList.isOpen() {
+	if m == nil || !m.processList.open {
 		return nil
 	}
 	if m.processClient == nil {
@@ -290,7 +282,7 @@ func (m *uiModel) processActionCmd(action, id, logPath string, inputDraftToken u
 }
 
 func (m *uiModel) processListHasRunningEntries() bool {
-	if m == nil || !m.processList.isOpen() {
+	if m == nil || !m.processList.open {
 		return false
 	}
 	for _, entry := range m.processList.entries {
@@ -307,7 +299,7 @@ func (m *uiModel) applyProcessActionDone(msg processActionDoneMsg) tea.Cmd {
 	}
 	m.processList.actionInFlight = false
 	if msg.err != nil {
-		statusCmd := m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
+		statusCmd := m.sendTransientStatusWithNoticeID(msg.err.Error(), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 		c := uiInputController{model: m}
 		switch msg.action {
 		case "kill", "logs":
@@ -321,10 +313,10 @@ func (m *uiModel) applyProcessActionDone(msg processActionDoneMsg) tea.Cmd {
 	case "kill":
 		status := fmt.Sprintf("sent terminate signal to %s", msg.id)
 		var refreshCmd tea.Cmd
-		if m.processList.isOpen() && msg.surfaceGeneration == m.processList.surfaceGeneration {
+		if m.processList.open && msg.surfaceGeneration == m.processList.surfaceGeneration {
 			refreshCmd = m.requestProcessListRefresh()
 		}
-		return tea.Batch(m.setTransientStatus(status), refreshCmd, c.resumeQueuedInputsAfterIdleRuntime())
+		return tea.Batch(m.sendTransientStatusWithNoticeID(status, uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, ""), refreshCmd, c.resumeQueuedInputsAfterIdleRuntime())
 	case "inline":
 		if msg.inputDraftToken != 0 && msg.inputDraftToken != m.mainInputDraftToken {
 			return c.resumeQueuedInputsAfterIdleRuntime()
@@ -335,22 +327,22 @@ func (m *uiModel) applyProcessActionDone(msg processActionDoneMsg) tea.Cmd {
 		}
 		releaseCmd := c.releaseLockedInjectedInput(true)
 		m.appendProcessOutputToInput(msg.id, preview)
-		if m.processList.isOpen() && msg.surfaceGeneration == m.processList.surfaceGeneration {
-			return tea.Batch(releaseCmd, c.stopProcessListFlowCmd(), c.showTransientStatus("Pasted shell transcript"))
+		if m.processList.open && msg.surfaceGeneration == m.processList.surfaceGeneration {
+			return tea.Batch(releaseCmd, c.stopProcessListFlowCmd(), c.model.sendTransientStatusWithNoticeID("Pasted shell transcript", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
-		return tea.Batch(releaseCmd, c.showTransientStatus("Pasted shell transcript"))
+		return tea.Batch(releaseCmd, c.model.sendTransientStatusWithNoticeID("Pasted shell transcript", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, ""))
 	case "logs":
-		statusCmd := c.showTransientStatus("Opened logs")
+		statusCmd := c.model.sendTransientStatusWithNoticeID("Opened logs", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, "")
 		if msg.editorCmd != nil {
 			execCmd := tea.ExecProcess(msg.editorCmd, func(runErr error) tea.Msg {
 				return openProcessLogsDoneMsg{err: runErr}
 			})
-			if m.processList.isOpen() && msg.surfaceGeneration == m.processList.surfaceGeneration {
+			if m.processList.open && msg.surfaceGeneration == m.processList.surfaceGeneration {
 				return tea.Batch(c.stopProcessListFlowCmd(), statusCmd, execCmd, c.resumeQueuedInputsAfterIdleRuntime())
 			}
 			return tea.Batch(statusCmd, execCmd, c.resumeQueuedInputsAfterIdleRuntime())
 		}
-		if m.processList.isOpen() && msg.surfaceGeneration == m.processList.surfaceGeneration {
+		if m.processList.open && msg.surfaceGeneration == m.processList.surfaceGeneration {
 			return tea.Batch(c.stopProcessListFlowCmd(), statusCmd, c.resumeQueuedInputsAfterIdleRuntime())
 		}
 		return tea.Batch(statusCmd, c.resumeQueuedInputsAfterIdleRuntime())
@@ -364,7 +356,7 @@ func (c uiInputController) handleProcessListKey(msg tea.KeyMsg) (tea.Model, tea.
 	switch strings.ToLower(msg.String()) {
 	case "ctrl+c":
 		m.exitAction = UIActionExit
-		if overlayCmd := m.popProcessOverlayIfNeeded(); overlayCmd != nil {
+		if overlayCmd := m.restoreTranscriptSurface(); overlayCmd != nil {
 			m.closeProcessList()
 			return m, tea.Sequence(overlayCmd, tea.Quit)
 		}
@@ -390,7 +382,7 @@ func (c uiInputController) handleProcessListKey(msg tea.KeyMsg) (tea.Model, tea.
 		m.selectLastProcess()
 		return m, nil
 	case "r":
-		return m, tea.Batch(m.requestProcessListRefresh(), c.showTransientStatus("refreshing processes"))
+		return m, tea.Batch(m.requestProcessListRefresh(), c.model.sendTransientStatusWithNoticeID("refreshing processes", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, ""))
 	case "enter":
 		return c.runProcessListAction("inline")
 	case "k":
@@ -408,7 +400,7 @@ func (c uiInputController) runProcessListAction(action string) (tea.Model, tea.C
 	m := c.model
 	selected, ok := m.selectedProcess()
 	if !ok {
-		return m, c.showErrorStatus("no background process selected")
+		return m, c.model.sendTransientStatusWithNoticeID("no background process selected", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	return c.runProcessAction(action, selected.ID)
 }
@@ -416,10 +408,10 @@ func (c uiInputController) runProcessListAction(action string) (tea.Model, tea.C
 func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.Cmd) {
 	m := c.model
 	if m.processClient == nil {
-		return m, c.showErrorStatus("background process client is unavailable")
+		return m, c.model.sendTransientStatusWithNoticeID("background process client is unavailable", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	if m.processList.actionInFlight {
-		return m, c.showTransientStatus("process action already in flight")
+		return m, c.model.sendTransientStatusWithNoticeID("process action already in flight", uiStatusNoticeNeutral, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	action = strings.ToLower(strings.TrimSpace(action))
 	id = strings.TrimSpace(id)
@@ -441,7 +433,7 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 		}
 		return m, m.processActionCmd(action, id, path, 0)
 	default:
-		return m, c.showErrorStatus(fmt.Sprintf("unknown /ps action %q", action))
+		return m, c.model.sendTransientStatusWithNoticeID(fmt.Sprintf("unknown /ps action %q", action), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 }
 

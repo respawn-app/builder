@@ -6,18 +6,18 @@ import (
 	"builder/server/runtime"
 	"builder/server/tools"
 	"builder/shared/clientui"
-	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattn/go-runewidth"
 	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 )
 
 func TestReviewerProgressKeepsInputEditable(t *testing.T) {
@@ -31,7 +31,7 @@ func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 	if !started.isReviewerBlocking() {
 		t.Fatal("expected reviewer state to be marked running")
 	}
-	lines := started.renderInputLines(80, uiThemeStyles("dark"))
+	lines := started.layout().renderInputLines(80, uiThemeStyles("dark"))
 	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "keep this draft") {
 		t.Fatalf("expected original draft visible while reviewer runs, got %q", plain)
@@ -48,7 +48,7 @@ func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 	if completed.isReviewerBlocking() {
 		t.Fatal("expected reviewer state cleared after completion")
 	}
-	lines = completed.renderInputLines(80, uiThemeStyles("dark"))
+	lines = completed.layout().renderInputLines(80, uiThemeStyles("dark"))
 	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "keep this draftx") {
 		t.Fatalf("expected edited draft retained after reviewer completion, got %q", plain)
@@ -66,7 +66,7 @@ func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
 	if !started.isReviewerRunning() {
 		t.Fatal("expected reviewer to be running")
 	}
-	if started.isInputLocked() {
+	if started.isInputSubmitLocked() {
 		t.Fatal("did not expect input lock while reviewer is running")
 	}
 
@@ -221,10 +221,6 @@ type busyTogglePatchTool struct {
 	delay time.Duration
 }
 
-func (t busyTogglePatchTool) Name() toolspec.ID {
-	return toolspec.ToolPatch
-}
-
 func (t busyTogglePatchTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if t.delay > 0 {
 		select {
@@ -363,8 +359,7 @@ func TestF1TogglesHelp(t *testing.T) {
 }
 
 func TestHelpSectionsUseCompactBindingsWithoutStandaloneTranscriptSection(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	sections := m.helpSections()
+	sections := helpSectionsForGOOS(goruntime.GOOS)
 
 	for _, section := range sections {
 		if section.Title == "Transcript" {
@@ -379,7 +374,7 @@ func TestHelpSectionsUseCompactBindingsWithoutStandaloneTranscriptSection(t *tes
 
 	assertHelpEntryBindings(t, sections, "toggle keyboard help", []string{shortcutLabelsForGOOS(goruntime.GOOS).helpToggleBinding()})
 	assertHelpEntryBindings(t, sections, "paste a clipboard screenshot as a file path", []string{"Ctrl + V/D"})
-	assertHelpEntryBindings(t, sections, "delete the current input line", deleteCurrentLineBindings())
+	assertHelpEntryBindings(t, sections, "delete the current input line", deleteCurrentLineBindingsForGOOS(goruntime.GOOS))
 	assertHelpEntryBindings(t, sections, "move the cursor by word", []string{"Alt/Ctrl + ←/→"})
 }
 
@@ -414,20 +409,17 @@ func TestHelpSectionsUsePlatformSpecificSuperKeyLabels(t *testing.T) {
 	}
 }
 
-func TestHelpPaneRendersDarwinCommandGlyphAtNarrowWidth(t *testing.T) {
-	originalGOOS := uiHelpGOOS
-	uiHelpGOOS = func() string { return "darwin" }
-	t.Cleanup(func() { uiHelpGOOS = originalGOOS })
-
+func TestHelpPaneRendersPlatformSuperKeyAtNarrowWidth(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.helpVisible = true
 	width := 24
 	lines := m.layout().renderHelpPane(width, 18, uiThemeStyles("dark"))
 	plain := stripANSIText(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "Alt/⌘") {
-		t.Fatalf("expected rendered help pane to contain command glyph binding, got %q", plain)
+	expected := "Alt/" + shortcutLabelsForGOOS(goruntime.GOOS).super
+	if !strings.Contains(plain, expected) {
+		t.Fatalf("expected rendered help pane to contain %q binding, got %q", expected, plain)
 	}
-	if strings.Contains(plain, "Cmd") || strings.Contains(plain, "CMD") {
+	if goruntime.GOOS == "darwin" && (strings.Contains(plain, "Cmd") || strings.Contains(plain, "CMD")) {
 		t.Fatalf("did not expect macOS command text in rendered help pane, got %q", plain)
 	}
 	for _, line := range strings.Split(stripANSIPreserve(strings.Join(lines, "\n")), "\n") {

@@ -8,6 +8,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 type joinArrival struct {
@@ -77,7 +78,7 @@ LIMIT 1`, taskID, string(joinEdge.TargetNode.ID), batchID.String).Scan(&existing
 	if !ready {
 		return CompleteRunResult{}, nil
 	}
-	joinOutputValuesJSON, err := marshalJSON(joinOutputValues)
+	joinOutputValuesJSON, err := workflowjson.MarshalString(joinOutputValues)
 	if err != nil {
 		return CompleteRunResult{}, err
 	}
@@ -96,7 +97,7 @@ LIMIT 1`, taskID, string(joinEdge.TargetNode.ID), batchID.String).Scan(&existing
 		return CompleteRunResult{}, err
 	}
 	result.PlacementIDs = append(result.PlacementIDs, workflow.PlacementID(targetPlacementID))
-	if err := insertTransitionEdgeSnapshot(ctx, q, joinTransitionID, outEdge, targetPlacementID, "applied", resolvedContextSourceRun{}); err != nil {
+	if err := insertTransitionEdgeSnapshotWithMetadata(ctx, q, joinTransitionID, outEdge, targetPlacementID, "applied", workflowRunMetadata{ContextSource: workflow.CanonicalContextSource(outEdge.ContextSource)}); err != nil {
 		return CompleteRunResult{}, err
 	}
 	if outEdge.TargetNode.Kind == workflow.NodeKindAgent {
@@ -108,7 +109,7 @@ LIMIT 1`, taskID, string(joinEdge.TargetNode.ID), batchID.String).Scan(&existing
 		if !foundSnapshot {
 			return CompleteRunResult{}, fmt.Errorf("join target node %q missing from run snapshot", outEdge.TargetNode.ID)
 		}
-		targetSnapshotJSON, err := marshalJSON(targetSnapshot)
+		targetSnapshotJSON, err := workflowjson.MarshalString(targetSnapshot)
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
@@ -120,7 +121,15 @@ LIMIT 1`, taskID, string(joinEdge.TargetNode.ID), batchID.String).Scan(&existing
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
-		targetMetadataJSON, err := targetRunMetadata(outEdge, source, priorParameterValues)
+		targetMetadataJSON, err := workflowjson.MarshalString(workflowRunMetadata{
+			ContextMode:          string(outEdge.ContextMode),
+			ContextSource:        workflow.CanonicalContextSource(outEdge.ContextSource),
+			SourceRunID:          source.runID,
+			SourceSessionID:      source.sessionID,
+			PromptTemplate:       strings.TrimSpace(outEdge.PromptTemplate),
+			Parameters:           append([]workflow.Parameter(nil), outEdge.Parameters...),
+			PriorParameterValues: clonePriorParameterValues(priorParameterValues),
+		})
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
@@ -133,7 +142,7 @@ LIMIT 1`, taskID, string(joinEdge.TargetNode.ID), batchID.String).Scan(&existing
 }
 
 func joinExpectedBranches(ctx context.Context, tx *sql.Tx, batchID string) (map[string]bool, error) {
-	rows, err := tx.QueryContext(ctx, workflowStoreQuery(joinExpectedBranchesQuery), batchID)
+	rows, err := tx.QueryContext(ctx, strings.TrimSuffix(joinExpectedBranchesQuery, "\n"), batchID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +161,7 @@ func joinExpectedBranches(ctx context.Context, tx *sql.Tx, batchID string) (map[
 }
 
 func joinArrivals(ctx context.Context, tx *sql.Tx, batchID string, joinNodeID workflow.NodeID) ([]joinArrival, error) {
-	rows, err := tx.QueryContext(ctx, workflowStoreQuery(joinArrivalsQuery), batchID, string(joinNodeID))
+	rows, err := tx.QueryContext(ctx, strings.TrimSuffix(joinArrivalsQuery, "\n"), batchID, string(joinNodeID))
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +188,7 @@ func joinArrivals(ctx context.Context, tx *sql.Tx, batchID string, joinNodeID wo
 			continue
 		}
 		outputs := map[string]string{}
-		if err := unmarshalJSON(outputValuesJSON, &outputs); err != nil {
+		if err := workflowjson.UnmarshalString(outputValuesJSON, &outputs); err != nil {
 			return nil, err
 		}
 		arrivals = append(arrivals, joinArrival{PlacementID: placementID, BranchEdgeID: key, JoinEdgeID: incomingJoinEdgeID, SourceNodeKey: sourceNodeKey, OutputValues: outputs})

@@ -8,10 +8,11 @@ import (
 	"builder/shared/config"
 	"builder/shared/rollbacktarget"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {

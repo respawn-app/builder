@@ -31,11 +31,11 @@ func (s *Store) RecordProtocolViolation(ctx context.Context, req RecordProtocolV
 	var err error
 	switch req.Kind {
 	case ProtocolViolationFinalAnswer:
-		err = s.db.QueryRowContext(ctx, workflowStoreQuery(recordFinalAnswerProtocolViolationQuery),
+		err = s.db.QueryRowContext(ctx, strings.TrimSuffix(recordFinalAnswerProtocolViolationQuery, "\n"),
 			now, req.MaxCount, now, req.MaxCount, req.MaxCount, detail, string(req.RunID), boolToInt64(req.RequireGeneration), req.ExpectedGeneration,
 		).Scan(&count, &interruptedAt)
 	case ProtocolViolationInvalidCompletion:
-		err = s.db.QueryRowContext(ctx, workflowStoreQuery(recordInvalidCompletionProtocolViolationQuery),
+		err = s.db.QueryRowContext(ctx, strings.TrimSuffix(recordInvalidCompletionProtocolViolationQuery, "\n"),
 			now, req.MaxCount, now, req.MaxCount, req.MaxCount, detail, string(req.RunID), boolToInt64(req.RequireGeneration), req.ExpectedGeneration,
 		).Scan(&count, &interruptedAt)
 	default:

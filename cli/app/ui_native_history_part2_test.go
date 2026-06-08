@@ -10,9 +10,10 @@ import (
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
@@ -23,7 +24,7 @@ func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
 		{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
 	}
 
-	pending := nativePendingToolEntries(entries)
+	pending := tui.PendingToolEntries(entries)
 	if len(pending) != 3 {
 		t.Fatalf("expected pending tool calls plus matching completed result, got %#v", pending)
 	}
@@ -403,7 +404,7 @@ func TestApplyRuntimeTranscriptPagePromotesHydratedStreamingStableLinesWithoutPr
 	m.setBusy(true)
 	lineCount := 8
 	streamText := makeStreamingLines(lineCount)
-	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     1,
 		TotalEntries: 1,
@@ -412,7 +413,7 @@ func TestApplyRuntimeTranscriptPagePromotesHydratedStreamingStableLinesWithoutPr
 			Text: "try again",
 		}},
 		Ongoing: streamText,
-	})
+	}, clientui.TranscriptRecoveryCauseNone)
 	if cmd == nil {
 		t.Fatal("expected runtime transcript page apply to promote hydrated streaming stable lines")
 	}

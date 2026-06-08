@@ -66,14 +66,6 @@ func sanitizeReviewerSuggestions(in []string) []string {
 	return out
 }
 
-func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
-	return buildReviewerRequestMessagesWithNow(messages, workspaceRoot, model, thinkingLevel, headless, disabledSkills, time.Now())
-}
-
-func buildReviewerRequestMessagesWithNow(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool, now time.Time) ([]llm.Message, error) {
-	return buildReviewerRequestMessagesWithBuilder(messages, newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, now), headless)
-}
-
 func buildReviewerRequestMessagesWithBuilder(messages []llm.Message, builder metaContextBuilder, headless bool) ([]llm.Message, error) {
 	metaMessages, transcriptSource := splitMetaContextMessages(messages)
 	metaMessages = filterReviewerMetaMessages(metaMessages)
@@ -416,10 +408,6 @@ func reviewerSessionID(sessionID string) string {
 		return ""
 	}
 	return trimmed + "/supervisor"
-}
-
-func reviewerPromptCacheKey(sessionID string, compactionCount int) string {
-	return conversationPromptCacheKey(reviewerSessionID(sessionID), compactionCount)
 }
 
 func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {

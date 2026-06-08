@@ -3,19 +3,23 @@ package app
 import (
 	"context"
 
+	"builder/cli/app/internal/onboardingimportfs"
+	"builder/cli/app/internal/onboardingimportproviders"
+	"builder/cli/app/internal/onboardingimportskills"
 	"builder/prompts"
 	"builder/server/generated"
 	"builder/server/runtime"
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func writeOnboardingTestSkill(t *testing.T, dir string, name string, description string) {
@@ -61,7 +65,7 @@ func TestDiscoverOnboardingImportsSkipsExistingTargets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(globalRoot, "commands", "demo.md"), []byte("demo"), 0o644); err != nil {
 		t.Fatalf("write command: %v", err)
 	}
-	discovery := discoverOnboardingImports(globalRoot)
+	discovery := discoverOnboardingImportsForWorkspace(globalRoot, "")
 	if discovery.err != nil {
 		t.Fatalf("discover imports: %v", discovery.err)
 	}
@@ -86,7 +90,7 @@ func TestDiscoverOnboardingImportsIncludesAgentsSkillsAndCommands(t *testing.T) 
 		t.Fatalf("write agents command: %v", err)
 	}
 
-	discovery := discoverOnboardingImports(globalRoot)
+	discovery := discoverOnboardingImportsForWorkspace(globalRoot, "")
 	if discovery.err != nil {
 		t.Fatalf("discover imports: %v", discovery.err)
 	}
@@ -128,7 +132,7 @@ func TestDiscoverProviderCommandSymlinkItemsPreferRootCommandsDirectory(t *testi
 	if err := os.WriteFile(filepath.Join(nestedPluginPrompts, "plugin.md"), []byte("plugin"), 0o644); err != nil {
 		t.Fatalf("write nested plugin prompt: %v", err)
 	}
-	root, items, err := discoverProviderCommandSymlinkItems(onboardingImportProvider{ID: onboardingImportProviderClaudeCode, Label: "Claude Code"}, base)
+	root, items, err := onboardingimportfs.DiscoverProviderCommands(onboardingImportProvider{ID: onboardingImportProviderClaudeCode, Label: "Claude Code"}, base)
 	if err != nil {
 		t.Fatalf("discover provider command symlink items: %v", err)
 	}
@@ -159,7 +163,7 @@ func TestDiscoverProviderCommandSymlinkItemsFallBackToPromptsWhenCommandsHasNoDi
 	if err := os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("prompts"), 0o644); err != nil {
 		t.Fatalf("write prompt command: %v", err)
 	}
-	root, items, err := discoverProviderCommandSymlinkItems(onboardingImportProvider{ID: onboardingImportProviderClaudeCode, Label: "Claude Code"}, base)
+	root, items, err := onboardingimportfs.DiscoverProviderCommands(onboardingImportProvider{ID: onboardingImportProviderClaudeCode, Label: "Claude Code"}, base)
 	if err != nil {
 		t.Fatalf("discover provider command symlink items: %v", err)
 	}
@@ -285,7 +289,7 @@ func TestProviderSkillSymlinkSourcePrefersCodexLocalSkills(t *testing.T) {
 
 func TestDiscoverProviderSkillSymlinkItemsFallsBackWhenPreferredDirectoryIsEmpty(t *testing.T) {
 	home := t.TempDir()
-	provider, ok := onboardingImportProviderByID(onboardingImportProviderCodex)
+	provider, ok := onboardingimportproviders.ByID(onboardingImportProviderCodex)
 	if !ok {
 		t.Fatal("expected codex provider")
 	}
@@ -295,7 +299,7 @@ func TestDiscoverProviderSkillSymlinkItemsFallsBackWhenPreferredDirectoryIsEmpty
 	}
 	writeOnboardingTestSkill(t, filepath.Join(base, "skills", "fallback-skill"), "fallback", "from skills root")
 
-	root, items, err := discoverProviderSkillSymlinkItems(provider, base)
+	root, items, err := onboardingimportfs.DiscoverProviderSkills(provider, base)
 	if err != nil {
 		t.Fatalf("discoverProviderSkillSymlinkItems: %v", err)
 	}
@@ -487,7 +491,7 @@ func TestExecuteOnboardingImportsTreatsZeroValueModesAsNone(t *testing.T) {
 }
 
 func TestOnboardingModelBackspaceTogglesMultiSelect(t *testing.T) {
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
 		ID:        "skills_enabled",
 		Kind:      onboardingScreenMulti,
@@ -505,7 +509,7 @@ func TestOnboardingModelBackspaceTogglesMultiSelect(t *testing.T) {
 }
 
 func TestOnboardingModelCtrlHTogglesMultiSelect(t *testing.T) {
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
 		ID:        "skills_enabled",
 		Kind:      onboardingScreenMulti,
@@ -545,7 +549,7 @@ func TestBuildSkillSelectionScreenAddsToggleAllOptionWhenThereAreMoreThanTwoItem
 func TestDiscoverOnboardingImportsIncludesGeneratedSkillCandidates(t *testing.T) {
 	home := newAppTestHome(t)
 
-	discovery := discoverOnboardingImports(filepath.Join(home, ".builder"))
+	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, ".builder"), "")
 	if discovery.err != nil {
 		t.Fatalf("discover onboarding imports: %v", discovery.err)
 	}
@@ -636,7 +640,7 @@ func TestDiscoverOnboardingImportsHidesGeneratedSkillsShadowedByWorkspaceSkills(
 		t.Fatalf("discover onboarding imports: %v", discovery.err)
 	}
 	for _, item := range skillSelectionCandidates(&onboardingFlowState{imports: discovery}) {
-		if normalizeOnboardingSkillName(item.SkillName) == "builder-dogfooding" {
+		if onboardingimportskills.NormalizeName(item.SkillName) == "builder-dogfooding" {
 			t.Fatalf("expected workspace skill to shadow generated builder-dogfooding, got %+v", item)
 		}
 	}
@@ -694,7 +698,7 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 		},
 	}
 	state.settings.SkillToggles = buildSkillToggles(&state, state.skillSelection)
-	model := newOnboardingModel(filepath.Join(home, ".builder"), state)
+	model := newOnboardingModelForWorkspace(filepath.Join(home, ".builder"), "", state)
 	msg := model.finalizeCmd(false)()
 	done, ok := msg.(onboardingFinalizeDoneMsg)
 	if !ok {
@@ -727,7 +731,7 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 }
 
 func TestOnboardingModelToggleAllHotkeyTogglesMultiSelection(t *testing.T) {
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
 		ID:      "skills_enabled",
 		Kind:    onboardingScreenMulti,
@@ -748,7 +752,7 @@ func TestOnboardingModelToggleAllHotkeyTogglesMultiSelection(t *testing.T) {
 }
 
 func TestOnboardingModelToggleAllMenuItemTogglesMultiSelection(t *testing.T) {
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
 		ID:      "skills_enabled",
 		Kind:    onboardingScreenMulti,
@@ -767,7 +771,7 @@ func TestOnboardingModelToggleAllMenuItemTogglesMultiSelection(t *testing.T) {
 }
 
 func TestOnboardingModelRefreshToggleAllTracksCheckedState(t *testing.T) {
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
 		ID:      "skills_enabled",
 		Kind:    onboardingScreenMulti,
@@ -794,10 +798,10 @@ func TestOnboardingModelRefreshToggleAllTracksCheckedState(t *testing.T) {
 }
 
 func TestOnboardingSubmitCurrentScreenShowsValidationError(t *testing.T) {
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{})
 	model.stepIndex = 2
 	model.syncScreen(true)
-	setSingleLineEditorValue(&model.input, "")
+	model.input.Replace(strings.NewReplacer("\r", "", "\n", "").Replace(""))
 	next, _ := model.submitCurrentScreen()
 	updated := next.(*onboardingModel)
 	if updated.errorText == "" {
@@ -814,8 +818,8 @@ func TestOnboardingWorkflowStartsWithThemeStep(t *testing.T) {
 	if len(steps) == 0 {
 		t.Fatal("expected onboarding workflow to include steps")
 	}
-	if steps[0].ID() != "theme" {
-		t.Fatalf("expected first onboarding step to be theme, got %q", steps[0].ID())
+	if steps[0].id != "theme" {
+		t.Fatalf("expected first onboarding step to be theme, got %q", steps[0].id)
 	}
 }
 
@@ -825,14 +829,14 @@ func TestThemeStepDefaultsToDetectedTheme(t *testing.T) {
 
 	lipgloss.SetHasDarkBackground(false)
 	lightState := &onboardingFlowState{}
-	lightScreen := newOnboardingWorkflow(lightState).visibleSteps(lightState)[0].Build(lightState)
+	lightScreen := newOnboardingWorkflow(lightState).visibleSteps(lightState)[0].build(lightState)
 	if lightScreen.DefaultOptionID != "light" {
 		t.Fatalf("expected light background detection to preselect light theme, got %q", lightScreen.DefaultOptionID)
 	}
 
 	lipgloss.SetHasDarkBackground(true)
 	darkState := &onboardingFlowState{}
-	darkScreen := newOnboardingWorkflow(darkState).visibleSteps(darkState)[0].Build(darkState)
+	darkScreen := newOnboardingWorkflow(darkState).visibleSteps(darkState)[0].build(darkState)
 	if darkScreen.DefaultOptionID != "dark" {
 		t.Fatalf("expected dark background detection to preselect dark theme, got %q", darkScreen.DefaultOptionID)
 	}
@@ -845,7 +849,7 @@ func TestThemeStepChoicePreservesAutoWhenKeepingDetectedDefault(t *testing.T) {
 	lipgloss.SetHasDarkBackground(true)
 	state := &onboardingFlowState{settings: config.Settings{Theme: theme.Auto}}
 	themeStep := newOnboardingWorkflow(state).visibleSteps(state)[0]
-	if err := themeStep.ApplyChoice(state, "dark"); err != nil {
+	if err := themeStep.apply(state, "dark"); err != nil {
 		t.Fatalf("apply detected theme choice: %v", err)
 	}
 	if state.settings.Theme != theme.Auto {
@@ -855,7 +859,7 @@ func TestThemeStepChoicePreservesAutoWhenKeepingDetectedDefault(t *testing.T) {
 	lipgloss.SetHasDarkBackground(false)
 	state = &onboardingFlowState{settings: config.Settings{Theme: theme.Auto}}
 	themeStep = newOnboardingWorkflow(state).visibleSteps(state)[0]
-	if err := themeStep.ApplyChoice(state, "dark"); err != nil {
+	if err := themeStep.apply(state, "dark"); err != nil {
 		t.Fatalf("apply explicit override: %v", err)
 	}
 	if state.settings.Theme != theme.Dark {
@@ -865,7 +869,7 @@ func TestThemeStepChoicePreservesAutoWhenKeepingDetectedDefault(t *testing.T) {
 
 func TestOnboardingDefaultsPathPersistsChosenTheme(t *testing.T) {
 	newAppTestHome(t)
-	model := newOnboardingModel(t.TempDir(), onboardingFlowState{settings: config.Settings{Theme: "light"}, theme: "light"})
+	model := newOnboardingModelForWorkspace(t.TempDir(), "", onboardingFlowState{settings: config.Settings{Theme: "light"}, theme: "light"})
 	msg := model.finalizeCmd(true)()
 	done, ok := msg.(onboardingFinalizeDoneMsg)
 	if !ok {
