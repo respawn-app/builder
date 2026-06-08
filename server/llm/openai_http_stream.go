@@ -704,15 +704,16 @@ func mergePassthroughOutputItems(items []ResponseItem, passthrough []ResponseIte
 	out := CloneResponseItems(items)
 	seen := make(map[string]struct{}, len(out))
 	for _, item := range out {
-		if key, ok := passthroughOutputItemKey(item); ok {
-			seen[key] = struct{}{}
-		}
-	}
-	for _, item := range passthrough {
-		key, ok := passthroughOutputItemKey(item)
-		if !ok {
+		if item.Type != ResponseItemTypeOther || len(item.Raw) == 0 {
 			continue
 		}
+		seen[fmt.Sprintf("%d\x00%s", item.OutputIndex, string(item.Raw))] = struct{}{}
+	}
+	for _, item := range passthrough {
+		if item.Type != ResponseItemTypeOther || len(item.Raw) == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%d\x00%s", item.OutputIndex, string(item.Raw))
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -722,13 +723,6 @@ func mergePassthroughOutputItems(items []ResponseItem, passthrough []ResponseIte
 		out = append(out, copyItem)
 	}
 	return out
-}
-
-func passthroughOutputItemKey(item ResponseItem) (string, bool) {
-	if item.Type != ResponseItemTypeOther || len(item.Raw) == 0 {
-		return "", false
-	}
-	return fmt.Sprintf("%d\x00%s", item.OutputIndex, string(item.Raw)), true
 }
 
 func isKnownResponseOutputItemType(itemType string) bool {
