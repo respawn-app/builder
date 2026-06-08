@@ -412,7 +412,7 @@ func TestHelpSectionsUsePlatformSpecificSuperKeyLabels(t *testing.T) {
 func TestHelpPaneRendersPlatformSuperKeyAtNarrowWidth(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.helpVisible = true
-	width := 24
+	width := 60
 	lines := m.layout().renderHelpPane(width, 18, uiThemeStyles("dark"))
 	plain := stripANSIText(strings.Join(lines, "\n"))
 	expected := "Alt/" + shortcutLabelsForGOOS(goruntime.GOOS).super
