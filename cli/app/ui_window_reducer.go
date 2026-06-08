@@ -28,9 +28,12 @@ func (r uiWindowFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		m.windowSizeKnown = true
 		m.syncViewport()
 		if previousWidth > 0 && previousWidth != msg.Width {
-			m.nativeStreamingController.Resize(msg.Width)
+			m.nativeStreamingController.Configure(m.nativeStreamingController.theme, msg.Width)
 			m.nativeStreamingWidth = msg.Width
-			m.nativeStreamingTail = cloneNativeStreamProjectionLines(m.nativeStreamingController.Tail())
+			m.nativeStreamingTail = cloneNativeStreamProjectionLines(m.nativeStreamingController.rendered[m.nativeStreamingController.enqueuedStableLineCount:])
+			if m.nativeStreamingController.invalidatedByResize {
+				m.nativeStreamingTail = cloneNativeStreamProjectionLines(m.nativeStreamingController.rendered)
+			}
 		}
 		if m.nativeHistoryReplayed && previousWidth > 0 && previousWidth != msg.Width {
 			committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)

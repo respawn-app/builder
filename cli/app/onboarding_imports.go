@@ -155,7 +155,7 @@ func discoverExistingOnboardingSkillNamesInRoot(root string) (map[string]bool, e
 		if !ok {
 			continue
 		}
-		if normalized := onboardingimportskills.NormalizeName(meta.Name); normalized != "" {
+		if normalized := strings.ToLower(strings.Join(strings.Fields(meta.Name), " ")); normalized != "" {
 			names[normalized] = true
 		}
 	}
@@ -266,7 +266,11 @@ func buildSkillSelectionScreen(state *onboardingFlowState) onboardingScreen {
 	body := "Pick skills to keep enabled for now. Builder will write config toggles for the unchecked skills."
 	options := make([]onboardingOption, 0, len(items))
 	if len(items) > 2 {
-		options = append(options, onboardingOption{ID: onboardingToggleAllOptionID, Title: onboardingimportskills.ToggleAllTitle(items, selection)})
+		title := "Enable all"
+		if onboardingimportskills.AllSelected(items, selection) {
+			title = "Disable all"
+		}
+		options = append(options, onboardingOption{ID: onboardingToggleAllOptionID, Title: title})
 	}
 	for _, item := range items {
 		warning := ""

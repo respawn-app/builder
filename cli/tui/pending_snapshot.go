@@ -81,7 +81,7 @@ func (m Model) renderPendingSpinnerBlock(block ongoingBlock, entries []Transcrip
 		return ongoingBlock{}, false
 	}
 	entry := entries[block.entryIndex]
-	if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
+	if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 		return ongoingBlock{}, false
 	}
 	lines := block.lines
@@ -139,7 +139,7 @@ func (m Model) shouldRenderPendingSpinner(block ongoingBlock, entries []Transcri
 		return false
 	}
 	entry := entries[block.entryIndex]
-	if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
+	if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 		return false
 	}
 	resultIdx := resultIndex.findMatchingToolResultIndex(entries, block.entryIndex, consumedResults)

@@ -63,7 +63,7 @@ func (m Model) detailTreeGuideLine(role RenderIntent, line string, last bool, ex
 		}
 		return m.truncateDetailLine(value)
 	}
-	prefixWidth := m.entryPrefixWidth(role, symbolOverride)
+	prefixWidth := lipgloss.Width(m.entryPrefix(role, symbolOverride))
 	if prefixWidth <= 0 {
 		return formatLine(styledConnector + " " + strings.TrimLeft(line, " "))
 	}
@@ -202,7 +202,7 @@ func (m Model) detailCollapsedToolLinesWithSymbol(role RenderIntent, entry Trans
 		} else {
 			lines := m.flattenEntryWithMetaAndSymbol(role, compact, true, entry.ToolCall, symbolOverride)
 			if role.IsToolErrorHeadline() {
-				summaryLines := m.flattenToolErrorText(role, summary, m.entryContinuationPrefix(role, symbolOverride))
+				summaryLines := m.flattenToolErrorText(role, summary, strings.Repeat(" ", max(0, lipgloss.Width(m.entryPrefix(role, symbolOverride)))))
 				return m.detailWithTreeGuideWithSymbol(role, append(lines, summaryLines...), false, symbolOverride)
 			}
 			compact += "\n" + summary

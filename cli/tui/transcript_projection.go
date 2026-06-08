@@ -441,10 +441,6 @@ func (b TranscriptProjectionBlock) equal(other TranscriptProjectionBlock) bool {
 	return true
 }
 
-func (m Model) OngoingProjection(includeStreaming bool) TranscriptProjection {
-	return projectionFromOngoingBlocks(m.buildOngoingBlocks(includeStreaming))
-}
-
 func (m Model) CommittedOngoingProjection() TranscriptProjection {
 	return m.CommittedOngoingProjectionForEntries(m.transcriptInput.Entries)
 }
@@ -510,7 +506,7 @@ func ProjectTranscriptViews(input TranscriptProjectionInput, state TranscriptPro
 	renderer.transcriptInput.Ongoing = input.Ongoing
 	renderer.transcriptInput.StreamingReasoning = cloneStreamingReasoningEntries(input.StreamingReasoning)
 
-	ongoing := renderer.OngoingProjection(true)
+	ongoing := projectionFromOngoingBlocks(renderer.buildOngoingBlocks(true))
 	detail := renderer.DetailProjection(true, true)
 	return TranscriptViewProjection{
 		InputRevision:          input.Revision,
@@ -595,7 +591,7 @@ func RenderAssistantMarkdownProjection(text string, theme string, width int) []T
 		return nil
 	}
 	renderer := transcriptProjectionRenderer(theme, width, 0)
-	flattened := renderer.flattenEntry(RenderIntentAssistant, text)
+	flattened := renderer.flattenEntryWithMetaAndSymbol(RenderIntentAssistant, text, false, nil, "")
 	lines := make([]TranscriptProjectionLine, 0, len(flattened))
 	for _, line := range flattened {
 		lines = append(lines, TranscriptProjectionLine{Kind: VisibleLineContent, Text: line})
@@ -620,7 +616,7 @@ func (p *TranscriptViewProjector) StreamingDetailAssistantLines(text string, sta
 		return p.detailStreamingLines
 	}
 	renderer := transcriptProjectionRenderer(key.Theme, key.Width, 0)
-	lines := renderer.flattenEntry(RenderIntentAssistant, text)
+	lines := renderer.flattenEntryWithMetaAndSymbol(RenderIntentAssistant, text, false, nil, "")
 	if p != nil {
 		p.detailStreamingKey = key
 		p.detailStreamingLines = lines
@@ -711,7 +707,7 @@ func appendDetailStreamingProjection(base TranscriptProjection, input Transcript
 			lines = projector.StreamingDetailAssistantLines(input.Ongoing, state)
 		} else {
 			renderer := transcriptProjectionRenderer(state.Theme, state.ViewportWidth, input.BaseOffset)
-			lines = renderer.flattenEntry(RenderIntentAssistant, input.Ongoing)
+			lines = renderer.flattenEntryWithMetaAndSymbol(RenderIntentAssistant, input.Ongoing, false, nil, "")
 		}
 		if len(lines) > 0 {
 			blocks = append(blocks, TranscriptProjectionBlock{
@@ -742,7 +738,7 @@ func detailStreamingReasoningBlock(input TranscriptProjectionInput, state Transc
 		return TranscriptProjectionBlock{}
 	}
 	renderer := transcriptProjectionRenderer(state.Theme, state.ViewportWidth, input.BaseOffset)
-	lines := renderer.flattenEntry(RenderIntentReasoning, strings.Join(parts, "\n"))
+	lines := renderer.flattenEntryWithMetaAndSymbol(RenderIntentReasoning, strings.Join(parts, "\n"), false, nil, "")
 	return TranscriptProjectionBlock{
 		Role:         RenderIntentReasoning,
 		DividerGroup: ongoingDividerGroup(RenderIntentReasoning),
@@ -1044,7 +1040,7 @@ func PendingToolEntries(entries []TranscriptEntry) []TranscriptEntry {
 	consumedResults := make(map[int]struct{})
 	resultIndex := buildToolResultIndex(tail)
 	for idx, entry := range tail {
-		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
@@ -1068,17 +1064,10 @@ func PendingToolEntries(entries []TranscriptEntry) []TranscriptEntry {
 	return pending
 }
 
-func RenderCommittedOngoingSnapshot(entries []TranscriptEntry, theme string, width int) string {
-	if len(entries) == 0 {
-		return ""
-	}
-	return ProjectCommittedOngoingTranscript(entries, theme, width).Render(TranscriptDivider)
-}
-
 func nonEmptyTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {
 	filtered := make([]TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
-		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)).IsToolResult() &&
+		if TranscriptRoleFromWire(string(entry.Role)).IsToolResult() &&
 			strings.TrimSpace(entry.Text) == "" &&
 			strings.TrimSpace(entry.OngoingText) == "" {
 			// Successful patch/edit calls intentionally emit an empty tool_result
@@ -1102,7 +1091,7 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 		if entry.Transient {
 			return committedOngoingPrefixEndBefore(entries, idx, resultIndex)
 		}
-		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
@@ -1121,7 +1110,7 @@ func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, re
 	consumedResults := make(map[int]struct{})
 	for idx := boundary - 1; idx >= 0; idx-- {
 		entry := entries[idx]
-		if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
+		if TranscriptRoleFromWire(string(entry.Role)) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
