@@ -147,21 +147,16 @@ func collapsedCompactionOverflowShellOutput(output json.RawMessage) (json.RawMes
 	if outputTokens, ok := estimateStructuredOutputTokens(output); ok {
 		before = outputTokens
 	}
-	replacement := shellOutputCollapsePayload()
+	replacement, err := json.Marshal(compactionOverflowCollapsedText)
+	if err != nil {
+		replacement = json.RawMessage(`"<collapsed>"`)
+	}
 	after := estimateTextTokens(string(replacement))
 	saved := before - after
 	if saved <= 0 {
 		return nil, 0
 	}
 	return replacement, saved
-}
-
-func shellOutputCollapsePayload() json.RawMessage {
-	data, err := json.Marshal(compactionOverflowCollapsedText)
-	if err != nil {
-		return json.RawMessage(`"<collapsed>"`)
-	}
-	return data
 }
 
 func isCollapsedCompactionOverflowShellOutput(output json.RawMessage) bool {
