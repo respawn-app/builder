@@ -39,7 +39,7 @@ func (m *uiModel) refreshRollbackCandidates() {
 		m.rollback.selectedTargetID = ""
 		m.rollback.pendingSelectionAnchor = -1
 		m.rollback.pendingSelectionDelta = 0
-		m.clearRollbackSelectionHighlight()
+		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: false})
 		if m.inputMode() == uiInputModeRollbackSelection || m.inputMode() == uiInputModeRollbackEdit {
 			m.restorePrimaryInputMode()
 		}
@@ -121,7 +121,7 @@ func (m *uiModel) startRollbackSelectionMode() bool {
 
 func (m *uiModel) stopRollbackSelectionMode() {
 	m.rollback.phase = uiRollbackPhaseInactive
-	m.clearRollbackSelectionHighlight()
+	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: false})
 	if m.rollback.restoreScrollActive {
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.rollback.restoreOngoingScroll})
 		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: true})
@@ -132,7 +132,7 @@ func (m *uiModel) stopRollbackSelectionMode() {
 
 func (m *uiModel) applyRollbackSelectionHighlight() {
 	if !m.rollback.isSelecting() || len(m.rollback.candidates) == 0 {
-		m.clearRollbackSelectionHighlight()
+		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: false})
 		return
 	}
 	candidate := m.rollback.candidates[m.rollback.selection]
@@ -146,10 +146,6 @@ func (m *uiModel) focusRollbackSelection() {
 	}
 	candidate := m.rollback.candidates[m.rollback.selection]
 	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: candidate.TranscriptIndex, Center: true})
-}
-
-func (m *uiModel) clearRollbackSelectionHighlight() {
-	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: false})
 }
 
 func (m *uiModel) moveRollbackSelection(delta int) {
@@ -185,7 +181,7 @@ func (m *uiModel) requestRollbackSelectionPage(delta int) tea.Cmd {
 	current := m.rollback.candidates[m.rollback.selection]
 	m.rollback.pendingSelectionAnchor = current.TranscriptIndex
 	m.rollback.pendingSelectionDelta = delta
-	return m.requestRuntimeTranscriptPage(req)
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(req, true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)).cmd
 }
 
 func (m *uiModel) beginRollbackEditing() (int, bool) {
@@ -259,10 +255,6 @@ func (m *uiModel) restoreRollbackAlternateScrollIfNeeded() tea.Cmd {
 		return nil
 	}
 	return enableAlternateScrollCmd()
-}
-
-func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
-	return m.popRollbackOverlayWithNativeReplay(true)
 }
 
 func (m *uiModel) popRollbackOverlayWithNativeReplay(emitNativeReplay bool) tea.Cmd {

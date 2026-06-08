@@ -15,8 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
-	xansi "github.com/charmbracelet/x/ansi"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +22,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 type runtimeDisconnectTestRemote struct {
@@ -543,10 +544,6 @@ func (c *queuedSteerDuringBlockingToolClient) GenerateStream(_ context.Context, 
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after steer", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 200_000},
 	}, nil
-}
-
-func (t *blockingShellTool) Name() toolspec.ID {
-	return toolspec.ToolExecCommand
 }
 
 func (t *blockingShellTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

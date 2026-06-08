@@ -10,7 +10,6 @@ import (
 
 	"builder/server/tools"
 	"builder/server/tools/shell/postprocess"
-	"builder/shared/toolspec"
 )
 
 type execCommandInput struct {
@@ -50,10 +49,6 @@ func NewExecCommandTool(workspaceRoot string, outputLimit int, background *Manag
 		background:     background,
 		ownerSessionID: strings.TrimSpace(ownerSessionID),
 	}
-}
-
-func (t *ExecCommandTool) Name() toolspec.ID {
-	return toolspec.ToolExecCommand
 }
 
 func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

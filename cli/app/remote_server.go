@@ -21,14 +21,6 @@ type remoteAppServer struct {
 	owns      bool
 }
 
-func newRemoteAppServer(remote *client.Remote, cfg config.App) *remoteAppServer {
-	return newRemoteAppServerWithAuth(remote, cfg, nil, false)
-}
-
-func newRemoteAppServerWithClose(remote *client.Remote, cfg config.App, closeFn func() error) *remoteAppServer {
-	return newRemoteAppServerWithAuth(remote, cfg, closeFn, true)
-}
-
 func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn func() error, ownsServer bool) *remoteAppServer {
 	if remote == nil {
 		return nil
@@ -144,7 +136,7 @@ func (s *remoteAppServer) SessionViewClient() client.SessionViewClient {
 	return s.remote
 }
 
-func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
+func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	if s == nil || s.remote == nil {
 		return errors.New("remote server is required")
 	}
@@ -155,12 +147,12 @@ func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInt
 	if interactive, ok := interactor.(*interactiveAuthInteractor); ok {
 		return interactive.completeRemoteAuthBootstrap(ctx, s.remote, s.cfg.Settings, status, true)
 	}
-	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor, interactiveAuth)
 }
 
-func (s *remoteAppServer) EnsureAuthReady(ctx context.Context, interactor authInteractor) error {
+func (s *remoteAppServer) EnsureAuthReady(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	if s == nil || s.remote == nil {
 		return errors.New("remote server is required")
 	}
-	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor, interactiveAuth)
 }

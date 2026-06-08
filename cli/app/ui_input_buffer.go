@@ -6,10 +6,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *uiModel) cursorIndex() int {
-	return bufferCursorIndex(m.input, m.inputCursor)
-}
-
 func nextNonZeroToken(token uint64) uint64 {
 	token++
 	if token == 0 {
@@ -153,12 +149,12 @@ func (m *uiModel) moveCursorRight() {
 }
 
 func (m *uiModel) moveCursorStart() {
-	m.inputCursor = moveBufferCursorStart()
+	m.inputCursor = 0
 	m.refreshAutocompleteStateFromInput()
 }
 
 func (m *uiModel) moveCursorEnd() {
-	m.inputCursor = moveBufferCursorEnd()
+	m.inputCursor = -1
 	m.refreshAutocompleteStateFromInput()
 }
 
@@ -173,14 +169,14 @@ func (m *uiModel) moveCursorWordRight() {
 }
 
 func (m *uiModel) moveCursorUpLine() bool {
-	nextCursor, moved := moveBufferCursorUpLine(m.input, m.inputCursor, m.effectiveWidth(), m.layout().mainInputPrefix())
+	nextCursor, moved := moveBufferCursorVertical(m.input, m.inputCursor, m.layout().effectiveWidth(), m.layout().mainInputPrefix(), -1)
 	m.inputCursor = nextCursor
 	m.refreshAutocompleteStateFromInput()
 	return moved
 }
 
 func (m *uiModel) moveCursorDownLine() bool {
-	nextCursor, moved := moveBufferCursorDownLine(m.input, m.inputCursor, m.effectiveWidth(), m.layout().mainInputPrefix())
+	nextCursor, moved := moveBufferCursorVertical(m.input, m.inputCursor, m.layout().effectiveWidth(), m.layout().mainInputPrefix(), 1)
 	m.inputCursor = nextCursor
 	m.refreshAutocompleteStateFromInput()
 	return moved
@@ -287,38 +283,14 @@ func (m *uiModel) yankAskInput() bool {
 	return true
 }
 
-func (m *uiModel) moveAskCursorLeft() {
-	m.ask.inputCursor = moveBufferCursorLeft(m.ask.input, m.ask.inputCursor)
-}
-
-func (m *uiModel) moveAskCursorRight() {
-	m.ask.inputCursor = moveBufferCursorRight(m.ask.input, m.ask.inputCursor)
-}
-
-func (m *uiModel) moveAskCursorStart() {
-	m.ask.inputCursor = moveBufferCursorStart()
-}
-
-func (m *uiModel) moveAskCursorEnd() {
-	m.ask.inputCursor = moveBufferCursorEnd()
-}
-
-func (m *uiModel) moveAskCursorWordLeft() {
-	m.ask.inputCursor = moveBufferCursorWordLeft(m.ask.input, m.ask.inputCursor)
-}
-
-func (m *uiModel) moveAskCursorWordRight() {
-	m.ask.inputCursor = moveBufferCursorWordRight(m.ask.input, m.ask.inputCursor)
-}
-
 func (m *uiModel) moveAskCursorUpLine() bool {
-	nextCursor, moved := moveBufferCursorUpLine(m.ask.input, m.ask.inputCursor, m.effectiveWidth(), m.askInputPrefix())
+	nextCursor, moved := moveBufferCursorVertical(m.ask.input, m.ask.inputCursor, m.layout().effectiveWidth(), "› ", -1)
 	m.ask.inputCursor = nextCursor
 	return moved
 }
 
 func (m *uiModel) moveAskCursorDownLine() bool {
-	nextCursor, moved := moveBufferCursorDownLine(m.ask.input, m.ask.inputCursor, m.effectiveWidth(), m.askInputPrefix())
+	nextCursor, moved := moveBufferCursorVertical(m.ask.input, m.ask.inputCursor, m.layout().effectiveWidth(), "› ", 1)
 	m.ask.inputCursor = nextCursor
 	return moved
 }
@@ -331,10 +303,6 @@ func (m *uiModel) deleteCurrentAskInputLine() bool {
 	m.ask.input = updated
 	m.ask.inputCursor = nextCursor
 	return true
-}
-
-func bufferCursorIndex(text string, cursor int) int {
-	return clampCursor(cursor, len([]rune(text)))
 }
 
 func insertBufferRunes(text string, cursor int, chars []rune) (string, int, bool) {
@@ -363,7 +331,7 @@ func backspaceBuffer(text string, cursor int) (string, int, bool) {
 func deleteForwardBuffer(text string, cursor int) (string, int, bool) {
 	editor := bufferEditor(text, cursor)
 	if !editor.DeleteForward() {
-		return text, bufferCursorIndex(text, cursor), false
+		return text, clampCursor(cursor, len([]rune(text))), false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
 }
@@ -380,14 +348,6 @@ func moveBufferCursorRight(text string, cursor int) int {
 	return runeOffsetForByteCursor(text, editor.Cursor())
 }
 
-func moveBufferCursorStart() int {
-	return 0
-}
-
-func moveBufferCursorEnd() int {
-	return -1
-}
-
 func moveBufferCursorWordLeft(text string, cursor int) int {
 	editor := bufferEditor(text, cursor)
 	editor.MoveWordLeft()
@@ -398,14 +358,6 @@ func moveBufferCursorWordRight(text string, cursor int) int {
 	editor := bufferEditor(text, cursor)
 	editor.MoveWordRight()
 	return runeOffsetForByteCursor(text, editor.Cursor())
-}
-
-func moveBufferCursorUpLine(text string, cursor int, width int, prefix string) (int, bool) {
-	return moveBufferCursorVertical(text, cursor, width, prefix, -1)
-}
-
-func moveBufferCursorDownLine(text string, cursor int, width int, prefix string) (int, bool) {
-	return moveBufferCursorVertical(text, cursor, width, prefix, 1)
 }
 
 func moveBufferCursorVertical(text string, cursor int, width int, prefix string, delta int) (int, bool) {
@@ -419,15 +371,15 @@ func moveBufferCursorVertical(text string, cursor int, width int, prefix string,
 	lines := editor.WrappedLines(width)
 	lineIndex := bufferWrappedLineIndex(lines, editor.Cursor())
 	if lineIndex < 0 {
-		return bufferCursorIndex(text, cursor), false
+		return clampCursor(cursor, len([]rune(text))), false
 	}
 	if delta < 0 && lineIndex == 0 {
 		nextCursor := 0
-		return nextCursor, nextCursor != bufferCursorIndex(text, cursor)
+		return nextCursor, nextCursor != clampCursor(cursor, len([]rune(text)))
 	}
 	if delta > 0 && lineIndex+1 >= len(lines) {
 		nextCursor := len([]rune(text))
-		return nextCursor, nextCursor != bufferCursorIndex(text, cursor)
+		return nextCursor, nextCursor != clampCursor(cursor, len([]rune(text)))
 	}
 	targetIndex := lineIndex + delta
 	currentLine := lines[lineIndex]
@@ -450,13 +402,13 @@ func moveBufferCursorVertical(text string, cursor int, width int, prefix string,
 		nextByteCursor = 0
 	}
 	nextCursor := runeOffsetForByteCursor(text, nextByteCursor)
-	return nextCursor, nextCursor != bufferCursorIndex(text, cursor)
+	return nextCursor, nextCursor != clampCursor(cursor, len([]rune(text)))
 }
 
 func deleteCurrentBufferLine(text string, cursor int) (string, int, bool) {
 	editor := bufferEditor(text, cursor)
 	if !editor.DeleteCurrentLine() {
-		return text, bufferCursorIndex(text, cursor), false
+		return text, clampCursor(cursor, len([]rune(text))), false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
 }
@@ -464,7 +416,7 @@ func deleteCurrentBufferLine(text string, cursor int) (string, int, bool) {
 func deleteBackwardWordBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
 	editor := bufferEditorWithKill(text, cursor, killBuffer)
 	if !editor.DeleteBackwardWord() {
-		return text, bufferCursorIndex(text, cursor), killBuffer, false
+		return text, clampCursor(cursor, len([]rune(text))), killBuffer, false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
 }
@@ -472,7 +424,7 @@ func deleteBackwardWordBuffer(text string, cursor int, killBuffer string) (strin
 func deleteForwardWordBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
 	editor := bufferEditorWithKill(text, cursor, killBuffer)
 	if !editor.DeleteForwardWord() {
-		return text, bufferCursorIndex(text, cursor), killBuffer, false
+		return text, clampCursor(cursor, len([]rune(text))), killBuffer, false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
 }
@@ -480,7 +432,7 @@ func deleteForwardWordBuffer(text string, cursor int, killBuffer string) (string
 func killToLineStartBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
 	editor := bufferEditorWithKill(text, cursor, killBuffer)
 	if !editor.KillToLineStart() {
-		return text, bufferCursorIndex(text, cursor), killBuffer, false
+		return text, clampCursor(cursor, len([]rune(text))), killBuffer, false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
 }
@@ -488,7 +440,7 @@ func killToLineStartBuffer(text string, cursor int, killBuffer string) (string, 
 func killToLineEndBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
 	editor := bufferEditorWithKill(text, cursor, killBuffer)
 	if !editor.KillToLineEnd() {
-		return text, bufferCursorIndex(text, cursor), killBuffer, false
+		return text, clampCursor(cursor, len([]rune(text))), killBuffer, false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
 }
@@ -496,7 +448,7 @@ func killToLineEndBuffer(text string, cursor int, killBuffer string) (string, in
 func yankBuffer(text string, cursor int, killBuffer string) (string, int, bool) {
 	editor := bufferEditorWithKill(text, cursor, killBuffer)
 	if !editor.Yank() {
-		return text, bufferCursorIndex(text, cursor), false
+		return text, clampCursor(cursor, len([]rune(text))), false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
 }

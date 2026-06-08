@@ -440,7 +440,7 @@ func TestServiceMoveTaskAutoApproveDoesNotBypassApprovalGatedEdge(t *testing.T) 
 	if startEdge.ID == "" {
 		t.Fatalf("missing start edge in %+v", def.Definition.Edges)
 	}
-	if _, err := service.store.UpdateEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID(startEdge.ID), WorkflowID: workflow.WorkflowID(workflowID), TransitionGroupID: workflow.TransitionGroupID(startEdge.TransitionGroupID), Key: workflow.ModelKey(startEdge.Key), TargetNodeID: workflow.NodeID(startEdge.TargetNodeID), RequiresApproval: true, ContextMode: workflow.ContextMode(startEdge.ContextMode), ContextSource: domainContextSource(startEdge.ContextSource), PromptTemplate: startEdge.PromptTemplate, Parameters: domainParameters(startEdge.Parameters)}); err != nil {
+	if _, err := service.store.UpdateEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID(startEdge.ID), WorkflowID: workflow.WorkflowID(workflowID), TransitionGroupID: workflow.TransitionGroupID(startEdge.TransitionGroupID), Key: workflow.ModelKey(startEdge.Key), TargetNodeID: workflow.NodeID(startEdge.TargetNodeID), RequiresApproval: true, ContextMode: workflow.ContextMode(startEdge.ContextMode), ContextSource: workflow.CanonicalContextSource(workflow.ContextSource{Kind: workflow.ContextSourceKind(startEdge.ContextSource.Kind), NodeKey: workflow.ModelKey(startEdge.ContextSource.NodeKey)}), PromptTemplate: startEdge.PromptTemplate, Parameters: domainParameters(startEdge.Parameters)}); err != nil {
 		t.Fatalf("enable start edge approval: %v", err)
 	}
 
@@ -974,6 +974,8 @@ func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 	}
 
 	renamedGraph := renameWorkflowGraphDraftNode(graph, "node-agent-"+workflowID, "Preview Agent")
+	renamedGraph = setWorkflowGraphDraftEdgePrompt(renamedGraph, "edge-start-"+workflowID, "Saved edge prompt.")
+	renamedGraph = setWorkflowGraphDraftTransitionDescription(renamedGraph, "group-start-"+workflowID, "Start implementation from the backlog.")
 	preview, err := service.PreviewWorkflowGraphSave(ctx, serverapi.WorkflowGraphSavePreviewRequest{
 		WorkflowID:      workflowID,
 		ExpectedVersion: source.Definition.Workflow.Version,
@@ -1022,6 +1024,12 @@ func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 	if saved.Definition.Workflow.Name != "Saved Workflow" || saved.Definition.Workflow.Description != "Saved metadata" {
 		t.Fatalf("saved workflow metadata = %+v, want combined metadata persisted", saved.Definition.Workflow)
 	}
+	if workflowServiceEdgeByID(t, *saved.Definition, "edge-start-"+workflowID).PromptTemplate != "Saved edge prompt." {
+		t.Fatalf("saved response edge prompt = %q, want edited edge prompt", workflowServiceEdgeByID(t, *saved.Definition, "edge-start-"+workflowID).PromptTemplate)
+	}
+	if workflowServiceTransitionGroupByID(t, *saved.Definition, "group-start-"+workflowID).Description != "Start implementation from the backlog." {
+		t.Fatalf("saved response transition description = %q, want edited transition description", workflowServiceTransitionGroupByID(t, *saved.Definition, "group-start-"+workflowID).Description)
+	}
 	for _, event := range waitWorkflowProjectActions(t, sub, "workflow", "graph_saved") {
 		if event.ProjectID != binding.ProjectID || event.WorkflowID != workflowID {
 			t.Fatalf("event = %+v, want linked workflow event", event)
@@ -1042,6 +1050,102 @@ func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(*saved.Definition, canonical.Definition) {
 		t.Fatalf("saved definition = %+v, want canonical %+v", *saved.Definition, canonical.Definition)
+	}
+}
+
+func TestServiceWorkflowGraphSaveDescriptionOnlyFeedsRuntimeTransitions(t *testing.T) {
+	ctx, service, binding := newWorkflowServiceTestContext(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
+	source, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow source: %v", err)
+	}
+	graph := workflowGraphDraftFromDefinition(source.Definition)
+	description := "Use this transition when the agent has completed implementation."
+	graph = setWorkflowGraphDraftTransitionDescription(graph, "group-done-"+workflowID, description)
+
+	saved, err := service.SaveWorkflowGraph(ctx, serverapi.WorkflowGraphSaveRequest{
+		WorkflowID:      workflowID,
+		ExpectedVersion: source.Definition.Workflow.Version,
+		Graph:           graph,
+	})
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph description-only: %v", err)
+	}
+	if !saved.Saved || saved.CurrentVersion != source.Definition.Workflow.Version+1 {
+		t.Fatalf("description-only save = %+v, want saved version bump", saved)
+	}
+
+	reloaded, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow reloaded: %v", err)
+	}
+	if workflowServiceTransitionGroupByID(t, reloaded.Definition, "group-done-"+workflowID).Description != description {
+		t.Fatalf("reloaded transition description = %q, want %q", workflowServiceTransitionGroupByID(t, reloaded.Definition, "group-done-"+workflowID).Description, description)
+	}
+
+	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
+	started := startWorkflowServiceTask(t, ctx, service, task.Task.ID)
+	runContext, err := service.store.GetRunStartContext(ctx, workflow.RunID(started.RunID))
+	if err != nil {
+		t.Fatalf("GetRunStartContext: %v", err)
+	}
+	if len(runContext.TransitionOptions) != 1 || runContext.TransitionOptions[0].ID != "done" || runContext.TransitionOptions[0].Description != description {
+		t.Fatalf("runtime transition options = %+v, want done description %q", runContext.TransitionOptions, description)
+	}
+}
+
+func TestServiceWorkflowGraphSaveAllowsEmptyPromptButTaskStartRejects(t *testing.T) {
+	ctx, service, binding := newWorkflowServiceTestContext(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
+	source, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow source: %v", err)
+	}
+	graph := workflowGraphDraftFromDefinition(source.Definition)
+	graph = setWorkflowGraphDraftEdgePrompt(graph, "edge-start-"+workflowID, "")
+
+	preview, err := service.PreviewWorkflowGraphSave(ctx, serverapi.WorkflowGraphSavePreviewRequest{
+		WorkflowID:      workflowID,
+		ExpectedVersion: source.Definition.Workflow.Version,
+		Graph:           graph,
+	})
+	if err != nil {
+		t.Fatalf("PreviewWorkflowGraphSave empty prompt: %v", err)
+	}
+	if !preview.CanSave || len(preview.Blockers) != 0 {
+		t.Fatalf("empty-prompt preview = %+v, want can save without blockers", preview)
+	}
+	if preview.ValidationResults[serverapi.WorkflowValidationModeDraft].Valid != true {
+		t.Fatalf("empty-prompt preview draft validation = %+v, want valid", preview.ValidationResults[serverapi.WorkflowValidationModeDraft])
+	}
+	if preview.ValidationResults[serverapi.WorkflowValidationModeExecution].Valid {
+		t.Fatalf("empty-prompt preview execution validation = %+v, want invalid", preview.ValidationResults[serverapi.WorkflowValidationModeExecution])
+	}
+
+	saved, err := service.SaveWorkflowGraph(ctx, serverapi.WorkflowGraphSaveRequest{
+		WorkflowID:      workflowID,
+		ExpectedVersion: source.Definition.Workflow.Version,
+		Graph:           graph,
+	})
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph empty prompt: %v", err)
+	}
+	if !saved.Saved || saved.CurrentVersion != source.Definition.Workflow.Version+1 || len(saved.Blockers) != 0 {
+		t.Fatalf("empty-prompt save = %+v, want saved without blockers", saved)
+	}
+	if saved.ValidationResults[serverapi.WorkflowValidationModeDraft].Valid != true {
+		t.Fatalf("empty-prompt draft validation = %+v, want valid", saved.ValidationResults[serverapi.WorkflowValidationModeDraft])
+	}
+	if saved.ValidationResults[serverapi.WorkflowValidationModeExecution].Valid {
+		t.Fatalf("empty-prompt execution validation = %+v, want invalid", saved.ValidationResults[serverapi.WorkflowValidationModeExecution])
+	}
+
+	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
+	if _, err := service.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: task.Task.ID}); err == nil || !strings.Contains(err.Error(), string(workflow.CodeTransitionPromptRequired)) {
+		t.Fatalf("StartWorkflowTask empty prompt error = %v, want transition prompt required", err)
 	}
 }
 
@@ -1245,6 +1349,28 @@ func workflowServiceNodeByID(t *testing.T, def serverapi.WorkflowDefinition, nod
 	return serverapi.WorkflowNode{}
 }
 
+func workflowServiceEdgeByID(t *testing.T, def serverapi.WorkflowDefinition, edgeID string) serverapi.WorkflowEdge {
+	t.Helper()
+	for _, edge := range def.Edges {
+		if edge.ID == edgeID {
+			return edge
+		}
+	}
+	t.Fatalf("missing edge %q in %+v", edgeID, def.Edges)
+	return serverapi.WorkflowEdge{}
+}
+
+func workflowServiceTransitionGroupByID(t *testing.T, def serverapi.WorkflowDefinition, groupID string) serverapi.WorkflowTransitionGroup {
+	t.Helper()
+	for _, group := range def.TransitionGroups {
+		if group.ID == groupID {
+			return group
+		}
+	}
+	t.Fatalf("missing transition group %q in %+v", groupID, def.TransitionGroups)
+	return serverapi.WorkflowTransitionGroup{}
+}
+
 func workflowGraphDraftFromDefinition(def serverapi.WorkflowDefinition) serverapi.WorkflowGraphDraft {
 	graph := serverapi.WorkflowGraphDraft{
 		NodeGroups:       make([]serverapi.WorkflowGraphDraftNodeGroup, 0, len(def.NodeGroups)),
@@ -1259,7 +1385,7 @@ func workflowGraphDraftFromDefinition(def serverapi.WorkflowDefinition) serverap
 		graph.Nodes = append(graph.Nodes, serverapi.WorkflowGraphDraftNode{ID: node.ID, Key: node.Key, Kind: node.Kind, DisplayName: node.DisplayName, GroupID: node.GroupID, GroupKey: node.GroupKey, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, InputFields: node.InputFields, JoinInputProviders: node.JoinInputProviders})
 	}
 	for _, group := range def.TransitionGroups {
-		graph.TransitionGroups = append(graph.TransitionGroups, serverapi.WorkflowGraphDraftTransitionGroup{ID: group.ID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName})
+		graph.TransitionGroups = append(graph.TransitionGroups, serverapi.WorkflowGraphDraftTransitionGroup{ID: group.ID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName, Description: group.Description})
 	}
 	for _, edge := range def.Edges {
 		graph.Edges = append(graph.Edges, serverapi.WorkflowGraphDraftEdge{ID: edge.ID, TransitionGroupID: edge.TransitionGroupID, Key: edge.Key, TargetNodeID: edge.TargetNodeID, RequiresApproval: edge.RequiresApproval, ContextMode: edge.ContextMode, ContextSource: edge.ContextSource, PromptTemplate: edge.PromptTemplate, Parameters: edge.Parameters})
@@ -1277,6 +1403,30 @@ func renameWorkflowGraphDraftNode(graph serverapi.WorkflowGraphDraft, nodeID str
 		renamed.Nodes = append(renamed.Nodes, node)
 	}
 	return renamed
+}
+
+func setWorkflowGraphDraftEdgePrompt(graph serverapi.WorkflowGraphDraft, edgeID string, promptTemplate string) serverapi.WorkflowGraphDraft {
+	updated := graph
+	updated.Edges = make([]serverapi.WorkflowGraphDraftEdge, 0, len(graph.Edges))
+	for _, edge := range graph.Edges {
+		if edge.ID == edgeID {
+			edge.PromptTemplate = promptTemplate
+		}
+		updated.Edges = append(updated.Edges, edge)
+	}
+	return updated
+}
+
+func setWorkflowGraphDraftTransitionDescription(graph serverapi.WorkflowGraphDraft, groupID string, description string) serverapi.WorkflowGraphDraft {
+	updated := graph
+	updated.TransitionGroups = make([]serverapi.WorkflowGraphDraftTransitionGroup, 0, len(graph.TransitionGroups))
+	for _, group := range graph.TransitionGroups {
+		if group.ID == groupID {
+			group.Description = description
+		}
+		updated.TransitionGroups = append(updated.TransitionGroups, group)
+	}
+	return updated
 }
 
 func workflowServiceNodeIDByKey(t *testing.T, def serverapi.WorkflowDefinition, key string) string {

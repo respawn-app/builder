@@ -6,10 +6,10 @@ import (
 	"io"
 )
 
-func newCommandFlagSet(name string, stderr io.Writer, usage func(*flag.FlagSet)) *flag.FlagSet {
+func newCommandFlagSet(name string, stderr io.Writer, usage commandUsage) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { usage(fs) }
+	fs.Usage = func() { usage.write(fs) }
 	return fs
 }
 

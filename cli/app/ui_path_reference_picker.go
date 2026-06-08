@@ -91,13 +91,13 @@ func applyPathReferenceCompletion(input string, cursor int, query uiPathReferenc
 }
 
 func (m *uiModel) refreshAutocompleteFromInput() tea.Cmd {
-	cmd := m.refreshSlashCommandFilterFromInput()
+	cmd := m.refreshSlashCommandFilterFromInputWithAuth(true)
 	m.refreshPathReferenceFromInput()
 	return cmd
 }
 
 func (m *uiModel) refreshAutocompleteStateFromInput() {
-	m.refreshSlashCommandFilterStateFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(false)
 	m.refreshPathReferenceFromInput()
 }
 
@@ -110,7 +110,7 @@ func (m *uiModel) refreshPathReferenceFromInput() {
 		m.clearPathReferenceState()
 		return
 	}
-	query := detectPathReferenceQuery(m.input, m.cursorIndex())
+	query := detectPathReferenceQuery(m.input, clampCursor(m.inputCursor, len([]rune(m.input))))
 	if !query.Active {
 		m.clearPathReferenceState()
 		return
@@ -142,7 +142,9 @@ func (m *uiModel) shouldTrackPathReferenceQuery() bool {
 	if m == nil {
 		return false
 	}
-	if m.rollback.isSelecting() || m.isInputLocked() || m.ask.hasCurrent() {
+	if m.rollback.isSelecting() ||
+		m.isInputSubmitLocked() ||
+		m.ask.hasCurrent() {
 		return false
 	}
 	switch m.inputModeState().Mode {

@@ -40,8 +40,6 @@ type countingTool struct {
 	count atomic.Int64
 }
 
-func (t *countingTool) Name() toolspec.ID { return t.name }
-
 func (t *countingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	t.count.Add(1)
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: json.RawMessage(`{"ok":true}`)}, nil
@@ -116,7 +114,7 @@ func TestWorkflowToolModeExposesCompleteNodeDespiteEnabledTools(t *testing.T) {
 
 func TestCompleteNodeNotAdvertisedOutsideWorkflow(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		EnabledTools: []toolspec.ID{toolspec.ToolCompleteNode},
 	})
 	req, err := eng.buildRequest(context.Background(), "step", true)
@@ -301,7 +299,7 @@ func TestWorkflowMixedCompleteNodeRunsSideEffects(t *testing.T) {
 		),
 		commentaryResponse("complete", completeNodeCall("call_complete_2", json.RawMessage(`{"commentary":"complete","summary":"done"}`))),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(sideEffect), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: sideEffect}), Config{
 		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
 	})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {

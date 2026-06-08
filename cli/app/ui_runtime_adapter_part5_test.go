@@ -27,7 +27,7 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionReasoningClear(t *testing
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "user", Text: "u"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary"}})
@@ -42,7 +42,7 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionReasoningClear(t *testing
 			{Role: "assistant", Text: "done", Phase: string(llm.MessagePhaseFinal)},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, fresh); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, fresh, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	if detail := stripANSIAndTrimRight(m.view.View()); strings.Contains(detail, "Plan summary") {
@@ -72,7 +72,7 @@ func TestReasoningDeltaBoldOnlyUpdatesStatusLineHeader(t *testing.T) {
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Lifecycle: runtime.RunningRunLifecycle(runtime.RunModeTurn)}})
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "**Summarizing fix and investigation**"}})
 
-	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Summarizing fix and investigation") {
 		t.Fatalf("expected bold-only reasoning summary in status line, got %q", status)
 	}
@@ -91,7 +91,7 @@ func TestReasoningDeltaMixedContentUsesFirstBoldSpanForStatusLineHeader(t *testi
 	text := "**Summarizing fix and investigation**\n\nregular reasoning details"
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: text}})
 
-	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Summarizing fix and investigation") {
 		t.Fatalf("expected first bold span in status line, got %q", status)
 	}
@@ -114,7 +114,7 @@ func TestReasoningDeltaRegularSummaryDoesNotReplaceStatusLineHeader(t *testing.T
 	if detail := stripANSIAndTrimRight(m.view.View()); !strings.Contains(detail, "I am exploring ways to define atomic, low-level collection methods") {
 		t.Fatalf("expected plain reasoning summary in detail view, got %q", detail)
 	}
-	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Preparing patch") {
 		t.Fatalf("expected prior bold-only header to persist, got %q", status)
 	}
@@ -122,12 +122,12 @@ func TestReasoningDeltaRegularSummaryDoesNotReplaceStatusLineHeader(t *testing.T
 		t.Fatalf("did not expect regular reasoning summary in status line, got %q", status)
 	}
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "**Running checks**"}})
-	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status = stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Running checks") || strings.Contains(status, "Preparing patch") {
 		t.Fatalf("expected latest bold-only header to replace prior value, got %q", status)
 	}
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Lifecycle: runtime.IdleRunLifecycle()}})
-	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status = stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if strings.Contains(status, "Running checks") {
 		t.Fatalf("expected status line header cleared when run stops, got %q", status)
 	}
@@ -288,7 +288,7 @@ func TestUserMessageFlushedAlreadyCoveredByAuthoritativeTailDoesNotDuplicateNati
 	m.transcriptRevision = 10
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "steered message",
@@ -298,7 +298,7 @@ func TestUserMessageFlushedAlreadyCoveredByAuthoritativeTailDoesNotDuplicateNati
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	if len(m.transcriptEntries) != 1 {
 		t.Fatalf("expected stale flushed user message to be skipped, got %+v", m.transcriptEntries)
 	}
@@ -315,7 +315,7 @@ func TestWorktreeReminderBeforeUserFlushRendersOnceInOngoing(t *testing.T) {
 	m.termHeight = 24
 	m.windowSizeKnown = true
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         10,
@@ -327,8 +327,8 @@ func TestWorktreeReminderBeforeUserFlushRendersOnceInOngoing(t *testing.T) {
 			OngoingText: "Switched worktree to fixes-1.2-part-3: /tmp/fixes-1.2-part-3",
 			MessageType: string(llm.MessageTypeWorktreeMode),
 		}},
-	})
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	}, true).cmd
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "typed after switch",
@@ -338,7 +338,7 @@ func TestWorktreeReminderBeforeUserFlushRendersOnceInOngoing(t *testing.T) {
 			Role: "user",
 			Text: "typed after switch",
 		}},
-	})
+	}, true).cmd
 
 	if len(m.transcriptEntries) != 2 {
 		t.Fatalf("transcript entries = %+v, want worktree reminder then user", m.transcriptEntries)
@@ -369,7 +369,7 @@ func TestProjectedUserMessageFlushedWithSameTextAndNewCommittedCountAppendsDisti
 	m.transcriptRevision = 10
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "steered message",
@@ -379,7 +379,7 @@ func TestProjectedUserMessageFlushedWithSameTextAndNewCommittedCountAppendsDisti
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	if len(m.transcriptEntries) != 2 {
 		t.Fatalf("expected repeated same-text user message to append distinctly, got %+v", m.transcriptEntries)
 	}
@@ -398,7 +398,7 @@ func TestProjectedUserMessageFlushedDoesNotScheduleTranscriptRefresh(t *testing.
 	m.termHeight = 20
 	m.windowSizeKnown = true
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "steered message",
@@ -406,7 +406,7 @@ func TestProjectedUserMessageFlushedDoesNotScheduleTranscriptRefresh(t *testing.
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
@@ -430,7 +430,7 @@ func TestProjectedUserMessageFlushedRecordsPromptHistoryWithoutTranscriptRefresh
 	m.lockedInjectID = "queue-test-0"
 	m.setInputSubmitLocked(true)
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged:   true,
 		UserMessage:                  "steered message",
@@ -439,7 +439,7 @@ func TestProjectedUserMessageFlushedRecordsPromptHistoryWithoutTranscriptRefresh
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
@@ -475,7 +475,7 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 	m.termHeight = 20
 	m.windowSizeKnown = true
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "steered message",
@@ -483,7 +483,7 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
@@ -491,7 +491,7 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 		}
 	}
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "working"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "working"}, true).cmd
 	if got := m.view.OngoingStreamingText(); got != "working" {
 		t.Fatalf("ongoing streaming text = %q, want working", got)
 	}
@@ -575,7 +575,7 @@ func TestProjectedCommittedToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *t
 	}
 
 	for _, evt := range events {
-		msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(evt))
+		msgs := collectCmdMessages(t, m.runtimeAdapter().applyProjectedRuntimeEvent(evt, true).cmd)
 		for _, msg := range msgs {
 			if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 				t.Fatalf("did not expect committed runtime event to trigger transcript hydration, event=%s msgs=%+v", evt.Kind, msgs)
@@ -617,13 +617,13 @@ func TestProjectedConversationUpdatedEntriesAdvanceCommittedTranscriptAndDetailV
 			Text: "seed",
 		}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
 	m.syncViewport()
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -634,7 +634,7 @@ func TestProjectedConversationUpdatedEntriesAdvanceCommittedTranscriptAndDetailV
 			Text:  "committed after",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
@@ -679,17 +679,17 @@ func TestProjectedConversationUpdatedMatchingCommittedStateSkipsHydration(t *tes
 		TotalEntries: 2,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}, {Role: "assistant", Text: "committed after", Phase: string(llm.MessagePhaseFinal)}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
 		CommittedEntryCount:        2,
-	})
+	}, true).cmd
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect matching committed conversation_updated to trigger hydration, got %+v", msg)
@@ -707,14 +707,14 @@ func TestProjectedPlainConversationUpdatedNeverHydrates(t *testing.T) {
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:   clientui.EventConversationUpdated,
 		StepID: "step-1",
-	})
+	}, true).cmd
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect plain conversation_updated to trigger hydration, got %+v", msg)
@@ -738,7 +738,7 @@ func TestProjectedCommittedConversationUpdatedRequestsHydrationOnlyOnContinuityL
 			{Role: "assistant", Text: "committed after", Phase: string(llm.MessagePhaseFinal)},
 		},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	client.transcript = clientui.TranscriptPage{
@@ -753,13 +753,13 @@ func TestProjectedCommittedConversationUpdatedRequestsHydrationOnlyOnContinuityL
 		},
 	}
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
 		CommittedEntryCount:        3,
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	var refresh runtimeTranscriptRefreshedMsg
 	refreshFound := false
@@ -799,7 +799,7 @@ func TestBootstrapRefreshRejectsStaleAuthoritativePageAfterLocalCommittedEvent(t
 	}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, client.page); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, client.page, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 
@@ -813,7 +813,7 @@ func TestBootstrapRefreshRejectsStaleAuthoritativePageAfterLocalCommittedEvent(t
 	}()
 	<-client.refreshStarted
 
-	commitCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	commitCmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -824,7 +824,7 @@ func TestBootstrapRefreshRejectsStaleAuthoritativePageAfterLocalCommittedEvent(t
 			Text:  "live commit",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
-	})
+	}, true).cmd
 	for _, msg := range collectCmdMessages(t, commitCmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect local committed event during bootstrap refresh to trigger extra hydration, got %+v", msg)
@@ -864,7 +864,7 @@ func TestProjectedCommittedGapRequestsExplicitCommittedGapHydration(t *testing.T
 		TotalEntries: 1,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 	}
-	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, baseline, clientui.TranscriptRecoveryCauseNone); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
 	client.transcript = clientui.TranscriptPage{
@@ -879,7 +879,7 @@ func TestProjectedCommittedGapRequestsExplicitCommittedGapHydration(t *testing.T
 		},
 	}
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -890,7 +890,7 @@ func TestProjectedCommittedGapRequestsExplicitCommittedGapHydration(t *testing.T
 			Text:  "authoritative tail",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	var refresh runtimeTranscriptRefreshedMsg
 	refreshFound := false
@@ -934,9 +934,9 @@ func TestProjectedUserMessageFlushedRequestsHydrationForCommittedGapWhileAssista
 			{Role: "user", Text: "steered message"},
 		},
 	}
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "foreground done"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "foreground done"}, true).cmd
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged:   true,
 		TranscriptRevision:           7,
@@ -947,7 +947,7 @@ func TestProjectedUserMessageFlushedRequestsHydrationForCommittedGapWhileAssista
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	refresh, ok := msgs[0].(runtimeTranscriptRefreshedMsg)
 	if !ok {
@@ -971,7 +971,7 @@ func TestProjectedUserMessageFlushedRequestsHydrationForCommittedGapWhileAssista
 	if len(m.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected queue consumed even while hydrate is pending, got %+v", m.pendingInjected)
 	}
-	queuedPane := strings.TrimSpace(stripANSIAndTrimRight(strings.Join(m.renderQueuedMessagesPane(80), "\n")))
+	queuedPane := strings.TrimSpace(stripANSIAndTrimRight(strings.Join(m.layout().renderQueuedMessagesPane(80), "\n")))
 	if queuedPane != "" {
 		t.Fatalf("expected flushed user message to leave queued pane once prompt history advances, got %q", queuedPane)
 	}
@@ -999,10 +999,10 @@ func TestDeferredCommittedUserFlushRequestsTranscriptRefreshWhenRunEndsWithoutCa
 		entries:    []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
 	}}
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:     clientui.EventRunStateChanged,
 		RunState: &clientui.RunState{Lifecycle: clientui.IdleRunLifecycle()},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	refreshFound := false
 	for _, msg := range msgs {

@@ -33,6 +33,7 @@ To accomplish large tasks - take on a manager role, communicating with agents (v
 - If you spawn a write-capable subagent, you must wait for it to finish before finalizing. Do **not** kill, cancel, or abandon it just because it is slower than expected; it may be mid-edit or mid-test and leave the workspace in an inconsistent state. Wait for its completion instead.
 - Poll when you finished your chunk of work and need the outputs of agents to continue, not right after spawning them.
 - When a delegated coding task returns, quickly review the changes, then integrate, refine them, or continue the session if needed.
+- Do not start a new subagent for follow-up of existing work. Use `--continue` for follow-ups instead, e.g. re-reviews after addressing comments.
 
 ### Parallel delegation patterns
 - Run multiple independent information-seeking subtasks in parallel when you have distinct questions that can be answered independently in non-overlapping areas.

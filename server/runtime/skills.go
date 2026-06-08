@@ -61,10 +61,6 @@ type skillRoot struct {
 	Kind skillSourceKind
 }
 
-func skillsContextMessage(workspaceRoot string) (string, bool, error) {
-	return skillsContextMessageWithDisabled(workspaceRoot, nil)
-}
-
 func skillsContextMessageWithDisabled(workspaceRoot string, disabledSkills map[string]bool) (string, bool, error) {
 	builder := newMetaContextBuilder(workspaceRoot, "", "", disabledSkills, time.Time{})
 	metaResult, err := builder.Build(metaContextBuildOptions{IncludeSkills: true})
@@ -114,14 +110,14 @@ func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool
 			skill.SourceKind = root.Kind
 			candidates = append(candidates, skill)
 			if root.Kind != skillSourceGenerated {
-				userSkillNames[normalizeSkillToggleName(skill.Name)] = true
+				userSkillNames[strings.ToLower(sanitizeSkillSingleLine(skill.Name))] = true
 			}
 		}
 	}
 
 	out := make([]injectedSkill, 0, len(candidates))
 	for _, skill := range candidates {
-		nameKey := normalizeSkillToggleName(skill.Name)
+		nameKey := strings.ToLower(sanitizeSkillSingleLine(skill.Name))
 		if disabledSkills[nameKey] {
 			continue
 		}
@@ -293,10 +289,6 @@ func sanitizeSkillSingleLine(raw string) string {
 	return strings.Join(parts, " ")
 }
 
-func normalizeSkillToggleName(raw string) string {
-	return strings.ToLower(sanitizeSkillSingleLine(raw))
-}
-
 func normalizedDisabledSkills(disabledSkills map[string]bool) map[string]bool {
 	if len(disabledSkills) == 0 {
 		return nil
@@ -306,7 +298,7 @@ func normalizedDisabledSkills(disabledSkills map[string]bool) map[string]bool {
 		if !disabled {
 			continue
 		}
-		key := normalizeSkillToggleName(name)
+		key := strings.ToLower(sanitizeSkillSingleLine(name))
 		if key == "" {
 			continue
 		}

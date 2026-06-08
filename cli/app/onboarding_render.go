@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/cli/app/internal/onboardingmodel"
+	tuiinput "builder/cli/tui/input"
+	"builder/server/llm"
 	"builder/shared/config"
+	sharedtheme "builder/shared/theme"
 	"builder/shared/toolspec"
 
 	"github.com/charmbracelet/lipgloss"
@@ -46,8 +48,8 @@ func newOnboardingStyles(theme string) onboardingStyles {
 		number:         lipgloss.NewStyle().Foreground(palette.muted),
 		numberSelected: lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		description:    lipgloss.NewStyle().Foreground(palette.muted).Faint(true),
-		warning:        lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true),
-		errorText:      lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true),
+		warning:        lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true),
+		errorText:      lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true),
 		checkbox:       lipgloss.NewStyle().Foreground(palette.muted),
 		checkboxOn:     lipgloss.NewStyle().Foreground(palette.secondary).Bold(true),
 		spinner:        lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
@@ -55,7 +57,7 @@ func newOnboardingStyles(theme string) onboardingStyles {
 		group:          lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		valueNeutral:   lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		valueOn:        lipgloss.NewStyle().Foreground(palette.secondary).Bold(true),
-		valueOff:       lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true),
+		valueOff:       lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true),
 	}
 }
 
@@ -223,7 +225,7 @@ func (m *onboardingModel) buildContent(width int) onboardingRenderedContent {
 			cursorCol = 0
 		}
 		if m.terminalCursor == nil {
-			lines = append(lines, renderEditableInputSoftCursorLines(width, renderedInput, m.styles.inputText)...)
+			lines = append(lines, tuiinput.RenderSoftCursorLines(width, renderedInput, m.styles.inputText)...)
 		} else {
 			for _, line := range renderedInput.Lines {
 				lines = append(lines, m.styles.inputText.Render(line))
@@ -297,7 +299,7 @@ func (m *onboardingModel) renderReviewSummary(width int) []string {
 	}
 	appendRow("Theme", onboardingThemeSummary(m.state.settings.Theme), m.styles.valueNeutral)
 	appendRow("Model", m.state.settings.Model, m.styles.valueNeutral)
-	if meta, ok := onboardingmodel.LookupModelMetadata(m.state.settings.Model); ok && meta.ContextWindowTokens > 0 {
+	if meta, ok := llm.LookupModelMetadata(m.state.settings.Model); ok && meta.ContextWindowTokens > 0 {
 		contextValue := formatTokenWindow(m.state.settings.ModelContextWindow)
 		if m.state.settings.ModelContextWindow == meta.ContextWindowTokens {
 			contextValue = "default (" + formatTokenWindow(meta.ContextWindowTokens) + ")"

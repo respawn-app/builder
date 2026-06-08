@@ -191,10 +191,10 @@ func UserFacingError(err error) string {
 	}
 	var authErr *AuthError
 	if errors.As(err, &authErr) && errors.Is(authErr.Err, auth.ErrAuthNotConfigured) {
-		return unauthenticatedWarning()
+		return "Not authenticated, run /login to sign in with your provider"
 	}
 	if errors.Is(err, auth.ErrAuthNotConfigured) {
-		return unauthenticatedWarning()
+		return "Not authenticated, run /login to sign in with your provider"
 	}
 	var providerErr *ProviderAPIError
 	if errors.As(err, &providerErr) {
@@ -209,10 +209,6 @@ func UserFacingError(err error) string {
 		}
 	}
 	return ""
-}
-
-func unauthenticatedWarning() string {
-	return "Not authenticated, run /login to sign in with your provider"
 }
 
 func authenticationFailedWarning(provider string, statusCode int) string {

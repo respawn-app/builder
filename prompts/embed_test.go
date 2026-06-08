@@ -166,8 +166,7 @@ func TestRenderWorkflowTaskInstructionsUsesCompletionModeFragment(t *testing.T) 
 func TestRenderGoalNudgePrompt(t *testing.T) {
 	rendered := RenderGoalNudgePrompt("ship /goal mode", "active")
 	for _, want := range []string{
-		"ship /goal mode",
-		"Current goal status: active",
+		"<goal>\nship /goal mode\n</goal>",
 		"builder goal complete",
 	} {
 		if !strings.Contains(rendered, want) {
@@ -204,5 +203,35 @@ func TestRenderGoalAlreadyCompletePrompt(t *testing.T) {
 	want := "No active goal present. Last goal was already completed:\nship /goal mode"
 	if rendered != want {
 		t.Fatalf("already-complete prompt = %q, want %q", rendered, want)
+	}
+}
+
+func TestRenderGoalAgentDuplicateSetDeniedPrompt(t *testing.T) {
+	rendered := RenderGoalAgentDuplicateSetDeniedPrompt("ship /goal mode\n\n- preserve markdown", "active")
+	for _, want := range []string{
+		"Overwriting an existing goal is not allowed",
+		"active or paused",
+		"status: active",
+		"<goal>\nship /goal mode\n\n- preserve markdown\n</goal>",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("duplicate set prompt missing %q: %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected duplicate set placeholders rendered, got %q", rendered)
+	}
+	if strings.Contains(rendered, "Detected invocation by the agent") {
+		t.Fatalf("duplicate set prompt used generic agent-denial reason: %q", rendered)
+	}
+}
+
+func TestRenderGoalCompleteConfirmRequiredPrompt(t *testing.T) {
+	rendered := RenderGoalCompleteConfirmRequiredPrompt("ship /goal mode\n\n- preserve markdown")
+	if !strings.Contains(rendered, "<goal>\nship /goal mode\n\n- preserve markdown\n</goal>") {
+		t.Fatalf("complete confirm prompt missing objective: %q", rendered)
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected complete confirm placeholders rendered, got %q", rendered)
 	}
 }

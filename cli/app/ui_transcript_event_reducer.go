@@ -5,6 +5,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 type projectedTranscriptEntryPlanMode uint8
@@ -87,7 +88,7 @@ func reduceProjectedTranscriptEvent(state projectedTranscriptEventState, evt cli
 	reduction := projectedTranscriptReduction{
 		decision:           projectedTranscriptDecisionApply,
 		plan:               plan,
-		projectedCommitted: eventTranscriptEntriesAreCommitted(evt),
+		projectedCommitted: evt.CommittedTranscriptChanged,
 		hydrationCause:     evt.RecoveryCause,
 	}
 	reduction.projectedTransient = state.hasRuntimeClient && evt.Kind != clientui.EventConversationUpdated && !reduction.projectedCommitted
@@ -192,10 +193,10 @@ func projectedTranscriptEntriesMatchCurrentOverlap(state projectedTranscriptEven
 	for absolute := overlapStart; absolute < overlapEnd; absolute++ {
 		currentIndex := absolute - currentStart
 		incomingIndex := absolute - eventStart
-		if requireCommitted && !transcriptEntryCommittedForApp(state.entries[currentIndex]) {
+		if requireCommitted && state.entries[currentIndex].Transient && !state.entries[currentIndex].Committed {
 			return false
 		}
-		if !transcriptEntryMatchesChatEntry(state.entries[currentIndex], entries[incomingIndex]) {
+		if !transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(state.entries[currentIndex]), transcriptPayloadFromClientEntry(entries[incomingIndex])) {
 			return false
 		}
 	}

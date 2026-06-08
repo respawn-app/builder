@@ -84,10 +84,10 @@ func TestFullscreenSurfaceOpenClosePolicy(t *testing.T) {
 			wantOpenMode: tui.ModeOngoing,
 			open: func(_ *testing.T, m *uiModel) tea.Cmd {
 				m.openStatusOverlay()
-				return m.pushStatusOverlayIfNeeded()
+				return m.activateSurface(uiSurfaceStatus)
 			},
 			close: func(m *uiModel) tea.Cmd {
-				cmd := m.popStatusOverlayIfNeeded()
+				cmd := m.restoreTranscriptSurface()
 				m.closeStatusOverlay()
 				return cmd
 			},
@@ -98,10 +98,10 @@ func TestFullscreenSurfaceOpenClosePolicy(t *testing.T) {
 			wantOpenMode: tui.ModeOngoing,
 			open: func(_ *testing.T, m *uiModel) tea.Cmd {
 				m.openProcessList()
-				return m.pushProcessOverlayIfNeeded()
+				return m.activateSurface(uiSurfaceProcessList)
 			},
 			close: func(m *uiModel) tea.Cmd {
-				cmd := m.popProcessOverlayIfNeeded()
+				cmd := m.restoreTranscriptSurface()
 				m.closeProcessList()
 				return cmd
 			},
@@ -112,10 +112,10 @@ func TestFullscreenSurfaceOpenClosePolicy(t *testing.T) {
 			wantOpenMode: tui.ModeOngoing,
 			open: func(_ *testing.T, m *uiModel) tea.Cmd {
 				m.openGoalOverlay(nil, nil)
-				return m.pushGoalOverlayIfNeeded()
+				return m.activateSurface(uiSurfaceGoal)
 			},
 			close: func(m *uiModel) tea.Cmd {
-				cmd := m.popGoalOverlayIfNeeded()
+				cmd := m.restoreTranscriptSurface()
 				m.closeGoalOverlay()
 				return cmd
 			},
@@ -126,10 +126,10 @@ func TestFullscreenSurfaceOpenClosePolicy(t *testing.T) {
 			wantOpenMode: tui.ModeOngoing,
 			open: func(_ *testing.T, m *uiModel) tea.Cmd {
 				m.openWorktreeOverlay(uiWorktreeOpenIntent{})
-				return m.pushWorktreeOverlayIfNeeded()
+				return m.activateSurface(uiSurfaceWorktree)
 			},
 			close: func(m *uiModel) tea.Cmd {
-				cmd := m.popWorktreeOverlayIfNeeded()
+				cmd := m.restoreTranscriptSurface()
 				m.closeWorktreeOverlay()
 				return cmd
 			},
@@ -147,7 +147,7 @@ func TestFullscreenSurfaceOpenClosePolicy(t *testing.T) {
 				return m.pushRollbackOverlayIfNeeded()
 			},
 			close: func(m *uiModel) tea.Cmd {
-				cmd := m.popRollbackOverlayIfNeeded()
+				cmd := m.popRollbackOverlayWithNativeReplay(true)
 				m.stopRollbackSelectionMode()
 				return cmd
 			},

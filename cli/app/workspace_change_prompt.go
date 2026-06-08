@@ -5,10 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/google/uuid"
 	"path/filepath"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/uuid"
 )
 
 const (
@@ -168,10 +169,10 @@ func (m *workspaceChangePromptModel) View() string {
 	return renderStartupFullScreenPrompt(startupFullScreenPromptSpec{
 		Width:           m.width,
 		Height:          m.height,
-		Title:           m.renderHeader(),
+		Title:           renderStartupPlainTitle(workspaceChangePromptHeaderFallback, m.theme),
 		Theme:           m.theme,
 		Lines:           m.promptLines(),
-		Footer:          m.footerText(),
+		Footer:          "↑/↓ pick | enter confirm | esc return to picker",
 		MinContentLines: 3,
 	})
 }
@@ -186,29 +187,13 @@ func (m *workspaceChangePromptModel) moveCursor(delta int) {
 	}
 }
 
-func (m *workspaceChangePromptModel) renderHeader() string {
-	return renderStartupPlainTitle(workspaceChangePromptHeaderFallback, m.theme)
-}
-
 func (m *workspaceChangePromptModel) promptLines() []askPromptLine {
 	return []askPromptLine{
-		{Text: m.description(), Kind: askPromptLineKindQuestion},
+		{Text: fmt.Sprintf("This session started in %q but Builder's current is %q. Continue in new location?", m.selectedRoot, m.currentRoot), Kind: askPromptLineKindQuestion},
 		{Text: "", Kind: askPromptLineKindQuestion},
-		{Text: m.optionLine(0, "Yes"), Kind: askPromptLineKindOption, Selected: m.cursor == 0},
-		{Text: m.optionLine(1, "No"), Kind: askPromptLineKindOption, Selected: m.cursor == 1},
+		{Text: fmt.Sprintf("%d. %s", 1, "Yes"), Kind: askPromptLineKindOption, Selected: m.cursor == 0},
+		{Text: fmt.Sprintf("%d. %s", 2, "No"), Kind: askPromptLineKindOption, Selected: m.cursor == 1},
 	}
-}
-
-func (m *workspaceChangePromptModel) footerText() string {
-	return "↑/↓ pick | enter confirm | esc return to picker"
-}
-
-func (m *workspaceChangePromptModel) description() string {
-	return fmt.Sprintf("This session started in %q but Builder's current is %q. Continue in new location?", m.selectedRoot, m.currentRoot)
-}
-
-func (m *workspaceChangePromptModel) optionLine(index int, label string) string {
-	return fmt.Sprintf("%d. %s", index+1, label)
 }
 
 func runWorkspaceChangePrompt(selectedRoot string, currentRoot string, theme string) (workspaceChangePromptResult, error) {

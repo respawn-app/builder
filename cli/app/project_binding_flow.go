@@ -11,6 +11,7 @@ import (
 	"builder/cli/app/internal/projectpicker"
 	"builder/cli/tui"
 	"builder/shared/clientui"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -34,8 +35,8 @@ const (
 	projectNamePromptHeaderFallback      = "Name New Project"
 )
 
-var runProjectBindingPickerFlow = runProjectBindingPicker
-var runServerProjectPickerFlow = runServerProjectPicker
+var runProjectBindingPickerFlow func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error)
+var runServerProjectPickerFlow func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error)
 var runProjectWorkspacePickerFlow = runProjectWorkspacePicker
 var runProjectNamePromptFlow = runProjectNamePrompt
 
@@ -50,8 +51,6 @@ type projectPickerOptions struct {
 	NoticeText     string
 	GroupLabel     string
 }
-
-type projectBindingVisibleRow = projectpicker.VisibleRow
 
 type projectBindingPickerModel struct {
 	projects []clientui.ProjectSummary
@@ -78,7 +77,7 @@ func newProjectBindingPickerModel(projects []clientui.ProjectSummary, theme stri
 		height:   defaultPickerHeight,
 		theme:    theme,
 		styles:   newSessionPickerStyles(theme),
-		headerMD: newStartupMarkdownRenderer(theme),
+		headerMD: newStartupMarkdownRendererWithWordWrap(theme, 0),
 	}
 }
 
@@ -93,7 +92,12 @@ func (m *projectBindingPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Height > 0 {
 			m.height = key.Height
 		}
-		m.ensureCursorVisible()
+		m.offset = projectpicker.EnsureCursorVisible(m.cursor, m.offset, projectpicker.VisibleRowsRequest{
+			ItemCount:  projectpicker.ItemCount(len(m.projects), m.options.AllowCreate),
+			LineBudget: m.visibleLineBudget(),
+			HasPreview: m.hasPreview,
+			ShowGroup:  m.shouldShowGroupHeader,
+		})
 		return m, nil
 	case tea.MouseMsg:
 		switch key.Button {
@@ -147,7 +151,13 @@ func (m *projectBindingPickerModel) View() string {
 	out.WriteString("\n\n")
 	out.WriteString(tui.ApplyThemeDefaultForeground(truncateQueuedMessageLine(m.options.NoticeText, m.width), m.theme))
 	out.WriteString("\n\n")
-	visible := m.visibleRowsFromOffset(m.offset)
+	visible := projectpicker.VisibleRows(projectpicker.VisibleRowsRequest{
+		Offset:     m.offset,
+		ItemCount:  projectpicker.ItemCount(len(m.projects), m.options.AllowCreate),
+		LineBudget: m.visibleLineBudget(),
+		HasPreview: m.hasPreview,
+		ShowGroup:  m.shouldShowGroupHeader,
+	})
 	groupRendered := false
 	for idx, row := range visible {
 		if idx > 0 {
@@ -164,10 +174,6 @@ func (m *projectBindingPickerModel) View() string {
 	return out.String()
 }
 
-func (m *projectBindingPickerModel) itemCount() int {
-	return projectpicker.ItemCount(len(m.projects), m.options.AllowCreate)
-}
-
 func (m *projectBindingPickerModel) visibleLineBudget() int {
 	rows := m.height - 4
 	if rows < 1 {
@@ -177,18 +183,9 @@ func (m *projectBindingPickerModel) visibleLineBudget() int {
 }
 
 func (m *projectBindingPickerModel) moveCursor(delta int) {
-	m.cursor = projectpicker.MoveCursor(m.cursor, delta, m.itemCount())
-	m.ensureCursorVisible()
-}
-
-func (m *projectBindingPickerModel) ensureCursorVisible() {
-	m.offset = projectpicker.EnsureCursorVisible(m.cursor, m.offset, m.itemCount(), m.visibleRowsFromOffset)
-}
-
-func (m *projectBindingPickerModel) visibleRowsFromOffset(offset int) []projectBindingVisibleRow {
-	return projectpicker.VisibleRows(projectpicker.VisibleRowsRequest{
-		Offset:     offset,
-		ItemCount:  m.itemCount(),
+	m.cursor = projectpicker.MoveCursor(m.cursor, delta, projectpicker.ItemCount(len(m.projects), m.options.AllowCreate))
+	m.offset = projectpicker.EnsureCursorVisible(m.cursor, m.offset, projectpicker.VisibleRowsRequest{
+		ItemCount:  projectpicker.ItemCount(len(m.projects), m.options.AllowCreate),
 		LineBudget: m.visibleLineBudget(),
 		HasPreview: m.hasPreview,
 		ShowGroup:  m.shouldShowGroupHeader,
@@ -255,10 +252,6 @@ func (m *projectBindingPickerModel) hasPreview(index int) bool {
 	return strings.TrimSpace(project.RootPath) != ""
 }
 
-func (m *projectBindingPickerModel) firstProjectRowIndex() int {
-	return projectpicker.FirstProjectRowIndex(m.options.AllowCreate)
-}
-
 func (m *projectBindingPickerModel) isCreateRow(index int) bool {
 	return m.options.AllowCreate && index == 0
 }
@@ -275,7 +268,7 @@ func (m *projectBindingPickerModel) shouldShowGroupHeader(index int, groupRender
 	if groupRendered || strings.TrimSpace(m.options.GroupLabel) == "" || len(m.projects) == 0 {
 		return false
 	}
-	return index == m.firstProjectRowIndex()
+	return index == projectpicker.FirstProjectRowIndex(m.options.AllowCreate)
 }
 
 func projectBindingHomeDir() string {
@@ -284,26 +277,6 @@ func projectBindingHomeDir() string {
 		return ""
 	}
 	return home
-}
-
-func runProjectBindingPicker(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
-	return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
-		AllowCreate:    true,
-		HeaderMarkdown: projectBindingPickerHeaderMarkdown,
-		HeaderFallback: projectBindingPickerHeaderFallback,
-		NoticeText:     projectBindingPickerNoticeText,
-		GroupLabel:     projectBindingExistingLabel,
-	})
-}
-
-func runServerProjectPicker(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
-	return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
-		AllowCreate:    false,
-		HeaderMarkdown: serverProjectPickerHeaderMarkdown,
-		HeaderFallback: serverProjectPickerHeaderFallback,
-		NoticeText:     serverProjectPickerNoticeText,
-		GroupLabel:     serverProjectExistingLabel,
-	})
 }
 
 func runConfiguredProjectPicker(projects []clientui.ProjectSummary, theme string, options projectPickerOptions) (projectBindingPickerResult, error) {
@@ -346,7 +319,7 @@ func newProjectWorkspacePickerModel(workspaces []clientui.ProjectWorkspaceSummar
 		height:     defaultPickerHeight,
 		theme:      theme,
 		styles:     newSessionPickerStyles(theme),
-		headerMD:   newStartupMarkdownRenderer(theme),
+		headerMD:   newStartupMarkdownRendererWithWordWrap(theme, 0),
 	}
 }
 
@@ -361,7 +334,11 @@ func (m *projectWorkspacePickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Height > 0 {
 			m.height = key.Height
 		}
-		m.ensureCursorVisible()
+		m.offset = projectpicker.EnsureCursorVisible(m.cursor, m.offset, projectpicker.VisibleRowsRequest{
+			ItemCount:  len(m.workspaces),
+			LineBudget: m.visibleLineBudget(),
+			HasPreview: m.hasPreview,
+		})
 		return m, nil
 	case tea.MouseMsg:
 		switch key.Button {
@@ -411,7 +388,12 @@ func (m *projectWorkspacePickerModel) View() string {
 	out.WriteString("\n\n")
 	out.WriteString(tui.ApplyThemeDefaultForeground(truncateQueuedMessageLine(projectWorkspacePickerNoticeText, m.width), m.theme))
 	out.WriteString("\n\n")
-	for idx, row := range m.visibleRowsFromOffset(m.offset) {
+	for idx, row := range projectpicker.VisibleRows(projectpicker.VisibleRowsRequest{
+		Offset:     m.offset,
+		ItemCount:  len(m.workspaces),
+		LineBudget: m.visibleLineBudget(),
+		HasPreview: m.hasPreview,
+	}) {
 		if idx > 0 {
 			out.WriteByte('\n')
 		}
@@ -419,8 +401,6 @@ func (m *projectWorkspacePickerModel) View() string {
 	}
 	return out.String()
 }
-
-func (m *projectWorkspacePickerModel) itemCount() int { return len(m.workspaces) }
 
 func (m *projectWorkspacePickerModel) visibleLineBudget() int {
 	rows := m.height - 4
@@ -431,18 +411,9 @@ func (m *projectWorkspacePickerModel) visibleLineBudget() int {
 }
 
 func (m *projectWorkspacePickerModel) moveCursor(delta int) {
-	m.cursor = projectpicker.MoveCursor(m.cursor, delta, m.itemCount())
-	m.ensureCursorVisible()
-}
-
-func (m *projectWorkspacePickerModel) ensureCursorVisible() {
-	m.offset = projectpicker.EnsureCursorVisible(m.cursor, m.offset, m.itemCount(), m.visibleRowsFromOffset)
-}
-
-func (m *projectWorkspacePickerModel) visibleRowsFromOffset(offset int) []projectBindingVisibleRow {
-	return projectpicker.VisibleRows(projectpicker.VisibleRowsRequest{
-		Offset:     offset,
-		ItemCount:  m.itemCount(),
+	m.cursor = projectpicker.MoveCursor(m.cursor, delta, len(m.workspaces))
+	m.offset = projectpicker.EnsureCursorVisible(m.cursor, m.offset, projectpicker.VisibleRowsRequest{
+		ItemCount:  len(m.workspaces),
 		LineBudget: m.visibleLineBudget(),
 		HasPreview: m.hasPreview,
 	})
@@ -520,19 +491,55 @@ func runProjectWorkspacePicker(workspaces []clientui.ProjectWorkspaceSummary, th
 }
 
 func ensureInteractiveProjectBinding(ctx context.Context, server projectbinding.Server[interactiveSessionServer]) (interactiveSessionServer, error) {
+	pickLocalProject := runProjectBindingPickerFlow
+	if pickLocalProject == nil {
+		pickLocalProject = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
+			return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
+				AllowCreate:    true,
+				HeaderMarkdown: projectBindingPickerHeaderMarkdown,
+				HeaderFallback: projectBindingPickerHeaderFallback,
+				NoticeText:     projectBindingPickerNoticeText,
+				GroupLabel:     projectBindingExistingLabel,
+			})
+		}
+	}
+	pickServerProject := runServerProjectPickerFlow
+	if pickServerProject == nil {
+		pickServerProject = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
+			return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
+				AllowCreate:    false,
+				HeaderMarkdown: serverProjectPickerHeaderMarkdown,
+				HeaderFallback: serverProjectPickerHeaderFallback,
+				NoticeText:     serverProjectPickerNoticeText,
+				GroupLabel:     serverProjectExistingLabel,
+			})
+		}
+	}
 	return projectbinding.EnsureInteractive[interactiveSessionServer](ctx, projectbinding.Request[interactiveSessionServer]{
 		Server:            server,
-		PickLocalProject:  runProjectBindingPickerFlow,
-		PickServerProject: runServerProjectPickerFlow,
+		PickLocalProject:  pickLocalProject,
+		PickServerProject: pickServerProject,
 		PickWorkspace:     runProjectWorkspacePickerFlow,
 		PromptProjectName: runProjectNamePromptFlow,
 	})
 }
 
 func ensureInteractiveServerBrowsingBinding(ctx context.Context, server projectbinding.Server[interactiveSessionServer], projects []clientui.ProjectSummary) (interactiveSessionServer, error) {
+	pickServerProject := runServerProjectPickerFlow
+	if pickServerProject == nil {
+		pickServerProject = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
+			return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
+				AllowCreate:    false,
+				HeaderMarkdown: serverProjectPickerHeaderMarkdown,
+				HeaderFallback: serverProjectPickerHeaderFallback,
+				NoticeText:     serverProjectPickerNoticeText,
+				GroupLabel:     serverProjectExistingLabel,
+			})
+		}
+	}
 	return projectbinding.EnsureServerBrowsing[interactiveSessionServer](ctx, projectbinding.Request[interactiveSessionServer]{
 		Server:            server,
-		PickServerProject: runServerProjectPickerFlow,
+		PickServerProject: pickServerProject,
 		PickWorkspace:     runProjectWorkspacePickerFlow,
 	}, projects)
 }

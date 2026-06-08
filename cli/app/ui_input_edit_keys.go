@@ -1,10 +1,6 @@
 package app
 
-import (
-	"runtime"
-
-	tea "github.com/charmbracelet/bubbletea"
-)
+import tea "github.com/charmbracelet/bubbletea"
 
 type uiSharedInputEditActions struct {
 	Backspace          func() bool
@@ -15,14 +11,6 @@ type uiSharedInputEditActions struct {
 	KillToLineEnd      func() bool
 	Yank               func() bool
 	DeleteCurrentLine  func() bool
-}
-
-func handleSharedInputEditKey(msg tea.KeyMsg, actions uiSharedInputEditActions) bool {
-	return handleSharedInputEditKeyForGOOS(msg, actions, runtime.GOOS)
-}
-
-func isSharedInputEditKey(msg tea.KeyMsg) bool {
-	return isSharedInputEditKeyForGOOS(msg, runtime.GOOS)
 }
 
 func isSharedInputEditKeyForGOOS(msg tea.KeyMsg, goos string) bool {

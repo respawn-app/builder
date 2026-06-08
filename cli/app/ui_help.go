@@ -19,16 +19,10 @@ type uiHelpSection struct {
 	Entries []uiHelpEntry
 }
 
-var uiHelpGOOS = func() string {
-	return runtime.GOOS
-}
-
-func (m *uiModel) toggleHelp() {
-	m.helpVisible = !m.helpVisible
-}
-
 func (m *uiModel) canToggleHelpWithQuestionMark() bool {
-	if m == nil || m.isInputLocked() || m.input != "" {
+	if m == nil ||
+		m.isInputSubmitLocked() ||
+		m.input != "" {
 		return false
 	}
 	switch m.inputMode() {
@@ -53,18 +47,14 @@ func (m *uiModel) canShowHelp() bool {
 	return m.surface() == uiSurfaceOngoingTranscript
 }
 
-func (m *uiModel) helpSections() []uiHelpSection {
-	return helpSectionsForGOOS(uiHelpGOOS())
-}
-
 func helpSectionsForGOOS(goos string) []uiHelpSection {
 	shortcutLabels := shortcutLabelsForGOOS(goos)
 	return []uiHelpSection{
 		{
 			Title: "Global",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{shortcutLabels.helpToggleBinding()}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
-				{Bindings: []string{"Ctrl + C"}, Description: "interrupt current run or exit", Active: uiHelpAlwaysActive},
+				{Bindings: []string{shortcutLabels.helpToggleBinding()}, Description: "toggle keyboard help", Active: func(*uiModel) bool { return true }},
+				{Bindings: []string{"Ctrl + C"}, Description: "interrupt current run or exit", Active: func(*uiModel) bool { return true }},
 				{Bindings: []string{"Shift + Tab / Ctrl + T"}, Description: "toggle transcript mode", Active: uiHelpCanToggleTranscript},
 			},
 		},
@@ -87,16 +77,12 @@ func helpSectionsForGOOS(goos string) []uiHelpSection {
 			Title: "Rollback Mode",
 			Entries: []uiHelpEntry{
 				{Bindings: []string{"Esc Esc"}, Description: "open rollback selection from an idle empty prompt", Active: uiHelpCanArmRollback},
-				{Bindings: []string{"↑ / ↓"}, Description: "move the rollback selection and load older/newer pages at the edges", Active: uiHelpAlwaysActive},
-				{Bindings: []string{"PgUp / PgDn"}, Description: "scroll the transcript while selecting a rollback point", Active: uiHelpAlwaysActive},
-				{Bindings: []string{"Esc"}, Description: "cancel or go back", Active: uiHelpAlwaysActive},
+				{Bindings: []string{"↑ / ↓"}, Description: "move the rollback selection and load older/newer pages at the edges", Active: func(*uiModel) bool { return true }},
+				{Bindings: []string{"PgUp / PgDn"}, Description: "scroll the transcript while selecting a rollback point", Active: func(*uiModel) bool { return true }},
+				{Bindings: []string{"Esc"}, Description: "cancel or go back", Active: func(*uiModel) bool { return true }},
 			},
 		},
 	}
-}
-
-func deleteCurrentLineBindings() []string {
-	return deleteCurrentLineBindingsForGOOS(uiHelpGOOS())
 }
 
 func deleteCurrentLineBindingsForGOOS(goos string) []string {
@@ -127,10 +113,6 @@ func (l uiShortcutLabels) helpToggleBinding() string {
 	return "F1 / ? (empty) / Alt/" + l.super + " + /"
 }
 
-func uiHelpAlwaysActive(*uiModel) bool {
-	return true
-}
-
 func uiHelpCanToggleTranscript(m *uiModel) bool {
 	switch m.inputMode() {
 	case uiInputModeMain, uiInputModeRollbackEdit:
@@ -157,7 +139,7 @@ func uiHelpInPromptInput(m *uiModel) bool {
 }
 
 func uiHelpInTextEditing(m *uiModel) bool {
-	if m.isInputLocked() {
+	if m.isInputSubmitLocked() {
 		return false
 	}
 	switch m.inputMode() {
@@ -182,10 +164,6 @@ func helpPaneMaxLines(height, inputLines, queuedLines, pickerLines int) int {
 	return maxLines
 }
 
-func (l uiViewLayout) helpPaneLineCount(width, maxLines int) int {
-	return len(l.renderHelpPane(width, maxLines, uiThemeStyles(l.model.theme)))
-}
-
 func (l uiViewLayout) renderHelpPane(width, maxLines int, style uiStyles) []string {
 	if !l.model.helpVisible || !l.model.canShowHelp() || width < 1 || maxLines < 3 {
 		return nil
@@ -199,7 +177,7 @@ func (l uiViewLayout) renderHelpPane(width, maxLines int, style uiStyles) []stri
 	activeDescStyle := style.input
 	inactiveDescStyle := style.meta
 
-	sections := l.model.helpSections()
+	sections := helpSectionsForGOOS(runtime.GOOS)
 	keyColumnWidth := helpKeyColumnWidth(sections, width)
 	content := make([]string, 0, 32)
 	visibleSectionCount := 0
@@ -250,7 +228,7 @@ func (l uiViewLayout) renderHelpPane(width, maxLines int, style uiStyles) []stri
 		}
 	}
 
-	return l.renderInputFrame(width, content)
+	return renderFramedLines(width, content, l.inputBorderStyle())
 }
 
 type renderedHelpEntryLine struct {

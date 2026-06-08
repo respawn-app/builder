@@ -85,18 +85,6 @@ func parseSlashCommandInput(input string) slashCommandInput {
 	}
 }
 
-func normalizeSlashCommandToken(token string) string {
-	return strings.ToLower(strings.TrimSpace(token))
-}
-
-func (m *uiModel) refreshSlashCommandFilterFromInput() tea.Cmd {
-	return m.refreshSlashCommandFilterFromInputWithAuth(true)
-}
-
-func (m *uiModel) refreshSlashCommandFilterStateFromInput() {
-	_ = m.refreshSlashCommandFilterFromInputWithAuth(false)
-}
-
 func (m *uiModel) refreshSlashCommandFilterFromInputWithAuth(scheduleAuth bool) tea.Cmd {
 	parsed := parseSlashCommandInput(m.input)
 	if !parsed.active || parsed.argumentMode {
@@ -115,7 +103,7 @@ func (m *uiModel) refreshSlashCommandFilterFromInputWithAuth(scheduleAuth bool) 
 	if scheduleAuth {
 		cmd = m.requestAuthSlashCommandRefresh()
 	}
-	normalized := normalizeSlashCommandToken(parsed.token)
+	normalized := strings.ToLower(strings.TrimSpace(parsed.token))
 	if !m.slashCommandFilterSet || m.slashCommandFilter != normalized {
 		m.slashCommandSelection = 0
 	}
@@ -129,7 +117,7 @@ func (m *uiModel) currentSlashCommandQuery(token string) string {
 	if m.slashCommandFilterSet {
 		return m.slashCommandFilter
 	}
-	return normalizeSlashCommandToken(token)
+	return strings.ToLower(strings.TrimSpace(token))
 }
 
 func (m *uiModel) currentSlashCommandMatches(token string) []commands.Command {
@@ -259,7 +247,9 @@ func (m *uiModel) slashCommandPicker() slashCommandPickerState {
 		return slashCommandPickerState{}
 	}
 	parsed := parseSlashCommandInput(m.input)
-	if !parsed.active || parsed.argumentMode || m.isInputLocked() || m.ask.hasCurrent() {
+	if !parsed.active || parsed.argumentMode ||
+		m.isInputSubmitLocked() ||
+		m.ask.hasCurrent() {
 		return slashCommandPickerState{}
 	}
 	matches := m.currentSlashCommandMatches(parsed.token)
@@ -302,7 +292,7 @@ func (m *uiModel) resolveSlashCommandSelection(input string) slashCommandSelecti
 		selection.exact = true
 		return selection
 	}
-	exactCommandText := "/" + normalizeSlashCommandToken(parsed.token)
+	exactCommandText := "/" + strings.ToLower(strings.TrimSpace(parsed.token))
 	if command, ok := m.commandRegistry.Command(exactCommandText); ok {
 		selection.command = command
 		selection.hasCommand = true
@@ -316,7 +306,7 @@ func (m *uiModel) resolveSlashCommandSelection(input string) slashCommandSelecti
 	selected := matches[clampSlashPickerIndex(m.slashCommandSelection, 0, len(matches)-1)]
 	selection.command = selected
 	selection.hasCommand = true
-	selection.exact = selected.Name == normalizeSlashCommandToken(parsed.token)
+	selection.exact = selected.Name == strings.ToLower(strings.TrimSpace(parsed.token))
 	return selection
 }
 

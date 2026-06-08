@@ -23,7 +23,7 @@ func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		AllowUnauthenticated:  true,
-	}, memoryAuthHandler{state: auth.EmptyState()}, autoOnboarding{})
+	}, memoryAuthHandler{state: auth.EmptyState()}, autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -38,8 +38,8 @@ func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 	}
 	defer func() { _ = remote.Close() }()
 
-	server := newRemoteAppServer(remote, cfg)
-	if err := server.Reauthenticate(context.Background(), newHeadlessAuthInteractor()); err != nil {
+	server := newRemoteAppServerWithAuth(remote, cfg, nil, false)
+	if err := server.Reauthenticate(context.Background(), newHeadlessAuthInteractor(), false); err != nil {
 		t.Fatalf("Reauthenticate: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testi
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
-	}, apiKeyMemoryAuthHandlerWithoutTimestamp("old-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandlerWithoutTimestamp("old-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -92,8 +92,8 @@ func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testi
 		},
 	}
 
-	server := newRemoteAppServer(remote, cfg)
-	if err := server.Reauthenticate(context.Background(), interactor); err != nil {
+	server := newRemoteAppServerWithAuth(remote, cfg, nil, false)
+	if err := server.Reauthenticate(context.Background(), interactor, true); err != nil {
 		t.Fatalf("Reauthenticate: %v", err)
 	}
 	if pickerCalls != 1 {
@@ -115,7 +115,7 @@ func TestRemoteAppServerEnsureAuthReadySkipsPickerWhenServerAuthAlreadyReady(t *
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
-	}, apiKeyMemoryAuthHandlerWithoutTimestamp("ready-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandlerWithoutTimestamp("ready-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -137,8 +137,8 @@ func TestRemoteAppServerEnsureAuthReadySkipsPickerWhenServerAuthAlreadyReady(t *
 		},
 	}
 
-	server := newRemoteAppServer(remote, cfg)
-	if err := server.EnsureAuthReady(context.Background(), interactor); err != nil {
+	server := newRemoteAppServerWithAuth(remote, cfg, nil, false)
+	if err := server.EnsureAuthReady(context.Background(), interactor, true); err != nil {
 		t.Fatalf("EnsureAuthReady: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestRemoteLoginTransitionWaitsForAuthChoiceWhenServerAuthAlreadyReady(t *te
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
-	}, apiKeyMemoryAuthHandlerWithoutTimestamp("old-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandlerWithoutTimestamp("old-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestRemoteLoginTransitionWaitsForAuthChoiceWhenServerAuthAlreadyReady(t *te
 			return authMethodPickerResult{Choice: authMethodChoiceEnvAPIKey}, nil
 		},
 	}
-	server := newRemoteAppServer(remote, cfg)
+	server := newRemoteAppServerWithAuth(remote, cfg, nil, false)
 	done := make(chan error, 1)
 	go func() {
 		_, err := resolveSessionAction(context.Background(), server, interactor, "", "", UITransition{Action: UIActionLogout})
@@ -229,10 +229,10 @@ func TestRemoteLoginTransitionWaitsForAuthChoiceWhenServerAuthAlreadyReady(t *te
 
 func TestRemoteAppServerCloseUsesOwnedCloser(t *testing.T) {
 	called := false
-	server := newRemoteAppServerWithClose(&client.Remote{}, config.App{}, func() error {
+	server := newRemoteAppServerWithAuth(&client.Remote{}, config.App{}, func() error {
 		called = true
 		return nil
-	})
+	}, true)
 	if !server.OwnsServer() {
 		t.Fatal("expected launched remote server to be owned")
 	}
@@ -254,7 +254,7 @@ func TestRemoteAppServerCloseFnDoesNotImplyOwnership(t *testing.T) {
 }
 
 func TestRemoteAppServerDiscoveredRemoteIsNotOwned(t *testing.T) {
-	server := newRemoteAppServer(&client.Remote{}, config.App{})
+	server := newRemoteAppServerWithAuth(&client.Remote{}, config.App{}, nil, false)
 	if server.OwnsServer() {
 		t.Fatal("expected configured remote server to not be owned")
 	}

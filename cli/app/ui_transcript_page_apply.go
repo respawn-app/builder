@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	appstatus "builder/cli/app/internal/status"
 	"builder/cli/tui"
 	"builder/shared/clientui"
 
@@ -27,7 +28,8 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
 	}
-	previousWindowTitle := m.windowTitle()
+	previousWindowTitle := sessionTitle(m.sessionName)
+
 	if transcriptPageSessionChanged(m.sessionID, view.SessionID) {
 		m.detailTranscript.reset()
 		m.transcriptRevision = 0
@@ -44,8 +46,8 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 		m.transcriptRevision = view.Transcript.Revision
 	}
 	titleCmd := tea.Cmd(nil)
-	if previousWindowTitle != m.windowTitle() {
-		titleCmd = tea.SetWindowTitle(m.windowTitle())
+	if previousWindowTitle != sessionTitle(m.sessionName) {
+		titleCmd = tea.SetWindowTitle(sessionTitle(m.sessionName))
 	}
 	return sequenceCmds(titleCmd, targetCmd)
 }
@@ -75,7 +77,7 @@ func (a uiRuntimeAdapter) applyProjectedExecutionTarget(target clientui.SessionE
 		return nil
 	}
 	if workdirChanged {
-		m.statusRepository = newMemoryUIStatusRepository()
+		m.statusRepository = appstatus.NewMemoryRepository()
 		m.clearPathReferenceState()
 	}
 	if workdirChanged && m.pathReferenceSearch != nil {
@@ -84,21 +86,14 @@ func (a uiRuntimeAdapter) applyProjectedExecutionTarget(target clientui.SessionE
 	return m.statusLineGitRefreshCmd()
 }
 
-func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptPage) tea.Cmd {
-	return a.applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, page, clientui.TranscriptRecoveryCauseNone)
-}
-
-func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPageRequest, page clientui.TranscriptPage) tea.Cmd {
-	return a.applyRuntimeTranscriptPageWithRecovery(req, page, clientui.TranscriptRecoveryCauseNone)
-}
-
 func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.TranscriptPageRequest, page clientui.TranscriptPage, recoveryCause clientui.TranscriptRecoveryCause) tea.Cmd {
 	m := a.model
 	m.logTranscriptPageDiag("transcript.diag.client.apply_page_start", req, page, map[string]string{"path": "hydrate", "recovery_cause": string(recoveryCause)})
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
 	}
-	previousWindowTitle := m.windowTitle()
+	previousWindowTitle := sessionTitle(m.sessionName)
+
 	if transcriptPageSessionChanged(m.sessionID, page.SessionID) {
 		m.detailTranscript.reset()
 		m.transcriptRevision = 0
@@ -125,8 +120,8 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 			"replacement_branch":      reduction.branch,
 			"preserve_live_reasoning": strconv.FormatBool(reduction.preserveLiveReasoning),
 		})
-		if previousWindowTitle != m.windowTitle() {
-			return tea.SetWindowTitle(m.windowTitle())
+		if previousWindowTitle != sessionTitle(m.sessionName) {
+			return tea.SetWindowTitle(sessionTitle(m.sessionName))
 		}
 		return nil
 	}
@@ -152,8 +147,8 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 	} else {
 		if m.view.Mode() == tui.ModeDetail && m.detailTranscript.matchesPage(page) {
 			m.transcriptRevision = max(m.transcriptRevision, page.Revision)
-			if previousWindowTitle != m.windowTitle() {
-				return tea.SetWindowTitle(m.windowTitle())
+			if previousWindowTitle != sessionTitle(m.sessionName) {
+				return tea.SetWindowTitle(sessionTitle(m.sessionName))
 			}
 			return nil
 		}
@@ -200,8 +195,8 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		"transcript_total_after":    strconv.Itoa(m.transcriptTotalEntries),
 		"native_history_sync":       strconv.FormatBool(reduction.shouldSyncNativeHistory),
 	})
-	if previousWindowTitle != m.windowTitle() {
-		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
+	if previousWindowTitle != sessionTitle(m.sessionName) {
+		cmds = append(cmds, tea.SetWindowTitle(sessionTitle(m.sessionName)))
 	}
 	return sequenceCmds(cmds...)
 }

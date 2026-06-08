@@ -754,7 +754,7 @@ type pendingWorktreeSessionRetarget struct {
 }
 
 func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord) error {
-	return s.retargetSessionsFromWorktree(ctx, workspaceID, workspaceRoot, worktree, worktreeSessionRetargetOptions{reminder: worktreeReminderStateForMissingWorktree})
+	return s.retargetSessionsFromWorktree(ctx, workspaceID, workspaceRoot, worktree, worktreeSessionRetargetOptions{reminder: worktreeReminderStateForExitedWorktree})
 }
 
 func (s *Service) retargetActiveSessionsFromDeletedWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord, currentSessionID string) error {
@@ -767,7 +767,7 @@ func (s *Service) retargetActiveSessionsFromDeletedWorktree(ctx context.Context,
 			}
 			return s.active != nil && s.active.IsSessionRuntimeActive(sessionID)
 		},
-		reminder:        worktreeReminderStateForDeletedWorktree,
+		reminder:        worktreeReminderStateForExitedWorktree,
 		rollbackOnError: true,
 	})
 }
@@ -788,7 +788,7 @@ func (s *Service) retargetSessionsFromWorktree(ctx context.Context, workspaceID 
 	}
 	reminderFactory := options.reminder
 	if reminderFactory == nil {
-		reminderFactory = worktreeReminderStateForMissingWorktree
+		reminderFactory = worktreeReminderStateForExitedWorktree
 	}
 	pending := make([]pendingWorktreeSessionRetarget, 0, len(blockers))
 	collected := make([]error, 0)
@@ -963,14 +963,6 @@ func worktreeReminderStateForTransition(previous *syncedWorktree, previousTarget
 		WorkspaceRoot: strings.TrimSpace(nextTarget.WorkspaceRoot),
 		EffectiveCwd:  strings.TrimSpace(nextTarget.EffectiveWorkdir),
 	}, true
-}
-
-func worktreeReminderStateForMissingWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {
-	return worktreeReminderStateForExitedWorktree(worktree, nextTarget)
-}
-
-func worktreeReminderStateForDeletedWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {
-	return worktreeReminderStateForExitedWorktree(worktree, nextTarget)
 }
 
 func worktreeReminderStateForExitedWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {

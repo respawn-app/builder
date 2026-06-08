@@ -74,9 +74,11 @@ var globalProviderRegistry = mustBuildProviderRegistry(providerContracts())
 func providerContracts() []ProviderContract {
 	return []ProviderContract{
 		{
-			Provider:   ProviderAnthropic,
-			MatchModel: matchAnthropicModelFamily,
-			NewClient:  newUnsupportedProviderClientFactory(ProviderAnthropic),
+			Provider: ProviderAnthropic,
+			MatchModel: func(model string) bool {
+				return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "claude")
+			},
+			NewClient: newUnsupportedProviderClientFactory(ProviderAnthropic),
 			ProviderVariants: []ProviderVariantContract{
 				{
 					ProviderID: "anthropic",
@@ -191,7 +193,7 @@ func mustBuildProviderRegistry(contracts []ProviderContract) providerRegistry {
 		registry.modelMatchers = append(registry.modelMatchers, contract)
 
 		for _, variant := range contract.ProviderVariants {
-			normalizedID := normalizeCapabilityRegistryKey(variant.ProviderID)
+			normalizedID := strings.ToLower(strings.TrimSpace(variant.ProviderID))
 			if normalizedID == "" {
 				panic(fmt.Sprintf("provider %q has empty provider_id variant", contract.Provider))
 			}
@@ -201,7 +203,7 @@ func mustBuildProviderRegistry(contracts []ProviderContract) providerRegistry {
 			if strings.TrimSpace(variant.Capabilities.ProviderID) == "" {
 				variant.Capabilities.ProviderID = normalizedID
 			}
-			if normalizeCapabilityRegistryKey(variant.Capabilities.ProviderID) != normalizedID {
+			if strings.ToLower(strings.TrimSpace(variant.Capabilities.ProviderID)) != normalizedID {
 				panic(fmt.Sprintf("provider %q capabilities provider_id %q does not match variant key %q", contract.Provider, variant.Capabilities.ProviderID, normalizedID))
 			}
 			if _, exists := registry.providerVariantsByID[normalizedID]; exists {
@@ -211,7 +213,7 @@ func mustBuildProviderRegistry(contracts []ProviderContract) providerRegistry {
 		}
 
 		for _, modelContract := range contract.ModelContracts {
-			normalizedModel := normalizeCapabilityRegistryKey(modelContract.Model)
+			normalizedModel := strings.ToLower(strings.TrimSpace(modelContract.Model))
 			if normalizedModel == "" {
 				panic(fmt.Sprintf("provider %q has empty model contract key", contract.Provider))
 			}
@@ -301,10 +303,6 @@ func InferProviderFromModel(model string) (Provider, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: no provider contract matches model %q", ErrUnsupportedProvider, normalizedModel)
-}
-
-func matchAnthropicModelFamily(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "claude")
 }
 
 func matchOpenAIModelFamily(model string) bool {

@@ -8,12 +8,8 @@ import (
 	"builder/cli/tui"
 )
 
-func nativePendingToolEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	return tui.PendingToolEntries(entries)
-}
-
 func renderNativePendingToolSnapshot(entries []tui.TranscriptEntry, theme string, width int, spinnerFrame int) string {
-	pending := nativePendingToolEntries(entries)
+	pending := tui.PendingToolEntries(entries)
 	if len(pending) == 0 {
 		return ""
 	}

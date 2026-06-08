@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"builder/cli/app/commands"
+	appstatus "builder/cli/app/internal/status"
 	"builder/cli/tui"
 	"builder/shared/clientui"
 	"builder/shared/theme"
@@ -68,7 +69,7 @@ func newUISessionTransitionFeatureState() uiSessionTransitionFeatureState {
 func newUIStatusFeatureState() uiStatusFeatureState {
 	debug := envFlagEnabled("BUILDER_DEBUG")
 	return uiStatusFeatureState{
-		statusRepository:      newMemoryUIStatusRepository(),
+		statusRepository:      appstatus.NewMemoryRepository(),
 		clipboardImagePaster:  newSystemClipboardImagePaster(),
 		clipboardTextCopier:   newSystemClipboardTextCopier(),
 		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),

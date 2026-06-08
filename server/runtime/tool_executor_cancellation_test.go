@@ -16,8 +16,6 @@ type cancelAwareTool struct {
 	started chan struct{}
 }
 
-func (t cancelAwareTool) Name() toolspec.ID { return t.name }
-
 func (t cancelAwareTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	select {
 	case <-t.started:
@@ -32,7 +30,7 @@ func (t cancelAwareTool) Call(ctx context.Context, c tools.Call) (tools.Result, 
 func TestExecuteToolCallsPropagatesContextCancellation(t *testing.T) {
 	store := mustCreateTestSession(t)
 	started := make(chan struct{})
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(cancelAwareTool{name: toolspec.ToolExecCommand, started: started}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: cancelAwareTool{name: toolspec.ToolExecCommand, started: started}}), Config{Model: "gpt-5"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

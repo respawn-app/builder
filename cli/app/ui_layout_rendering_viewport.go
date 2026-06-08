@@ -31,7 +31,7 @@ func (l uiViewLayout) calcChatLines() int {
 	inputLines := l.inputPanelLineCount(l.effectiveWidth(), height)
 	queuedLines := l.queuedPaneLineCount()
 	pickerLines := l.model.activePickerPresentation().lineCount
-	helpLines := l.helpPaneLineCount(l.effectiveWidth(), helpPaneMaxLines(height, inputLines, queuedLines, pickerLines))
+	helpLines := len(l.renderHelpPane(l.effectiveWidth(), helpPaneMaxLines(height, inputLines, queuedLines, pickerLines), uiThemeStyles(l.model.theme)))
 	chat := height - inputLines - queuedLines - pickerLines - helpLines - 1
 	if chat < 1 {
 		return 1

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"builder/cli/app/internal/oauthadapter"
+	serverauth "builder/server/auth"
 )
 
 type CallbackListener interface {
@@ -102,21 +103,21 @@ func (r Runner) beginBrowserFlow() BeginBrowserFlowFunc {
 	if r.BeginBrowserFlow != nil {
 		return r.BeginBrowserFlow
 	}
-	return oauthadapter.BeginOpenAIBrowserFlow
+	return serverauth.BeginOpenAIBrowserFlow
 }
 
 func (r Runner) completeBrowserFlow() CompleteBrowserFlowFunc {
 	if r.CompleteBrowserFlow != nil {
 		return r.CompleteBrowserFlow
 	}
-	return oauthadapter.CompleteOpenAIBrowserFlow
+	return serverauth.CompleteOpenAIBrowserFlow
 }
 
 func (r Runner) openBrowser() OpenBrowserFunc {
 	if r.OpenBrowser != nil {
 		return r.OpenBrowser
 	}
-	return oauthadapter.OpenBrowser
+	return serverauth.OpenBrowser
 }
 
 func (r Runner) startCallbackListener() StartCallbackListenerFunc {
@@ -124,7 +125,7 @@ func (r Runner) startCallbackListener() StartCallbackListenerFunc {
 		return r.StartCallbackListener
 	}
 	return func() (CallbackListener, error) {
-		return oauthadapter.StartOAuthCallbackListener()
+		return serverauth.StartOAuthCallbackListener()
 	}
 }
 
@@ -132,7 +133,7 @@ func (r Runner) runDeviceFlow() RunDeviceFlowFunc {
 	if r.RunDeviceFlow != nil {
 		return r.RunDeviceFlow
 	}
-	return oauthadapter.RunOpenAIDeviceCodeFlow
+	return serverauth.RunOpenAIDeviceCodeFlow
 }
 
 func (r Runner) prompt() PromptFunc {

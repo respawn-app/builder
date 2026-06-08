@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ func TestSummarizeBackgroundEventDefaultDoesNotDuplicateShortLogAroundTruncation
 		t.Fatalf("did not expect full content duplicated in summary, got %q", summary.DetailText)
 	}
 	headLen, tailLen := truncationSegmentLengths(len(content), 80)
-	wantMax := headLen + tailLen + backgroundTruncationBannerLen(len(content)-headLen-tailLen)
+	wantMax := headLen + tailLen + len(fmt.Sprintf(backgroundTruncationBannerTemplate, len(content)-headLen-tailLen))
 	_, preview, ok := strings.Cut(summary.DetailText, "Output:\n")
 	if !ok {
 		t.Fatalf("expected output section in summary, got %q", summary.DetailText)

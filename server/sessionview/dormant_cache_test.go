@@ -25,7 +25,7 @@ func TestDormantTranscriptCacheReusesEntryForUnchangedRevision(t *testing.T) {
 	}
 
 	buildCalls := 0
-	cache := newDormantTranscriptCache(func(_ context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
+	cache := newDormantTranscriptCacheWithLimit(dormantTranscriptCacheMaxEntries, func(_ context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
 		buildCalls++
 		meta := store.Meta()
 		return dormantTranscriptCacheEntry{
@@ -68,7 +68,7 @@ func TestDormantTranscriptCacheInvalidatesOnRevisionAdvance(t *testing.T) {
 	}
 
 	buildCalls := 0
-	cache := newDormantTranscriptCache(func(_ context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
+	cache := newDormantTranscriptCacheWithLimit(dormantTranscriptCacheMaxEntries, func(_ context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
 		buildCalls++
 		meta := store.Meta()
 		return dormantTranscriptCacheEntry{
@@ -134,7 +134,7 @@ func TestDormantTranscriptCacheEvictsLeastRecentlyUsedEntry(t *testing.T) {
 }
 
 func TestDormantTranscriptPageCacheReturnsMutationSafeCopies(t *testing.T) {
-	cache := newDormantTranscriptPageCache()
+	cache := newDormantTranscriptPageCacheWithLimit(dormantTranscriptPageCacheMaxEntries)
 	key := dormantTranscriptPageCacheKey{
 		sessionDir:       "dir",
 		sessionID:        "session-1",
@@ -212,7 +212,7 @@ func TestServiceUsesDormantCacheForMainViewAndTailCoveredPages(t *testing.T) {
 	}
 
 	buildCalls := 0
-	cache := newDormantTranscriptCache(func(_ context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
+	cache := newDormantTranscriptCacheWithLimit(dormantTranscriptCacheMaxEntries, func(_ context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
 		buildCalls++
 		meta := store.Meta()
 		return dormantTranscriptCacheEntry{

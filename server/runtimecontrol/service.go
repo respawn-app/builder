@@ -398,7 +398,7 @@ func (s *Service) CompactContextForPreSubmit(ctx context.Context, req serverapi.
 		return err
 	}
 	memoReq := sessionOnlyMemoRequest{SessionID: strings.TrimSpace(req.SessionID)}
-	_, err := s.preSubmitCompactions.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionOnlyMemoRequest, func(ctx context.Context) (struct{}, error) {
+	_, err := s.preSubmitCompactions.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, func(a sessionOnlyMemoRequest, b sessionOnlyMemoRequest) bool { return a.SessionID == b.SessionID }, func(ctx context.Context) (struct{}, error) {
 		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return struct{}{}, err
 		}
@@ -427,7 +427,7 @@ func (s *Service) SubmitQueuedUserMessages(ctx context.Context, req serverapi.Ru
 		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
 	}
 	memoReq := sessionOnlyMemoRequest{SessionID: strings.TrimSpace(req.SessionID)}
-	return s.queuedSubmits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionOnlyMemoRequest, func(ctx context.Context) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+	return s.queuedSubmits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, func(a sessionOnlyMemoRequest, b sessionOnlyMemoRequest) bool { return a.SessionID == b.SessionID }, func(ctx context.Context) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
 		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
 		}
@@ -453,7 +453,7 @@ func (s *Service) Interrupt(ctx context.Context, req serverapi.RuntimeInterruptR
 		return err
 	}
 	memoReq := sessionOnlyMemoRequest{SessionID: strings.TrimSpace(req.SessionID)}
-	_, err := s.interrupts.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionOnlyMemoRequest, func(ctx context.Context) (struct{}, error) {
+	_, err := s.interrupts.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, func(a sessionOnlyMemoRequest, b sessionOnlyMemoRequest) bool { return a.SessionID == b.SessionID }, func(ctx context.Context) (struct{}, error) {
 		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return struct{}{}, err
 		}
@@ -544,14 +544,21 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 		if err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
-		if strings.TrimSpace(req.Actor) == string(session.GoalActorAgent) && goalBlocksAgentSet(engine.Goal()) {
-			return serverapi.RuntimeGoalShowResponse{}, errors.New(strings.TrimSpace(prompts.GoalAgentCommandDeniedPrompt))
+		if strings.TrimSpace(req.Actor) == string(session.GoalActorAgent) {
+			currentGoal := engine.Goal()
+			if goalBlocksAgentSet(currentGoal) {
+				return serverapi.RuntimeGoalShowResponse{}, goalAgentOverwriteDeniedError(*currentGoal)
+			}
 		}
 		if err := engine.RequireGoalLoopStartAllowed(); err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
 		goal, err := engine.SetGoal(trimmedObjective, session.GoalActor(req.Actor))
 		if err != nil {
+			var blocked session.GoalAgentOverwriteBlockedError
+			if errors.As(err, &blocked) {
+				return serverapi.RuntimeGoalShowResponse{}, goalAgentOverwriteDeniedError(blocked.Goal)
+			}
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
 		if err := engine.StartGoalLoop(); err != nil {
@@ -563,6 +570,10 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 
 func goalBlocksAgentSet(goal *session.GoalState) bool {
 	return goal != nil && goal.Status != session.GoalStatusComplete
+}
+
+func goalAgentOverwriteDeniedError(goal session.GoalState) error {
+	return errors.New(strings.TrimSpace(prompts.RenderGoalAgentDuplicateSetDeniedPrompt(goal.Objective, string(goal.Status))))
 }
 
 func (s *Service) PauseGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
@@ -680,10 +691,6 @@ func sameSessionBoolMemoRequest(a sessionBoolMemoRequest, b sessionBoolMemoReque
 
 func sameSessionCommandMemoRequest(a sessionCommandMemoRequest, b sessionCommandMemoRequest) bool {
 	return a.SessionID == b.SessionID && a.Command == b.Command
-}
-
-func sameSessionOnlyMemoRequest(a sessionOnlyMemoRequest, b sessionOnlyMemoRequest) bool {
-	return a.SessionID == b.SessionID
 }
 
 func sameLocalEntryMemoRequest(a localEntryMemoRequest, b localEntryMemoRequest) bool {

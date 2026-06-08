@@ -5,8 +5,7 @@ import (
 	"strings"
 
 	"builder/cli/app/internal/onboardingimportchoice"
-	"builder/cli/app/internal/onboardingimportproviders"
-	"builder/cli/app/internal/onboardingmodel"
+	"builder/server/llm"
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
@@ -70,7 +69,7 @@ type onboardingFlowState struct {
 	settings                    config.Settings
 	baselineSettings            config.Settings
 	theme                       string
-	providerCapabilities        onboardingmodel.ProviderCapabilities
+	providerCapabilities        llm.ProviderCapabilities
 	pendingAction               onboardingPendingAction
 	customThinking              bool
 	reviewerCustomModel         bool
@@ -95,13 +94,13 @@ func applyOnboardingModel(state *onboardingFlowState, value string) error {
 		return fmt.Errorf("model must not be empty")
 	}
 	state.settings.Model = model
-	onboardingmodel.ApplyDerivedModelContextBudget(&state.settings, model, state.baselineSettings.ModelContextWindow, state.baselineSettings.ContextCompactionThresholdTokens)
-	if !onboardingmodel.SupportsVerbosityModel(model) {
+	llm.ApplyDerivedModelContextBudget(&state.settings, model, state.baselineSettings.ModelContextWindow, state.baselineSettings.ContextCompactionThresholdTokens)
+	if !llm.SupportsVerbosityModel(model) {
 		state.settings.ModelVerbosity = config.ModelVerbosity("")
 	} else if strings.TrimSpace(string(state.settings.ModelVerbosity)) == "" {
 		state.settings.ModelVerbosity = config.ModelVerbosityMedium
 	}
-	if !onboardingmodel.SupportsReasoningEffortModel(model) {
+	if !llm.SupportsReasoningEffortModel(model) {
 		state.customThinking = false
 		state.settings.ThinkingLevel = ""
 	}
@@ -123,7 +122,7 @@ func syncReviewerDefaultsFromPrimary(state *onboardingFlowState) {
 }
 
 func syncReviewerThinkingToPrimary(state *onboardingFlowState) {
-	if !onboardingmodel.SupportsReasoningEffortModel(state.settings.Reviewer.Model) {
+	if !llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) {
 		state.reviewerCustomThinking = false
 		state.reviewerCustomThinkingInput = false
 		state.settings.Reviewer.ThinkingLevel = ""
@@ -152,7 +151,7 @@ func applyOnboardingThemeChoice(state *onboardingFlowState, choiceID string) {
 }
 
 func applyContextWindowChoice(state *onboardingFlowState, choiceID string) {
-	meta, ok := onboardingmodel.LookupModelMetadata(state.settings.Model)
+	meta, ok := llm.LookupModelMetadata(state.settings.Model)
 	if !ok || meta.ContextWindowTokens <= 0 {
 		return
 	}
@@ -171,7 +170,7 @@ func reviewSummaryLines(state *onboardingFlowState) []string {
 		"- Theme: `" + onboardingThemeSummary(state.settings.Theme) + "`",
 		"- Model: `" + state.settings.Model + "`",
 	}
-	if meta, ok := onboardingmodel.LookupModelMetadata(state.settings.Model); ok && meta.ContextWindowTokens > 0 {
+	if meta, ok := llm.LookupModelMetadata(state.settings.Model); ok && meta.ContextWindowTokens > 0 {
 		if state.settings.ModelContextWindow == meta.ContextWindowTokens {
 			lines = append(lines, "- Context window: `default ("+formatTokenWindow(meta.ContextWindowTokens)+")`")
 		} else {
@@ -335,10 +334,6 @@ func effectiveSkillSelection(state *onboardingFlowState) map[string]bool {
 		}
 	}
 	return selection
-}
-
-func sortedImportProviders[T any](byProvider map[onboardingImportProviderID][]T) []onboardingImportProviderID {
-	return onboardingimportproviders.SortedProviderIDs(byProvider)
 }
 
 func thinkingLevelEstimate(level string) string {

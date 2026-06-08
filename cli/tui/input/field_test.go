@@ -1,6 +1,10 @@
 package input
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/rivo/uniseg"
+)
 
 func TestFieldRenderReturnsWidthSafeLinesAndCursor(t *testing.T) {
 	field := NewField()
@@ -15,7 +19,7 @@ func TestFieldRenderReturnsWidthSafeLinesAndCursor(t *testing.T) {
 		t.Fatalf("lines = %+v, want 3 lines", result.Lines)
 	}
 	for index, line := range result.Lines {
-		if got := displayWidth(line); got != 8 {
+		if got := uniseg.StringWidth(line); got != 8 {
 			t.Fatalf("line %d width = %d, want 8: %q", index, got, line)
 		}
 	}
@@ -55,7 +59,7 @@ func TestFieldRenderFrameOffsetsCursor(t *testing.T) {
 	if len(result.Lines) != 3 {
 		t.Fatalf("framed lines = %+v, want 3", result.Lines)
 	}
-	if result.Cursor.Row != 1 || result.Cursor.Col != displayWidth("› hello") {
+	if result.Cursor.Row != 1 || result.Cursor.Col != uniseg.StringWidth("› hello") {
 		t.Fatalf("framed cursor = %+v", result.Cursor)
 	}
 }
@@ -100,7 +104,7 @@ func TestFieldRenderPlaceholderDoesNotMoveCursorPastPrompt(t *testing.T) {
 	if got := result.Lines[0]; got != "› type here " {
 		t.Fatalf("placeholder line = %q", got)
 	}
-	if result.Cursor.Col != displayWidth("› ") {
-		t.Fatalf("placeholder cursor col = %d, want %d", result.Cursor.Col, displayWidth("› "))
+	if result.Cursor.Col != uniseg.StringWidth("› ") {
+		t.Fatalf("placeholder cursor col = %d, want %d", result.Cursor.Col, uniseg.StringWidth("› "))
 	}
 }

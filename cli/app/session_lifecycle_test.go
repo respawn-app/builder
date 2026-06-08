@@ -13,13 +13,14 @@ import (
 	"builder/shared/toolspec"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestRunSessionLifecycleMissingWorkspacePrepareRuntimeSuggestsRebind(t *testing.T) {
@@ -1148,7 +1149,7 @@ func (s narrowSessionLifecycleServer) Config() config.App {
 	return s.cfg
 }
 
-func (s narrowSessionLifecycleServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
+func (s narrowSessionLifecycleServer) Reauthenticate(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	if s.reauthenticate == nil {
 		return nil
 	}

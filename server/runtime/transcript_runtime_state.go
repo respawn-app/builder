@@ -69,7 +69,7 @@ func (s *transcriptRuntimeState) SnapshotItems() []llm.ResponseItem {
 
 func (s *transcriptRuntimeState) Snapshot() ChatSnapshot {
 	if chat := s.chatProjection(); chat != nil {
-		return chat.snapshot()
+		return chat.snapshotWithMetadata().Snapshot
 	}
 	return ChatSnapshot{}
 }

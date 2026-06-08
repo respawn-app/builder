@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"builder/server/primaryrun"
@@ -99,7 +100,7 @@ func (r *RuntimeRegistry) SubscribeSessionActivityFrom(_ context.Context, req se
 	if r == nil {
 		return nil, fmt.Errorf("runtime registry is required")
 	}
-	id := normalizeRegistrySessionID(req.SessionID)
+	id := strings.TrimSpace(req.SessionID)
 	entry := r.directory.Entry(id)
 	if entry == nil || entry.sessionActivity == nil {
 		return nil, fmt.Errorf("session activity stream for %q is unavailable: %w", id, serverapi.ErrSessionActivityUnavailable)
@@ -122,7 +123,7 @@ func (r *RuntimeRegistry) SubscribePromptActivityFrom(_ context.Context, req ser
 	if r == nil {
 		return nil, fmt.Errorf("runtime registry is required")
 	}
-	id := normalizeRegistrySessionID(req.SessionID)
+	id := strings.TrimSpace(req.SessionID)
 	entry := r.directory.Entry(id)
 	if entry == nil || entry.promptActivity == nil {
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
@@ -154,7 +155,7 @@ func (r *RuntimeRegistry) BeginPendingPrompt(sessionID string, req askquestion.R
 	if r == nil {
 		return
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	entry := r.directory.Entry(id)
 	if entry == nil {
 		return
@@ -170,7 +171,7 @@ func (r *RuntimeRegistry) CompletePendingPrompt(sessionID string, requestID stri
 	if r == nil {
 		return
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	entry := r.directory.Entry(id)
 	if entry == nil {
 		return
@@ -196,7 +197,7 @@ func (r *RuntimeRegistry) AwaitPromptResponse(ctx context.Context, sessionID str
 	if r == nil {
 		return askquestion.Response{}, fmt.Errorf("runtime registry is required")
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	entry := r.directory.Entry(id)
 	if entry == nil {
 		return askquestion.Response{}, fmt.Errorf("runtime %q is unavailable", id)
@@ -210,7 +211,7 @@ func (r *RuntimeRegistry) SubmitPromptResponse(sessionID string, resp askquestio
 	if r == nil {
 		return fmt.Errorf("runtime registry is required")
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	entry := r.directory.Entry(id)
 	if entry == nil {
 		return fmt.Errorf("runtime %q is unavailable", id)
@@ -251,7 +252,7 @@ func (r *RuntimeRegistry) notifyInterestChanged(sessionID string, reason Runtime
 	if r == nil {
 		return
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return
 	}

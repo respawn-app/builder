@@ -30,7 +30,7 @@ func (r uiWindowFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		if previousWidth > 0 && previousWidth != msg.Width {
 			m.nativeStreamingController.Resize(msg.Width)
 			m.nativeStreamingWidth = msg.Width
-			m.nativeStreamingTail = m.nativeStreamingLiveTail(m.nativeStreamingController.Tail())
+			m.nativeStreamingTail = cloneNativeStreamProjectionLines(m.nativeStreamingController.Tail())
 		}
 		if m.nativeHistoryReplayed && previousWidth > 0 && previousWidth != msg.Width {
 			committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)

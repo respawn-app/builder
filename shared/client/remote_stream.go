@@ -98,7 +98,9 @@ func (c *Remote) SubscribeWorkflowProject(ctx context.Context, req serverapi.Wor
 	if err != nil {
 		return nil, err
 	}
-	return newRemoteWorkflowProjectSubscription(conn, route), nil
+	return newRemoteSubscription(conn, route, func(params protocol.WorkflowProjectEventParams) serverapi.WorkflowProjectEvent {
+		return serverapi.WorkflowProjectEvent{ProjectID: params.Event.ProjectID, WorkflowID: params.Event.WorkflowID, Resource: params.Event.Resource, Action: params.Event.Action, ChangedIDs: params.Event.ChangedIDs, OccurredAtUnixMs: params.Event.OccurredAtUnixMs}
+	}), nil
 }
 
 func (c *Remote) SubscribeWorkflow(ctx context.Context, req serverapi.WorkflowSubscribeRequest) (serverapi.WorkflowSubscription, error) {
@@ -106,7 +108,9 @@ func (c *Remote) SubscribeWorkflow(ctx context.Context, req serverapi.WorkflowSu
 	if err != nil {
 		return nil, err
 	}
-	return newRemoteWorkflowProjectSubscription(conn, route), nil
+	return newRemoteSubscription(conn, route, func(params protocol.WorkflowProjectEventParams) serverapi.WorkflowProjectEvent {
+		return serverapi.WorkflowProjectEvent{ProjectID: params.Event.ProjectID, WorkflowID: params.Event.WorkflowID, Resource: params.Event.Resource, Action: params.Event.Action, ChangedIDs: params.Event.ChangedIDs, OccurredAtUnixMs: params.Event.OccurredAtUnixMs}
+	}), nil
 }
 
 func (c *Remote) subscribeRPC(ctx context.Context, method string, requestID string, req any, sessionID string, attachSession bool) (rpcwire.Conn, rpccontract.Route, error) {
@@ -131,12 +135,6 @@ func (c *Remote) subscribeRPC(ctx context.Context, method string, requestID stri
 
 func newRemoteSubscription[Wire any, Event any](conn rpcwire.Conn, route rpccontract.Route, event func(Wire) Event) *remoteSubscription[Wire, Event] {
 	return &remoteSubscription[Wire, Event]{conn: conn, route: route, event: event}
-}
-
-func newRemoteWorkflowProjectSubscription(conn rpcwire.Conn, route rpccontract.Route) *remoteSubscription[protocol.WorkflowProjectEventParams, serverapi.WorkflowProjectEvent] {
-	return newRemoteSubscription(conn, route, func(params protocol.WorkflowProjectEventParams) serverapi.WorkflowProjectEvent {
-		return serverapi.WorkflowProjectEvent{ProjectID: params.Event.ProjectID, WorkflowID: params.Event.WorkflowID, Resource: params.Event.Resource, Action: params.Event.Action, ChangedIDs: params.Event.ChangedIDs, OccurredAtUnixMs: params.Event.OccurredAtUnixMs}
-	})
 }
 
 func mustRemoteRoute(method string) rpccontract.Route {

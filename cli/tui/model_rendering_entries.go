@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/shared/theme"
 	"builder/shared/transcript"
 	"builder/shared/uiglyphs"
 	"strings"
@@ -25,7 +26,7 @@ func (m Model) entryPrefix(role RenderIntent, symbolOverride string) string {
 	if symbol == "" {
 		return ""
 	}
-	if isToolHeadlineRole(role) && m.toolSymbolGap > 1 {
+	if role.IsToolHeadline() && m.toolSymbolGap > 1 {
 		return symbol + strings.Repeat(" ", m.toolSymbolGap)
 	}
 	return symbol + " "
@@ -104,7 +105,7 @@ func (m Model) flattenPlainEntryWithIntents(role RenderIntent, text string, inte
 
 func (m Model) flattenEntryContent(role RenderIntent, content transcriptRenderContent, renderWidth int, muteText bool, isPatchBlock bool, symbolOverride string) []string {
 	content = m.applyEntrySemanticTransformStage(content)
-	if muteText && isShellPreviewRole(role) {
+	if muteText && role.IsShellPreview() {
 		return m.flattenSingleLineShellPreview(role, content, renderWidth, symbolOverride)
 	}
 	content = m.wrapEntryContentStage(content, renderWidth)
@@ -335,7 +336,7 @@ func (m Model) decorateEntryLayoutBodyStage(role RenderIntent, lines []transcrip
 			line.Intents &^= Subdued
 			line.Intents |= ThemeForeground
 		}
-		if isToolHeadlineRole(role) {
+		if role.IsToolHeadline() {
 			if idx == 0 {
 				display = m.renderToolHeadline(display, renderWidth)
 			}
@@ -516,7 +517,7 @@ func (m Model) selectedUserTranscriptEntry() (int, bool) {
 	if !ok {
 		return -1, false
 	}
-	if roleFromEntry(m.transcriptInput.Entries[localIndex]) != TranscriptRoleUser {
+	if TranscriptRoleFromWire(TranscriptRoleToWire(m.transcriptInput.Entries[localIndex].Role)) != TranscriptRoleUser {
 		return -1, false
 	}
 	return m.selectedTranscriptEntry, true
@@ -549,9 +550,10 @@ func (m Model) renderSelectedTranscriptLine(line string) string {
 	padded := padRenderedLineToWidth(line, m.viewportWidth)
 	if !m.compactDetail {
 		palette := m.palette()
-		return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
+		return applyANSIStyleTransform(padded, ansiStyleTransform{DefaultForeground: &palette.selectionForegroundColor, DefaultBackground: &palette.selectionBackgroundColor})
 	}
-	return applySelectionBackground(padded, themeModeBackgroundColor(m.theme))
+	background := rgbColorFromHex(theme.ResolvePalette(m.theme).App.ModeBg.TrueColor)
+	return applyANSIStyleTransform(padded, ansiStyleTransform{DefaultBackground: &background, PreserveBackground: true})
 }
 
 func (m Model) renderDetailViewportLine(line string, selected bool) string {
@@ -580,7 +582,8 @@ func (m Model) renderDetailViewportLine(line string, selected bool) string {
 	if !selected {
 		return line
 	}
-	return applySelectionBackground(padRenderedLineToWidth(line, m.viewportWidth), themeModeBackgroundColor(m.theme))
+	background := rgbColorFromHex(theme.ResolvePalette(m.theme).App.ModeBg.TrueColor)
+	return applyANSIStyleTransform(padRenderedLineToWidth(line, m.viewportWidth), ansiStyleTransform{DefaultBackground: &background, PreserveBackground: true})
 }
 
 func (m Model) renderDetailSelectionSpacerLine() string {
@@ -588,7 +591,8 @@ func (m Model) renderDetailSelectionSpacerLine() string {
 		return m.renderSelectedTranscriptLine("")
 	}
 	line := m.renderSelectedDetailRail()
-	return applySelectionBackground(padRenderedLineToWidth(line, m.viewportWidth), themeModeBackgroundColor(m.theme))
+	background := rgbColorFromHex(theme.ResolvePalette(m.theme).App.ModeBg.TrueColor)
+	return applyANSIStyleTransform(padRenderedLineToWidth(line, m.viewportWidth), ansiStyleTransform{DefaultBackground: &background, PreserveBackground: true})
 }
 
 func (m Model) renderSelectedDetailRail() string {
@@ -621,7 +625,7 @@ func (m Model) renderEntryTextStage(role RenderIntent, text string, width int, t
 	}
 	if !isMarkdownRole(role) {
 		intents := m.defaultEntryStyleIntents(role, muteText)
-		if isToolHeadlineRole(role) && strings.Contains(text, "\n") {
+		if role.IsToolHeadline() && strings.Contains(text, "\n") {
 			intents &^= ThemeForeground
 		}
 		return text, intents, transcriptRenderWrapModeViewport
@@ -629,7 +633,7 @@ func (m Model) renderEntryTextStage(role RenderIntent, text string, width int, t
 	if m.md == nil {
 		return text, m.defaultEntryStyleIntents(role, muteText), transcriptRenderWrapModeViewport
 	}
-	rendered, err := m.md.render(role, text, width)
+	rendered, err := m.md.renderWithRenderer(role, text, width, "plain", m.md.getRenderer)
 	if err != nil {
 		return text, m.defaultEntryStyleIntents(role, muteText), transcriptRenderWrapModeViewport
 	}
@@ -642,7 +646,7 @@ func (m Model) wrapRenderedEntryContent(text string, width int) string {
 
 func shouldUseMutedToolForeground(role RenderIntent, toolMeta *transcript.ToolCallMeta, muteText bool) bool {
 	return muteText &&
-		isShellPreviewRole(role) &&
+		role.IsShellPreview() &&
 		toolMeta != nil &&
 		toolMeta.HasRenderHint() &&
 		toolMeta.RenderHint.Kind == transcript.ToolRenderKindPlain
@@ -678,7 +682,7 @@ func shouldDeferEntrySemanticTransform(intents StyleIntent) bool {
 }
 
 func shouldUseLowLevelMutedShellStyle(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta) bool {
-	if !isShellPreviewRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() {
+	if !role.IsShellPreview() || toolMeta == nil || !toolMeta.HasRenderHint() {
 		return false
 	}
 	hint := toolMeta.RenderHint
@@ -720,7 +724,7 @@ func (m Model) renderToolTextWithHighlight(role RenderIntent, text string, toolM
 		rendered = prefix + "\n" + rendered
 	}
 	intents := ThemeForeground | SyntaxHighlighted
-	if isShellPreviewRole(role) {
+	if role.IsShellPreview() {
 		intents |= ShellPreview
 		if muteText && shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
 			intents |= Subdued
@@ -730,7 +734,7 @@ func (m Model) renderToolTextWithHighlight(role RenderIntent, text string, toolM
 }
 
 func resolveToolRenderHint(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta) (*transcript.ToolRenderHint, bool) {
-	if !isToolHeadlineRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() {
+	if !role.IsToolHeadline() || toolMeta == nil || !toolMeta.HasRenderHint() {
 		return nil, false
 	}
 	hint := toolMeta.RenderHint
@@ -747,7 +751,7 @@ func resolveToolRenderHint(role RenderIntent, text string, toolMeta *transcript.
 }
 
 func shouldFallbackToShellPreviewHint(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta, hint *transcript.ToolRenderHint) bool {
-	if hint == nil || !hint.ResultOnly || !isShellPreviewRole(role) || toolMeta == nil || !toolMeta.UsesShellRendering() {
+	if hint == nil || !hint.ResultOnly || !role.IsShellPreview() || toolMeta == nil || !toolMeta.UsesShellRendering() {
 		return false
 	}
 	parts := strings.SplitN(text, "\n", 2)

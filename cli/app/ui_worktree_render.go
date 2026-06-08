@@ -3,10 +3,14 @@ package app
 import (
 	"strings"
 
+	"builder/cli/app/internal/worktreecreateform"
+	"builder/cli/app/internal/worktreedelete"
+	"builder/cli/app/internal/worktreeview"
 	"builder/cli/app/internal/worktreeviewport"
 	tuiinput "builder/cli/tui/input"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	sharedtheme "builder/shared/theme"
 	"builder/shared/uiglyphs"
 
 	"github.com/charmbracelet/lipgloss"
@@ -51,7 +55,7 @@ func (l uiViewLayout) renderWorktreeList(width, height int, style uiStyles) []st
 		case m.worktrees.loading:
 			content = append(content, style.meta.Render(pendingToolSpinnerFrame(m.spinnerFrame)+" Loading worktrees..."))
 		case strings.TrimSpace(m.worktrees.errorText) != "":
-			content = append(content, renderWorktreeErrorLines(m.worktrees.errorText, width, lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true), worktreeOverlayMaxErrorLines)...)
+			content = append(content, renderWorktreeErrorLines(m.worktrees.errorText, width, lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true), worktreeOverlayMaxErrorLines)...)
 		case len(m.worktrees.entries) == 0:
 			content = append(content, style.meta.Render("No worktrees."))
 		default:
@@ -125,7 +129,7 @@ func renderWorktreeEntry(item serverapi.WorktreeView, selected bool, width int, 
 		rail = worktreeOverlayRailGlyph
 		sep = worktreeOverlayRailGlyph
 	}
-	title := truncateQueuedMessageLine(worktreeDisplayName(item), max(1, width-2))
+	title := truncateQueuedMessageLine(worktreeview.DisplayName(item), max(1, width-2))
 	badges := renderWorktreeBadges(item, selected, theme)
 	line1 := worktreeOverlayComposeTitleLine(railStyle.Render(rail), title, titleStyle, badges, width, line)
 	path := metaStyle.Render(truncateQueuedMessageLine(strings.TrimSpace(item.CanonicalRoot), max(1, width-2)))
@@ -154,7 +158,7 @@ func renderWorktreeBadges(item serverapi.WorktreeView, selected bool, theme stri
 		badges = append(badges, badge("main", p.primary))
 	}
 	if item.Detached {
-		badges = append(badges, badge("detached", statusAmberColor()))
+		badges = append(badges, badge("detached", sharedtheme.DefaultPalette().Status.Warning.Adaptive()))
 	} else if branch := strings.TrimSpace(item.BranchName); branch != "" {
 		badges = append(badges, badge("branch:"+branch, p.foreground))
 	}
@@ -253,14 +257,14 @@ func (l uiViewLayout) renderWorktreeCreateDialog(width, height int, style uiStyl
 		style.brand.Render(truncateQueuedMessageLine("New worktree", width)),
 	})
 	addSection(uiWorktreeCreateFieldBranchTarget, true, l.renderWorktreeCreateTargetField(width, dialog))
-	addSection(uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef(), l.renderWorktreeCreateField(width, style, "Base ref", "Used when creating a new branch.", dialog.baseRef, dialog.focus == uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef()))
+	addSection(uiWorktreeCreateFieldBaseRef, worktreecreateform.UsesBaseRef(dialog.resolution.Kind), l.renderWorktreeCreateField(width, style, "Base ref", "Used when creating a new branch.", dialog.baseRef, dialog.focus == uiWorktreeCreateFieldBaseRef, worktreecreateform.UsesBaseRef(dialog.resolution.Kind)))
 	addSection(uiWorktreeCreateFieldActions, true, renderWorktreeCreateActionGroup(width, m.theme, dialog, dialog.focus == uiWorktreeCreateFieldActions))
 	footer := make([]string, 0, 3)
 	if dialog.submitting {
 		footer = append(footer, style.meta.Render(truncateQueuedMessageLine(pendingToolSpinnerFrame(m.spinnerFrame)+" Creating worktree...", width)))
 	}
 	if trimmed := strings.TrimSpace(dialog.errorText); trimmed != "" {
-		footer = append(footer, renderWorktreeErrorLines(trimmed, width, lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true), worktreeOverlayMaxErrorLines)...)
+		footer = append(footer, renderWorktreeErrorLines(trimmed, width, lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true), worktreeOverlayMaxErrorLines)...)
 	}
 	footer = append(footer, style.meta.Render(truncateQueuedMessageLine("Esc back | Up/Down move | Left/Right change option | Enter activate", width)))
 	if len(footer) > height {
@@ -307,7 +311,7 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 	badgeStyle := rowStyle.Foreground(p.muted).Faint(true)
 	badgeText := ""
 	switch {
-	case strings.TrimSpace(singleLineEditorValue(dialog.branchTarget)) == "":
+	case strings.TrimSpace(dialog.branchTarget.Text()) == "":
 		badgeText = ""
 	case dialog.resolving:
 		badgeText = ""
@@ -315,10 +319,10 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 		badgeStyle = rowStyle.Foreground(p.secondary).Bold(true)
 		badgeText = "✔︎ new branch"
 	case dialog.resolution.Kind == serverapi.WorktreeCreateTargetResolutionKindExistingBranch:
-		badgeStyle = rowStyle.Foreground(statusAmberColor()).Bold(true)
+		badgeStyle = rowStyle.Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Bold(true)
 		badgeText = "∴ existing branch"
 	case dialog.resolution.Kind == serverapi.WorktreeCreateTargetResolutionKindDetachedRef:
-		badgeStyle = rowStyle.Foreground(statusAmberColor()).Bold(true)
+		badgeStyle = rowStyle.Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Bold(true)
 		badgeText = "∴ detached ref"
 	}
 	lineStyle := rowStyle.Foreground(p.foreground)
@@ -361,17 +365,17 @@ func (l uiViewLayout) renderWorktreeDeleteDialog(width, height int, style uiStyl
 	m := l.model
 	dialog := m.worktrees.deleteConfirm
 	lines := []string{
-		style.brand.Render(truncateQueuedMessageLine("Delete "+worktreeDisplayName(dialog.target)+"?", width)),
+		style.brand.Render(truncateQueuedMessageLine("Delete "+worktreeview.DisplayName(dialog.target)+"?", width)),
 		"",
 	}
-	body := worktreeDeletePreviewLines(dialog)
+	body := worktreedelete.PreviewLines(dialog.target, dialog.selectedAction)
 	for _, line := range body {
 		lineStyle := style.chat
 		switch line.Kind {
 		case worktreeDeletePreviewLineKindHeader:
 			lineStyle = lineStyle.Bold(true)
 		case worktreeDeletePreviewLineKindWarning:
-			lineStyle = lineStyle.Foreground(statusRedColor()).Bold(true)
+			lineStyle = lineStyle.Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true)
 		}
 		lines = append(lines, lineStyle.Render(truncateQueuedMessageLine(line.Text, width)))
 	}
@@ -381,7 +385,7 @@ func (l uiViewLayout) renderWorktreeDeleteDialog(width, height int, style uiStyl
 	}
 	if trimmed := strings.TrimSpace(dialog.errorText); trimmed != "" {
 		lines = append(lines, "")
-		lines = append(lines, renderWorktreeErrorLines(trimmed, width, lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true), worktreeOverlayMaxErrorLines)...)
+		lines = append(lines, renderWorktreeErrorLines(trimmed, width, lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true), worktreeOverlayMaxErrorLines)...)
 	}
 	return l.renderWorktreeDialogLines(lines, width, height, style)
 }

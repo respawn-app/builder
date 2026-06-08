@@ -10,6 +10,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+
 	"github.com/google/uuid"
 )
 
@@ -31,11 +32,11 @@ type sessionDraftPersistenceServer interface {
 
 type sessionTransitionServer interface {
 	sessionLifecycleClientProvider
-	Reauthenticate(ctx context.Context, interactor authInteractor) error
+	Reauthenticate(ctx context.Context, interactor authInteractor, interactive bool) error
 }
 
 type sessionAuthReadinessServer interface {
-	EnsureAuthReady(ctx context.Context, interactor authInteractor) error
+	EnsureAuthReady(ctx context.Context, interactor authInteractor, interactive bool) error
 }
 
 type sessionWorkspaceChangeServer interface {
@@ -246,7 +247,7 @@ func resolveReadOnlySessionAction(ctx context.Context, server sessionTransitionS
 		if server == nil {
 			return resolvedSessionAction{}, errors.New("session lifecycle client is required")
 		}
-		if err := server.Reauthenticate(ctx, interactor); err != nil {
+		if err := server.Reauthenticate(ctx, interactor, true); err != nil {
 			return resolvedSessionAction{}, err
 		}
 		return resolvedSessionAction{NextSessionID: strings.TrimSpace(sessionID), ShouldContinue: true}, nil
@@ -281,7 +282,7 @@ func resolveSessionAction(ctx context.Context, server sessionTransitionServer, i
 		return resolvedSessionAction{}, err
 	}
 	if resolved.RequiresReauth {
-		if err := server.Reauthenticate(ctx, interactor); err != nil {
+		if err := server.Reauthenticate(ctx, interactor, true); err != nil {
 			return resolvedSessionAction{}, err
 		}
 	}

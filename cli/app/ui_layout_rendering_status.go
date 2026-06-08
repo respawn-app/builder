@@ -5,8 +5,8 @@ import (
 	"math"
 	"strings"
 
-	"builder/cli/app/internal/statuscollect"
-	"builder/shared/theme"
+	"builder/server/llm"
+	sharedtheme "builder/shared/theme"
 
 	bubbleprogress "github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
@@ -193,9 +193,9 @@ func statusNoticeStyle(theme string, kind uiStatusNoticeKind) lipgloss.Style {
 	case uiStatusNoticeSuccess:
 		color = palette.secondary
 	case uiStatusNoticeUpdateAvailable:
-		color = statusGreenColor()
+		color = sharedtheme.DefaultPalette().Status.Success.Adaptive()
 	case uiStatusNoticeError:
-		color = statusRedColor()
+		color = sharedtheme.DefaultPalette().Status.Error.Adaptive()
 	}
 	return lipgloss.NewStyle().Foreground(color).Bold(true)
 }
@@ -213,7 +213,7 @@ func (l uiViewLayout) statusModelLabel() string {
 }
 
 func statusModelLabelText(modelName string, thinkingLevel string, fastModeAvailable bool, fastModeEnabled bool, modelContractLocked bool, configuredModelName string) string {
-	label := statuscollect.ModelDisplayLabel(modelName, thinkingLevel)
+	label := llm.ModelDisplayLabel(modelName, thinkingLevel)
 	if fastModeAvailable && fastModeEnabled {
 		label += " fast"
 	}
@@ -253,37 +253,17 @@ func (l uiViewLayout) renderContextUsage(style uiStyles) string {
 	barProgress := bubbleprogress.New(
 		bubbleprogress.WithWidth(statusContextBarWidth),
 		bubbleprogress.WithoutPercentage(),
-		bubbleprogress.WithSolidFill(statusContextZoneHex(l.model.theme, rawPercent)),
+		bubbleprogress.WithSolidFill(statusContextZone(l.model.theme, rawPercent).TrueColor),
 		bubbleprogress.WithFillCharacters('▮', '▯'),
 	)
-	barProgress.EmptyColor = statusContextEmptyHex(l.model.theme)
+	barProgress.EmptyColor = sharedtheme.ResolvePalette(l.model.theme).Status.ContextEmpty.TrueColor
 	bar := barProgress.ViewAs(float64(barPercent) / 100.0)
 	label := style.meta.Render(fmt.Sprintf("%d%%", rawPercent))
 	return label + " " + bar
 }
 
-func statusContextZoneHex(themeName string, percent int) string {
-	return statusContextZone(themeName, percent).TrueColor
-}
-
-func statusContextEmptyHex(themeName string) string {
-	return theme.ResolvePalette(themeName).Status.ContextEmpty.TrueColor
-}
-
-func statusGreenColor() lipgloss.CompleteAdaptiveColor {
-	return theme.DefaultPalette().Status.Success.Adaptive()
-}
-
-func statusAmberColor() lipgloss.CompleteAdaptiveColor {
-	return theme.DefaultPalette().Status.Warning.Adaptive()
-}
-
-func statusRedColor() lipgloss.CompleteAdaptiveColor {
-	return theme.DefaultPalette().Status.Error.Adaptive()
-}
-
-func statusContextZone(themeName string, percent int) theme.Color {
-	palette := theme.ResolvePalette(themeName).Status
+func statusContextZone(themeName string, percent int) sharedtheme.Color {
+	palette := sharedtheme.ResolvePalette(themeName).Status
 	if percent < 50 {
 		return palette.Success
 	}
@@ -295,41 +275,37 @@ func statusContextZone(themeName string, percent int) theme.Color {
 
 const statusStateCircleGlyph = "●"
 
-func renderStatusSpinner(color lipgloss.TerminalColor, frame int) string {
-	return lipgloss.NewStyle().Foreground(color).Render(pendingToolSpinnerFrame(frame))
-}
-
 func renderStatusDot(theme string, activity uiActivity, frame int) string {
 	palette := uiPalette(theme)
 	switch activity {
 	case uiActivityRunning:
-		return renderStatusSpinner(palette.primary, frame)
+		return lipgloss.NewStyle().Foreground(palette.primary).Render(pendingToolSpinnerFrame(frame))
 	case uiActivityQuestion:
 		return lipgloss.NewStyle().Foreground(palette.primary).Render(statusStateCircleGlyph)
 	default:
-		color := statusGreenColor()
+		color := sharedtheme.DefaultPalette().Status.Success.Adaptive()
 		if activity == uiActivityError {
-			color = statusRedColor()
+			color = sharedtheme.DefaultPalette().Status.Error.Adaptive()
 		}
 		return lipgloss.NewStyle().Foreground(color).Render(statusStateCircleGlyph)
 	}
 }
 
 func renderCompactionStatus(frame int) string {
-	indicator := renderStatusSpinner(statusAmberColor(), frame)
-	keyword := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true).Render("compacting")
+	indicator := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Render(pendingToolSpinnerFrame(frame))
+	keyword := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Bold(true).Render("compacting")
 	return indicator + " " + keyword
 }
 
 func renderReviewerStatus(frame int) string {
-	indicator := renderStatusSpinner(statusGreenColor(), frame)
-	keyword := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("reviewing")
+	indicator := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Success.Adaptive()).Render(pendingToolSpinnerFrame(frame))
+	keyword := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Success.Adaptive()).Bold(true).Render("reviewing")
 	return indicator + " " + keyword
 }
 
 func renderGoalStatus(theme string, frame int) string {
 	color := uiPalette(theme).primary
-	indicator := renderStatusSpinner(color, frame)
+	indicator := lipgloss.NewStyle().Foreground(color).Render(pendingToolSpinnerFrame(frame))
 	keyword := lipgloss.NewStyle().Foreground(color).Bold(true).Render("goal")
 	return indicator + " " + keyword
 }

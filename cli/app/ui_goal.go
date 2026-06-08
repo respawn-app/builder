@@ -4,7 +4,9 @@ import (
 	"strings"
 
 	"builder/cli/app/commands"
+	"builder/cli/app/internal/submissionerror"
 	"builder/shared/clientui"
+	sharedtheme "builder/shared/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -28,7 +30,7 @@ func (c uiInputController) handleGoalCommand(mode commands.GoalMode, objective s
 		return m, m.goalRuntimeCommand(goalRuntimeCheckClear, "")
 	default:
 		errText := "Usage: /goal [show|pause|resume|clear|<objective>]"
-		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+		return m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", errText, ""), c.model.sendTransientStatusWithNoticeID(errText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 }
 
@@ -40,19 +42,15 @@ func goalRequiresClearConfirmation(goal *clientui.RuntimeGoal) bool {
 	return goalIsActive(goal) && !goal.Suspended
 }
 
-func (c uiInputController) appendGoalFeedback(text string) tea.Cmd {
-	return nil
-}
-
 func (c uiInputController) startGoalFlowCmd() tea.Cmd {
 	m := c.model
 	m.openGoalOverlay(nil, nil)
-	return tea.Batch(m.pushGoalOverlayIfNeeded(), m.goalRuntimeCommand(goalRuntimeShow, ""))
+	return tea.Batch(m.activateSurface(uiSurfaceGoal), m.goalRuntimeCommand(goalRuntimeShow, ""))
 }
 
 func (c uiInputController) stopGoalFlowCmd() tea.Cmd {
 	m := c.model
-	overlayCmd := m.popGoalOverlayIfNeeded()
+	overlayCmd := m.restoreTranscriptSurface()
 	m.closeGoalOverlay()
 	return overlayCmd
 }
@@ -68,7 +66,7 @@ func (c uiInputController) handleGoalOverlayKey(msg tea.KeyMsg) (tea.Model, tea.
 			return m, c.interruptBusyRuntime()
 		}
 		m.exitAction = UIActionExit
-		if overlayCmd := m.popGoalOverlayIfNeeded(); overlayCmd != nil {
+		if overlayCmd := m.restoreTranscriptSurface(); overlayCmd != nil {
 			m.closeGoalOverlay()
 			return m, tea.Sequence(overlayCmd, tea.Quit)
 		}
@@ -99,7 +97,7 @@ func (c uiInputController) handleGoalConfirmKey(msg tea.KeyMsg) (tea.Model, tea.
 			return m, c.interruptBusyRuntime()
 		}
 		m.exitAction = UIActionExit
-		if overlayCmd := m.popGoalOverlayIfNeeded(); overlayCmd != nil {
+		if overlayCmd := m.restoreTranscriptSurface(); overlayCmd != nil {
 			m.closeGoalOverlay()
 			return m, tea.Sequence(overlayCmd, tea.Quit)
 		}
@@ -237,12 +235,15 @@ func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
 		if goalRuntimeOperationMutates(msg.operation) {
 			m.goalRuntimePending = goalRuntimePendingState{}
 		}
-		detailErr := formatSubmissionError(msg.err)
-		if m.goal.isOpen() {
+		detailErr := submissionerror.Format(msg.err)
+		if m.goal.open {
 			m.goal.error = detailErr
 			return nil
 		}
-		return m.inputController().appendErrorFeedbackWithStatus(detailErr, m.inputController().showErrorStatus(detailErr))
+		return sequenceCmds(
+			m.appendLocalEntryWithNoticeID("error", detailErr, ""),
+			m.sendTransientStatusWithNoticeID(detailErr, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""),
+		)
 	}
 	var followUpCmd tea.Cmd
 	if goalRuntimeOperationMutates(msg.operation) {
@@ -265,7 +266,7 @@ func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
 		}
 		if goalIsActive(msg.goal) {
 			m.openGoalConfirmOverlay("replace", msg.goal, msg.objective, nil)
-			return sequenceCmds(m.pushGoalOverlayIfNeeded(), followUpCmd)
+			return sequenceCmds(m.activateSurface(uiSurfaceGoal), followUpCmd)
 		}
 		return sequenceCmds(m.goalRuntimeCommand(goalRuntimeSet, msg.objective), followUpCmd)
 	case goalRuntimeCheckClear:
@@ -274,29 +275,29 @@ func (m *uiModel) applyGoalRuntimeDone(msg goalRuntimeDoneMsg) tea.Cmd {
 		}
 		if goalRequiresClearConfirmation(msg.goal) {
 			m.openGoalConfirmOverlay("clear", msg.goal, "", nil)
-			return sequenceCmds(m.pushGoalOverlayIfNeeded(), followUpCmd)
+			return sequenceCmds(m.activateSurface(uiSurfaceGoal), followUpCmd)
 		}
 		return sequenceCmds(m.goalRuntimeCommand(goalRuntimeClear, ""), followUpCmd)
 	case goalRuntimeSet:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
 		overlayCmd := tea.Cmd(nil)
-		if m.goal.isOpen() && strings.TrimSpace(m.goal.confirmMode) != "" {
+		if m.goal.open && strings.TrimSpace(m.goal.confirmMode) != "" {
 			overlayCmd = m.inputController().stopGoalFlowCmd()
 		}
-		return sequenceCmds(overlayCmd, m.inputController().appendGoalFeedback("Goal set"), followUpCmd)
+		return sequenceCmds(overlayCmd, followUpCmd)
 	case goalRuntimePause:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
-		return sequenceCmds(m.inputController().appendGoalFeedback("Goal paused"), followUpCmd)
+		return followUpCmd
 	case goalRuntimeResume:
 		m.goal.goal = cloneRuntimeGoal(msg.goal)
-		return sequenceCmds(m.inputController().appendGoalFeedback("Goal resumed"), followUpCmd)
+		return followUpCmd
 	case goalRuntimeClear:
 		m.goal.goal = nil
 		overlayCmd := tea.Cmd(nil)
-		if m.goal.isOpen() && strings.TrimSpace(m.goal.confirmMode) != "" {
+		if m.goal.open && strings.TrimSpace(m.goal.confirmMode) != "" {
 			overlayCmd = m.inputController().stopGoalFlowCmd()
 		}
-		return sequenceCmds(overlayCmd, m.inputController().appendGoalFeedback("Goal cleared"), followUpCmd)
+		return sequenceCmds(overlayCmd, followUpCmd)
 	default:
 		return followUpCmd
 	}
@@ -323,14 +324,6 @@ func (m *uiModel) openGoalConfirmOverlay(mode string, goal *clientui.RuntimeGoal
 func (m *uiModel) closeGoalOverlay() {
 	m.goal = uiGoalOverlayState{}
 	m.restorePrimaryInputMode()
-}
-
-func (m *uiModel) pushGoalOverlayIfNeeded() tea.Cmd {
-	return m.activateSurface(uiSurfaceGoal)
-}
-
-func (m *uiModel) popGoalOverlayIfNeeded() tea.Cmd {
-	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) moveGoalScroll(delta int) {
@@ -450,7 +443,7 @@ func (l uiViewLayout) goalOverlayContentLines(width int) []string {
 	titleStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 	boldStyle := lipgloss.NewStyle().Bold(true)
 	subtleStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
-	warningStyle := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true)
+	warningStyle := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Bold(true)
 	builder := newGoalOverlayLineBuilder(m, width)
 
 	builder.appendWrapped("Goal", titleStyle)

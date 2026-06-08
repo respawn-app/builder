@@ -2,20 +2,16 @@ package app
 
 import (
 	"builder/cli/tui"
-	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/shared/clientui"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	goruntime "runtime"
 	"strings"
 	"testing"
-)
 
-func requestMessages(req llm.Request) []llm.Message {
-	return llm.MessagesFromItems(req.Items)
-}
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
 
 func TestTabQueuesAndStartsSubmission(t *testing.T) {
 	m := newProjectedStaticUIModel()
@@ -278,7 +274,7 @@ func TestAskQuestionPickerSubmitPreservesPendingFreeformDraft(t *testing.T) {
 	if testAskInput(updated) != "custom" {
 		t.Fatalf("expected pending freeform draft preserved, got %q", testAskInput(updated))
 	}
-	promptLines := updated.renderAskPromptLines()
+	promptLines := updated.askController().renderPromptLines()
 	hasDisabledDraftPreview := false
 	hasHintLine := false
 	for _, line := range promptLines {
@@ -564,7 +560,7 @@ func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	promptLines := updated.renderAskPromptLines()
+	promptLines := updated.askController().renderPromptLines()
 	optionLines := 0
 	hintLines := 0
 	for _, line := range promptLines {
@@ -591,7 +587,7 @@ func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
 	if !testAskFreeform(updated) {
 		t.Fatal("expected tab on deny selection to switch to commentary input")
 	}
-	promptLines = updated.renderAskPromptLines()
+	promptLines = updated.askController().renderPromptLines()
 	if len(promptLines) != 2 || promptLines[0].Kind != askPromptLineKindHint || promptLines[1].Kind != askPromptLineKindInput {
 		t.Fatalf("expected commentary prompt to collapse to hint+input, got %+v", promptLines)
 	}

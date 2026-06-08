@@ -12,11 +12,12 @@ import (
 	"builder/shared/transcript/toolcodec"
 	"bytes"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
-	xansi "github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
@@ -417,7 +418,7 @@ func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *t
 func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -475,7 +476,7 @@ func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t 
 func TestNativeProgramRendersBackgroundCompletionFromShellManagerWhileIdle(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}

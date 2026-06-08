@@ -220,9 +220,7 @@ func startupTestAuthLookupEnv(key string) string {
 	return ""
 }
 
-type startupNoopOnboarding struct{}
-
-func (startupNoopOnboarding) EnsureOnboardingReady(_ context.Context, req OnboardingRequest) (config.App, error) {
+var startupNoopOnboarding = OnboardingHandler(func(_ context.Context, req OnboardingRequest) (config.App, error) {
 	path, created, err := config.WriteDefaultSettingsFile()
 	if err != nil {
 		return config.App{}, err
@@ -235,7 +233,7 @@ func (startupNoopOnboarding) EnsureOnboardingReady(_ context.Context, req Onboar
 	reloaded.Source.SettingsPath = path
 	reloaded.Source.SettingsFileExists = true
 	return reloaded, nil
-}
+})
 
 func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	home := t.TempDir()
@@ -244,7 +242,7 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 
 	request := Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := startupEnvAuthHandler{}
-	onboarding := startupNoopOnboarding{}
+	onboarding := startupNoopOnboarding
 	registerStartupWorkspace(t, workspace)
 	generatedCalls := 0
 	restoreGeneratedSync := serverbootstrap.SetGeneratedSyncForTest(func(ctx context.Context, opts generated.SyncOptions) (generated.SyncResult, error) {

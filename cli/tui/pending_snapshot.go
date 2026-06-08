@@ -81,7 +81,7 @@ func (m Model) renderPendingSpinnerBlock(block ongoingBlock, entries []Transcrip
 		return ongoingBlock{}, false
 	}
 	entry := entries[block.entryIndex]
-	if roleFromEntry(entry) != TranscriptRoleToolCall {
+	if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
 		return ongoingBlock{}, false
 	}
 	lines := block.lines
@@ -132,14 +132,14 @@ func firstNonEmptyLine(lines []string) string {
 }
 
 func (m Model) shouldRenderPendingSpinner(block ongoingBlock, entries []TranscriptEntry, consumedResults map[int]struct{}, resultIndex toolResultIndex) bool {
-	if !isToolHeadlineRole(block.role) || len(block.lines) == 0 {
+	if !block.role.IsToolHeadline() || len(block.lines) == 0 {
 		return false
 	}
 	if block.entryIndex < 0 || block.entryIndex >= len(entries) {
 		return false
 	}
 	entry := entries[block.entryIndex]
-	if roleFromEntry(entry) != TranscriptRoleToolCall {
+	if TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role)) != TranscriptRoleToolCall {
 		return false
 	}
 	resultIdx := resultIndex.findMatchingToolResultIndex(entries, block.entryIndex, consumedResults)

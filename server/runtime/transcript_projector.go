@@ -72,7 +72,7 @@ func (p *TranscriptProjector) ChatSnapshot() ChatSnapshot {
 	if p == nil || p.chat == nil {
 		return ChatSnapshot{}
 	}
-	return p.chat.snapshot()
+	return p.chat.snapshotWithMetadata().Snapshot
 }
 
 func (p *TranscriptProjector) TranscriptPageSnapshot(offset, limit int) transcriptPageSnapshot {

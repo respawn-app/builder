@@ -16,7 +16,7 @@ func TestChatStoreSnapshotPreservesVisibleEntryOrdering(t *testing.T) {
 			name: "local entry ordering with developer error feedback",
 			seed: func(s *chatStore) {
 				s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})
-				s.appendLocalEntry("system", "local-between")
+				s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "system", Text: "local-between"})
 				s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "warn"})
 				s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
 			},
@@ -31,7 +31,7 @@ func TestChatStoreSnapshotPreservesVisibleEntryOrdering(t *testing.T) {
 			name: "local entries stay at insertion point",
 			seed: func(s *chatStore) {
 				s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})
-				s.appendLocalEntry("error", "mid-error")
+				s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "error", Text: "mid-error"})
 				s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "second"})
 			},
 			want: []expectedChatEntry{
@@ -45,9 +45,9 @@ func TestChatStoreSnapshotPreservesVisibleEntryOrdering(t *testing.T) {
 			seed: func(s *chatStore) {
 				s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "a"})
 				s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "b"})
-				s.appendLocalEntry("error", "before replace")
+				s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "error", Text: "before replace"})
 				s.replaceHistory(llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "after replace"}}))
-				s.appendLocalEntry("compaction_notice", "after replace notice")
+				s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "compaction_notice", Text: "after replace notice"})
 			},
 			want: []expectedChatEntry{
 				{Role: "user", Text: "a"},
@@ -86,7 +86,7 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 		t.Fatalf("expected post-compaction tail in provider history, got %+v", items[2])
 	}
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	assertChatEntries(t, snap.Entries, []expectedChatEntry{
 		{Role: "user", Text: "before-1"},
 		{Role: "assistant", Text: "before-2"},
@@ -104,7 +104,7 @@ func TestChatStoreSnapshotKeepsProjectedEntriesAcrossMultipleCompactions(t *test
 	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-2"}})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "after"})
 
-	snap := s.snapshot()
+	snap := s.snapshotWithMetadata().Snapshot
 	assertChatEntries(t, snap.Entries, []expectedChatEntry{
 		{Role: "user", Text: "before"},
 		{Role: string(transcript.EntryRoleCompactionSummary), Text: "summary-1"},
@@ -138,8 +138,8 @@ func TestChatStoreSnapshotItemsPreservesMultiToolOutputOrdering(t *testing.T) {
 	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)})
 	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"ls"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"/tmp"}`)})
-	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.recordToolCompletionWithProviderItems(tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"/tmp"}`)}, nil)
+	s.recordToolCompletionWithProviderItems(tools.Result{CallID: "call-2", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"a.txt"}`)}, nil)
 
 	items := s.snapshotItems()
 	if len(items) != 4 {
@@ -164,8 +164,8 @@ func TestChatStoreSnapshotItemsPreservesMixedMaterializedAndPendingToolOutputs(t
 	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)})
 	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"ls"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"/tmp"}`)})
-	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.recordToolCompletionWithProviderItems(tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"/tmp"}`)}, nil)
+	s.recordToolCompletionWithProviderItems(tools.Result{CallID: "call-2", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"a.txt"}`)}, nil)
 	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolExecCommand), Content: `{"output":"/tmp"}`})
 
 	items := s.snapshotItems()
@@ -221,7 +221,7 @@ func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
 		t.Fatalf("after assistant tool call committed entry count = %d, want 2", got)
 	}
 
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletionWithProviderItems(tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: json.RawMessage(`{"output":"/tmp"}`)}, nil)
 	if got := s.committedEntryCount(); got != 3 {
 		t.Fatalf("after synthesized tool result committed entry count = %d, want 3", got)
 	}
@@ -231,12 +231,12 @@ func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
 		t.Fatalf("materialized tool result should not double count, got %d want 3", got)
 	}
 
-	s.appendLocalEntry("system", "note")
+	s.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: "system", Text: "note"})
 	if got := s.committedEntryCount(); got != 4 {
 		t.Fatalf("after local entry committed entry count = %d, want 4", got)
 	}
 
-	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
+	if got := len(s.snapshotWithMetadata().Snapshot.Entries); got != s.committedEntryCount() {
 		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
 	}
 }

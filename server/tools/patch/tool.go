@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"builder/server/tools"
-	"builder/shared/toolspec"
 	patchformat "builder/shared/transcript/patchformat"
 )
 
@@ -51,10 +50,6 @@ func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error
 	return t, nil
 }
 
-func (t *Tool) Name() toolspec.ID {
-	return toolspec.ToolPatch
-}
-
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
@@ -66,13 +61,21 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 
 	doc, err := patchformat.Parse(in.Patch)
 	if err != nil {
-		return patchErrorResult(c, malformedFailure(err.Error())), nil
+		patchErr := malformedFailure(err.Error())
+		return tools.ErrorResultWith(c, errorMessage(patchErr), func(any) (json.RawMessage, error) {
+			return json.Marshal(errorPayload(patchErr))
+		}), nil
 	}
 	if len(doc.Hunks) == 0 {
-		return patchErrorResult(c, malformedFailure("No files were modified.")), nil
+		patchErr := malformedFailure("No files were modified.")
+		return tools.ErrorResultWith(c, errorMessage(patchErr), func(any) (json.RawMessage, error) {
+			return json.Marshal(errorPayload(patchErr))
+		}), nil
 	}
 	if err := t.apply(ctx, doc); err != nil {
-		return patchErrorResult(c, err), nil
+		return tools.ErrorResultWith(c, errorMessage(err), func(any) (json.RawMessage, error) {
+			return json.Marshal(errorPayload(err))
+		}), nil
 	}
 
 	body, _ := json.Marshal(map[string]any{

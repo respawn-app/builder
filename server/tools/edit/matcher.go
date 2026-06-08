@@ -56,10 +56,18 @@ func findMatches(content, old string) []rangeMatch {
 		return matches
 	}
 	strategies := []func(string, string) []rangeMatch{
-		lineTrimmedMatches,
+		func(content, old string) []rangeMatch {
+			return lineWindowMatches(content, old, func(actual, expected string) bool {
+				return strings.TrimRight(actual, " \t") == strings.TrimRight(expected, " \t")
+			})
+		},
 		blockAnchorMatches,
-		whitespaceNormalizedMatches,
-		indentFlexibleMatches,
+		func(content, old string) []rangeMatch {
+			return normalizedLineWindowMatches(content, old, normalizeWhitespace)
+		},
+		func(content, old string) []rangeMatch {
+			return normalizedLineWindowMatches(content, old, stripCommonIndent)
+		},
 		quoteNormalizedMatches,
 		escapedStringMatches,
 		trimmedBoundaryMatches,
@@ -106,12 +114,6 @@ func exactOccurrences(content, needle string, convertLineEndings bool) []rangeMa
 	return out
 }
 
-func lineTrimmedMatches(content, old string) []rangeMatch {
-	return lineWindowMatches(content, old, func(actual, expected string) bool {
-		return strings.TrimRight(actual, " \t") == strings.TrimRight(expected, " \t")
-	})
-}
-
 func blockAnchorMatches(content, old string) []rangeMatch {
 	expected := nonEmptyLines(old)
 	if len(expected) < 2 {
@@ -119,17 +121,9 @@ func blockAnchorMatches(content, old string) []rangeMatch {
 	}
 	first := strings.TrimSpace(expected[0])
 	last := strings.TrimSpace(expected[len(expected)-1])
-	return lineWindowMatches(content, old, funcWindow(len(expected), func(actual []lineSpan) bool {
+	return lineWindowMatches(content, old, func(actual []lineSpan) bool {
 		return strings.TrimSpace(actual[0].text) == first && strings.TrimSpace(actual[len(actual)-1].text) == last
-	}))
-}
-
-func whitespaceNormalizedMatches(content, old string) []rangeMatch {
-	return normalizedLineWindowMatches(content, old, normalizeWhitespace)
-}
-
-func indentFlexibleMatches(content, old string) []rangeMatch {
-	return normalizedLineWindowMatches(content, old, stripCommonIndent)
+	})
 }
 
 func normalizedLineWindowMatches(content string, old string, normalize func(string) string) []rangeMatch {
@@ -189,10 +183,10 @@ func contextAwareMatches(content, old string) []rangeMatch {
 	if len(expected) < 3 {
 		return nil
 	}
-	return lineWindowMatches(content, old, funcWindow(len(lineSpans(old)), func(actual []lineSpan) bool {
+	return lineWindowMatches(content, old, func(actual []lineSpan) bool {
 		actualLines := normalizedNonEmptyLines(sliceText(actual))
 		return stringSlicesEqual(actualLines, expected)
-	}))
+	})
 }
 
 func stringSlicesEqual(actual []string, expected []string) bool {
@@ -248,10 +242,6 @@ func lineWindowMatches(content, old string, predicate any) []rangeMatch {
 		}
 	}
 	return out
-}
-
-func funcWindow(_ int, fn func([]lineSpan) bool) func([]lineSpan) bool {
-	return fn
 }
 
 func lineSpans(text string) []lineSpan {

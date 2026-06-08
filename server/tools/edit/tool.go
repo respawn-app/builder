@@ -65,10 +65,6 @@ func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error
 	return t, nil
 }
 
-func (t *Tool) Name() toolspec.ID {
-	return toolspec.ToolEdit
-}
-
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	in, err := parseInput(c.Input)
 	if err != nil {

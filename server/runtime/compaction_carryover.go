@@ -41,12 +41,8 @@ func handoffFutureAgentMessage(text string) llm.Message {
 	return llm.Message{
 		Role:        llm.RoleDeveloper,
 		MessageType: llm.MessageTypeHandoffFutureMessage,
-		Content:     handoffFutureAgentMessageContent(trimmed),
+		Content:     prompts.FormatHandoffFutureAgentMessage(trimmed),
 	}
-}
-
-func handoffFutureAgentMessageContent(text string) string {
-	return prompts.FormatHandoffFutureAgentMessage(text)
 }
 
 func (e *Engine) postCompactionMessages(mode compactionMode, manualCarryover string, wasHeadless bool) []postCompactionMessage {

@@ -43,8 +43,6 @@ type sessionRuntimeTestTool struct {
 	name toolspec.ID
 }
 
-func (t sessionRuntimeTestTool) Name() toolspec.ID { return t.name }
-
 func (t sessionRuntimeTestTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	out, _ := json.Marshal(map[string]string{"tool": string(t.name)})
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
@@ -1739,7 +1737,7 @@ func TestSyncExecutionTargetUpdatesActiveRuntimePatchTranscriptWorkdir(t *testin
 		},
 	}}
 	var detail patchDetailCapture
-	engine, err := runtimepkg.New(fixture.store, client, tools.NewRegistry(sessionRuntimeTestTool{name: toolspec.ToolPatch}), runtimepkg.Config{
+	engine, err := runtimepkg.New(fixture.store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: sessionRuntimeTestTool{name: toolspec.ToolPatch}}), runtimepkg.Config{
 		Model:                "gpt-5",
 		TranscriptWorkingDir: "/old-worktree",
 		OnEvent: func(evt runtimepkg.Event) {
@@ -1830,7 +1828,7 @@ func TestRuntimeRebindDoesNotAdvanceTranscriptWorkdirWhenLocalRebindFails(t *tes
 		},
 	}}
 	var detail patchDetailCapture
-	engine, err := runtimepkg.New(fixture.store, client, tools.NewRegistry(sessionRuntimeTestTool{name: toolspec.ToolPatch}), runtimepkg.Config{
+	engine, err := runtimepkg.New(fixture.store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: sessionRuntimeTestTool{name: toolspec.ToolPatch}}), runtimepkg.Config{
 		Model:                "gpt-5",
 		TranscriptWorkingDir: "/old-worktree",
 		OnEvent: func(evt runtimepkg.Event) {

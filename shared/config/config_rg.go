@@ -14,7 +14,7 @@ const managedRGConfigName = "rg.conf"
 var managedRGConfigContents string
 
 func ResolveManagedRGConfigPath() (string, error) {
-	settingsPath, err := resolveSettingsFilePath()
+	settingsPath, err := resolveSettingsFilePathInRoot("")
 	if err != nil {
 		return "", err
 	}

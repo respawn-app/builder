@@ -1,6 +1,7 @@
 package app
 
 import (
+	sharedtheme "builder/shared/theme"
 	"fmt"
 	"strings"
 	"time"
@@ -62,7 +63,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	titleStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 	boldStyle := lipgloss.NewStyle().Bold(true)
 	subtleStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
-	warningStyle := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true)
+	warningStyle := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Bold(true)
 	lines := make([]string, 0, 96)
 
 	appendWrapped := func(text string, lineStyle lipgloss.Style) {
@@ -130,8 +131,8 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	}
 
 	appendSectionTitle("Context")
-	appendWrapped(statusContextRemainingSummary(snapshot.Context), boldStyle)
-	appendWrapped(statusContextCompactionSummary(snapshot.Context), lipgloss.Style{})
+	appendWrapped(fmt.Sprintf("%s (%s) left of %s", statusPercent(snapshot.Context.AvailableTokens, snapshot.Context.WindowTokens), statusTokenShort(snapshot.Context.AvailableTokens), statusTokenShort(snapshot.Context.WindowTokens)), boldStyle)
+	appendWrapped(fmt.Sprintf("Compaction at %s (%s).", statusTokenShort(snapshot.Context.ThresholdTokens), statusPercent(snapshot.Context.ThresholdTokens, snapshot.Context.WindowTokens)), lipgloss.Style{})
 	appendWrapped("auto-compaction "+statusOnOff(snapshot.Config.AutoCompaction), lipgloss.Style{})
 	appendWrapped("debug "+statusOnOff(snapshot.Config.Debug), lipgloss.Style{})
 	appendWrapped(fmt.Sprintf("%d compactions", snapshot.CompactionCount), lipgloss.Style{})
@@ -178,7 +179,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	subheaderStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 	directoryStyle := lipgloss.NewStyle().Foreground(palette.foreground)
 	treeStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
-	errorStyle := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true)
+	errorStyle := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true)
 	appendGap()
 	appendWrapped(fmt.Sprintf("%d skills", len(snapshot.Skills)), subheaderStyle)
 	if l.statusSectionLoading(uiStatusSectionEnvironment) && len(snapshot.Skills) == 0 {
@@ -209,7 +210,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 		appendWrapped("Loading AGENTS.md...", subtleStyle)
 	} else {
 		for _, path := range snapshot.AgentsPaths {
-			appendWrapped(statusAgentTokenLine(path, snapshot.AgentTokenCounts, snapshot.Workdir), lipgloss.Style{})
+			appendWrapped(fmt.Sprintf("%s (%s)", statusDisplayPath(path, snapshot.Workdir), statusTokenShort(snapshot.AgentTokenCounts[strings.TrimSpace(path)])), lipgloss.Style{})
 		}
 	}
 
@@ -225,7 +226,7 @@ func (l uiViewLayout) renderStatusUpdateLine(width int, update uiStatusUpdateInf
 		return ""
 	}
 	text := "Update: available " + strings.TrimSpace(update.LatestVersion)
-	style := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true)
+	style := lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Success.Adaptive()).Bold(true)
 	return padANSIRight(style.Render(truncateQueuedMessageLine(text, width)), width)
 }
 
@@ -271,20 +272,20 @@ func (l uiViewLayout) renderStatusSubscriptionLine(width int, window uiStatusSub
 func (l uiViewLayout) renderStatusGitSummaryLine(width int, git uiStatusGitInfo) string {
 	palette := uiPalette(l.model.theme)
 	cleanText := "clean"
-	cleanliness := lipgloss.NewStyle().Bold(true).Foreground(statusGreenColor()).Render(cleanText)
+	cleanliness := lipgloss.NewStyle().Bold(true).Foreground(sharedtheme.DefaultPalette().Status.Success.Adaptive()).Render(cleanText)
 	if git.Dirty {
 		cleanText = "dirty"
-		cleanliness = lipgloss.NewStyle().Bold(true).Foreground(statusRedColor()).Render(cleanText)
+		cleanliness = lipgloss.NewStyle().Bold(true).Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Render(cleanText)
 	}
 	aheadStyle := lipgloss.NewStyle().Foreground(palette.foreground)
 	aheadText := fmt.Sprintf("ahead %d", git.Ahead)
 	if git.Ahead > 0 {
-		aheadStyle = lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true)
+		aheadStyle = lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Success.Adaptive()).Bold(true)
 	}
 	behindStyle := lipgloss.NewStyle().Foreground(palette.foreground)
 	behindText := fmt.Sprintf("behind %d", git.Behind)
 	if git.Behind > 0 {
-		behindStyle = lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true)
+		behindStyle = lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true)
 	}
 	joinParts := func(parts ...string) string {
 		return strings.Join(parts, " | ")
@@ -317,7 +318,7 @@ func (l uiViewLayout) renderStatusModelLine(width int, summary string) string {
 	}
 	base := strings.TrimSuffix(text, " fast")
 	boldStyle := lipgloss.NewStyle().Bold(true)
-	fastStyle := lipgloss.NewStyle().Bold(true).Foreground(statusAmberColor())
+	fastStyle := lipgloss.NewStyle().Bold(true).Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive())
 	return padANSIRight(boldStyle.Render(base)+" "+fastStyle.Render("fast"), width)
 }
 
@@ -325,9 +326,9 @@ func (l uiViewLayout) statusSubscriptionBar(width int, remaining float64) string
 	bar := bubbleprogress.New(
 		bubbleprogress.WithWidth(max(4, width)),
 		bubbleprogress.WithoutPercentage(),
-		bubbleprogress.WithSolidFill(statusSubscriptionFillHex(l.model.theme, remaining)),
+		bubbleprogress.WithSolidFill(statusContextZone(l.model.theme, int(100-remaining)).TrueColor),
 		bubbleprogress.WithFillCharacters('▮', '▯'),
 	)
-	bar.EmptyColor = statusContextEmptyHex(l.model.theme)
+	bar.EmptyColor = sharedtheme.ResolvePalette(l.model.theme).Status.ContextEmpty.TrueColor
 	return bar.ViewAs(remaining / 100.0)
 }

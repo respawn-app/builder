@@ -90,7 +90,7 @@ func TestRuntimeBackedLocalEntryFallbackIsTransientUntilEcho(t *testing.T) {
 	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
 
-	_ = m.appendLocalEntry("developer_feedback", "local feedback")
+	_ = m.appendLocalEntryWithNoticeID("developer_feedback", "local feedback", "")
 	if len(m.transcriptEntries) != 1 {
 		t.Fatalf("expected optimistic local entry, got %+v", m.transcriptEntries)
 	}
@@ -105,7 +105,7 @@ func TestRuntimeBackedLocalEntryFallbackIsTransientUntilEcho(t *testing.T) {
 func TestStaticLocalEntryFallbackRemainsCommitted(t *testing.T) {
 	m := newProjectedStaticUIModel()
 
-	_ = m.appendLocalEntry("developer_feedback", "local feedback")
+	_ = m.appendLocalEntryWithNoticeID("developer_feedback", "local feedback", "")
 	if len(m.transcriptEntries) != 1 {
 		t.Fatalf("expected local entry, got %+v", m.transcriptEntries)
 	}
@@ -124,7 +124,7 @@ func TestRuntimeStatusLineHidesGoalStatusText(t *testing.T) {
 		}}
 		m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 
-		status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+		status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 		if strings.Contains(status, "goal active") || strings.Contains(status, "goal paused") || strings.Contains(status, "goal complete") {
 			t.Fatalf("did not expect status line to include goal status text for %s, got %q", goalStatus, status)
 		}
@@ -198,7 +198,7 @@ func TestSlashCommandPickerRenderDoesNotRefreshMainViewWhenCacheMissing(t *testi
 	client := newTestSessionRuntimeClient(reads, &leaseRetryRuntimeControlClient{})
 	m := newSizedProjectedClosedUIModel(client, 120, 20, WithUISessionID("session-1"))
 	m.input = "/ba"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 	clearSessionRuntimeClientMainViewCache(client)
 	reads.count.Store(0)
 

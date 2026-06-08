@@ -150,6 +150,7 @@ type TransitionGroupRecord struct {
 	SourceNodeID workflow.NodeID
 	TransitionID workflow.TransitionID
 	DisplayName  string
+	Description  string
 }
 
 type EdgeRecord struct {
@@ -442,7 +443,7 @@ func (s *Store) ListWorkflows(ctx context.Context, req ListWorkflowsRequest) (Li
 		args = append(args, like, like)
 	}
 	args = append(args, pageSize+1, offset)
-	rows, err := s.db.QueryContext(ctx, workflowStoreQueryWithClause(listWorkflowsQuery, where), args...)
+	rows, err := s.db.QueryContext(ctx, strings.Replace(strings.TrimSuffix(listWorkflowsQuery, "\n"), "{{clause}}", where, 1), args...)
 	if err != nil {
 		return ListWorkflowsResult{}, err
 	}
@@ -470,15 +471,15 @@ func (s *Store) AddNode(ctx context.Context, node NodeRecord) (int64, error) {
 	if strings.TrimSpace(string(node.WorkflowID)) == "" {
 		return 0, errors.New("workflow id is required")
 	}
-	inputFields, err := marshalJSON(node.InputFields)
+	inputFields, err := workflowjson.MarshalString(node.InputFields)
 	if err != nil {
 		return 0, err
 	}
-	joinProviders, err := marshalJSON(node.JoinInputProviders)
+	joinProviders, err := workflowjson.MarshalString(node.JoinInputProviders)
 	if err != nil {
 		return 0, err
 	}
-	outputFields, err := marshalJSON(node.OutputFields)
+	outputFields, err := workflowjson.MarshalString(node.OutputFields)
 	if err != nil {
 		return 0, err
 	}
@@ -535,15 +536,15 @@ func (s *Store) UpdateNode(ctx context.Context, node NodeRecord) (int64, error) 
 	if strings.TrimSpace(string(node.WorkflowID)) == "" {
 		return 0, errors.New("workflow id is required")
 	}
-	inputFields, err := marshalJSON(node.InputFields)
+	inputFields, err := workflowjson.MarshalString(node.InputFields)
 	if err != nil {
 		return 0, err
 	}
-	joinProviders, err := marshalJSON(node.JoinInputProviders)
+	joinProviders, err := workflowjson.MarshalString(node.JoinInputProviders)
 	if err != nil {
 		return 0, err
 	}
-	outputFields, err := marshalJSON(node.OutputFields)
+	outputFields, err := workflowjson.MarshalString(node.OutputFields)
 	if err != nil {
 		return 0, err
 	}
@@ -564,7 +565,7 @@ func (s *Store) UpdateNode(ctx context.Context, node NodeRecord) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	updated, err := tx.ExecContext(ctx, workflowStoreQuery(updateWorkflowNodeQuery),
+	updated, err := tx.ExecContext(ctx, strings.TrimSuffix(updateWorkflowNodeQuery, "\n"),
 		string(node.Key),
 		string(node.Kind),
 		strings.TrimSpace(node.DisplayName),
@@ -730,7 +731,7 @@ func (s *Store) AddTransitionGroup(ctx context.Context, group TransitionGroupRec
 		if err := ensureWorkflowNodeID(ctx, q, string(group.WorkflowID), group.SourceNodeID); err != nil {
 			return err
 		}
-		if err := q.InsertWorkflowTransitionGroup(ctx, sqlitegen.InsertWorkflowTransitionGroupParams{ID: string(group.ID), SourceNodeID: string(group.SourceNodeID), TransitionID: strings.TrimSpace(string(group.TransitionID)), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: 100}); err != nil {
+		if err := q.InsertWorkflowTransitionGroup(ctx, sqlitegen.InsertWorkflowTransitionGroupParams{ID: string(group.ID), SourceNodeID: string(group.SourceNodeID), TransitionID: strings.TrimSpace(string(group.TransitionID)), DisplayName: strings.TrimSpace(group.DisplayName), Description: strings.TrimSpace(group.Description), SortOrder: 100}); err != nil {
 			return fmt.Errorf("insert transition group: %w", err)
 		}
 		return nil
@@ -750,10 +751,11 @@ func (s *Store) UpdateTransitionGroup(ctx context.Context, group TransitionGroup
 		if err := ensureWorkflowNodeID(ctx, q, string(group.WorkflowID), group.SourceNodeID); err != nil {
 			return err
 		}
-		updated, err := tx.ExecContext(ctx, workflowStoreQuery(updateWorkflowTransitionGroupQuery),
+		updated, err := tx.ExecContext(ctx, strings.TrimSuffix(updateWorkflowTransitionGroupQuery, "\n"),
 			string(group.SourceNodeID),
 			strings.TrimSpace(string(group.TransitionID)),
 			strings.TrimSpace(group.DisplayName),
+			strings.TrimSpace(group.Description),
 			string(group.ID),
 			string(group.WorkflowID),
 		)
@@ -777,11 +779,11 @@ func (s *Store) AddEdge(ctx context.Context, edge EdgeRecord) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	inputs, err := marshalJSON(edge.InputBindings)
+	inputs, err := workflowjson.MarshalString(edge.InputBindings)
 	if err != nil {
 		return 0, err
 	}
-	requirements, err := marshalJSON(edge.OutputRequirements)
+	requirements, err := workflowjson.MarshalString(edge.OutputRequirements)
 	if err != nil {
 		return 0, err
 	}
@@ -816,11 +818,11 @@ func (s *Store) UpdateEdge(ctx context.Context, edge EdgeRecord) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	inputs, err := marshalJSON(edge.InputBindings)
+	inputs, err := workflowjson.MarshalString(edge.InputBindings)
 	if err != nil {
 		return 0, err
 	}
-	requirements, err := marshalJSON(edge.OutputRequirements)
+	requirements, err := workflowjson.MarshalString(edge.OutputRequirements)
 	if err != nil {
 		return 0, err
 	}
@@ -833,7 +835,7 @@ func (s *Store) UpdateEdge(ctx context.Context, edge EdgeRecord) (int64, error) 
 		if err := ensureWorkflowNodeID(ctx, q, string(edge.WorkflowID), edge.TargetNodeID); err != nil {
 			return err
 		}
-		updated, err := tx.ExecContext(ctx, workflowStoreQuery(updateWorkflowEdgeQuery),
+		updated, err := tx.ExecContext(ctx, strings.TrimSuffix(updateWorkflowEdgeQuery, "\n"),
 			string(edge.TransitionGroupID),
 			string(edge.Key),
 			string(edge.TargetNodeID),
@@ -972,13 +974,13 @@ func (s *Store) GetDefinition(ctx context.Context, workflowID workflow.WorkflowI
 		inputFields := []workflow.InputField{}
 		joinProviders := []workflow.JoinInputProvider{}
 		outputFields := []workflow.OutputField{}
-		if err := unmarshalJSON(node.InputFieldsJson, &inputFields); err != nil {
+		if err := workflowjson.UnmarshalString(node.InputFieldsJson, &inputFields); err != nil {
 			return workflow.Definition{}, WorkflowRecord{}, err
 		}
-		if err := unmarshalJSON(node.JoinInputProvidersJson, &joinProviders); err != nil {
+		if err := workflowjson.UnmarshalString(node.JoinInputProvidersJson, &joinProviders); err != nil {
 			return workflow.Definition{}, WorkflowRecord{}, err
 		}
-		if err := unmarshalJSON(node.OutputFieldsJson, &outputFields); err != nil {
+		if err := workflowjson.UnmarshalString(node.OutputFieldsJson, &outputFields); err != nil {
 			return workflow.Definition{}, WorkflowRecord{}, err
 		}
 		groupID := ""
@@ -992,24 +994,24 @@ func (s *Store) GetDefinition(ctx context.Context, workflowID workflow.WorkflowI
 		def.NodeGroups[index].MemberNodeIDs = groupMemberIDs[def.NodeGroups[index].ID]
 	}
 	for _, group := range groups {
-		def.TransitionGroups = append(def.TransitionGroups, workflow.TransitionGroup{WorkflowID: workflow.WorkflowID(group.WorkflowID), ID: workflow.TransitionGroupID(group.ID), SourceNodeID: workflow.NodeID(group.SourceNodeID), TransitionID: workflow.TransitionID(group.TransitionID), DisplayName: group.DisplayName})
+		def.TransitionGroups = append(def.TransitionGroups, workflow.TransitionGroup{WorkflowID: workflow.WorkflowID(group.WorkflowID), ID: workflow.TransitionGroupID(group.ID), SourceNodeID: workflow.NodeID(group.SourceNodeID), TransitionID: workflow.TransitionID(group.TransitionID), DisplayName: group.DisplayName, Description: group.Description})
 	}
 	for _, edge := range edges {
 		inputs := []workflow.InputBinding{}
 		parameters := []workflow.Parameter{}
 		requirements := []workflow.OutputRequirement{}
-		if err := unmarshalJSON(edge.ParametersJson, &parameters); err != nil {
+		if err := workflowjson.UnmarshalString(edge.ParametersJson, &parameters); err != nil {
 			return workflow.Definition{}, WorkflowRecord{}, err
 		}
-		if err := unmarshalJSON(edge.InputBindingsJson, &inputs); err != nil {
+		if err := workflowjson.UnmarshalString(edge.InputBindingsJson, &inputs); err != nil {
 			return workflow.Definition{}, WorkflowRecord{}, err
 		}
-		if err := unmarshalJSON(edge.OutputRequirementsJson, &requirements); err != nil {
+		if err := workflowjson.UnmarshalString(edge.OutputRequirementsJson, &requirements); err != nil {
 			return workflow.Definition{}, WorkflowRecord{}, err
 		}
 		def.Edges = append(def.Edges, workflow.Edge{WorkflowID: workflow.WorkflowID(edge.WorkflowID), ID: workflow.EdgeID(edge.ID), Key: workflow.ModelKey(edge.EdgeKey), TransitionGroupID: workflow.TransitionGroupID(edge.TransitionGroupID), TargetNodeID: workflow.NodeID(edge.TargetNodeID), RequiresApproval: edge.RequiresApproval != 0, ContextMode: workflow.ContextMode(edge.ContextMode), ContextSource: workflow.CanonicalContextSource(workflow.ContextSource{Kind: workflow.ContextSourceKind(edge.ContextSourceKind), NodeKey: workflow.ModelKey(edge.ContextSourceNodeKey)}), PromptTemplate: edge.PromptTemplate, Parameters: parameters, InputBindings: inputs, OutputRequirements: requirements})
 	}
-	return def, workflowRecordFromGetWorkflowRow(row), nil
+	return def, workflowRecordFromRow(workflowRecordRow{ID: row.ID, Name: row.Name, Description: row.Description, Version: row.Version, CreatedAtUnixMs: row.CreatedAtUnixMs, UpdatedAtUnixMs: row.UpdatedAtUnixMs}), nil
 }
 
 type workflowRecordRow struct {
@@ -1023,10 +1025,6 @@ type workflowRecordRow struct {
 
 func workflowRecordFromRow(row workflowRecordRow) WorkflowRecord {
 	return WorkflowRecord{ID: workflow.WorkflowID(row.ID), Name: row.Name, Description: row.Description, Version: row.Version}
-}
-
-func workflowRecordFromGetWorkflowRow(row sqlitegen.Workflow) WorkflowRecord {
-	return workflowRecordFromRow(workflowRecordRow{ID: row.ID, Name: row.Name, Description: row.Description, Version: row.Version, CreatedAtUnixMs: row.CreatedAtUnixMs, UpdatedAtUnixMs: row.UpdatedAtUnixMs})
 }
 
 func resolveWorkflowNodeGroupID(ctx context.Context, q *sqlitegen.Queries, workflowID string, groupID string, groupKey string) (string, error) {
@@ -1082,7 +1080,7 @@ func ensureWorkflowTransitionGroupID(ctx context.Context, tx *sql.Tx, workflowID
 		return errors.New("workflow transition group id is required")
 	}
 	var rowWorkflowID string
-	err := tx.QueryRowContext(ctx, workflowStoreQuery(ensureWorkflowTransitionGroupIDQuery), trimmedGroupID).Scan(&rowWorkflowID)
+	err := tx.QueryRowContext(ctx, strings.TrimSuffix(ensureWorkflowTransitionGroupIDQuery, "\n"), trimmedGroupID).Scan(&rowWorkflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("workflow transition group %q not found: %w", trimmedGroupID, sql.ErrNoRows)
@@ -1111,17 +1109,9 @@ func boolToInt64(value bool) int64 {
 	return 0
 }
 
-func marshalJSON(value any) (string, error) {
-	return workflowjson.MarshalString(value)
-}
-
 func marshalJSONArray[T any](value []T) (string, error) {
 	if value == nil {
 		value = []T{}
 	}
-	return marshalJSON(value)
-}
-
-func unmarshalJSON(raw string, target any) error {
-	return workflowjson.UnmarshalString(raw, target)
+	return workflowjson.MarshalString(value)
 }

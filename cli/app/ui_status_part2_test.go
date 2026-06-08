@@ -7,12 +7,13 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestStatusLineGitStartupRefreshCachesBranch(t *testing.T) {
@@ -28,7 +29,7 @@ func TestStatusLineGitStartupRefreshCachesBranch(t *testing.T) {
 	)
 
 	updated := drainStatusLineStartupCommands(t, m, m.Init())
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "statusline-branch") {
 		t.Fatalf("expected startup git branch in status line, got %q", status)
 	}
@@ -58,7 +59,7 @@ func TestStatusLineGitStartupUsesRuntimeWorktreeRootBranch(t *testing.T) {
 	)
 
 	updated := drainStatusLineStartupCommands(t, m, m.Init())
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "worktree-branch") {
 		t.Fatalf("expected worktree git branch in status line, got %q", status)
 	}
@@ -88,7 +89,7 @@ func TestStatusLineGitRefreshesAfterExecutionTargetChange(t *testing.T) {
 	})
 	updated := drainStatusLineStartupCommands(t, next.(*uiModel), cmd)
 
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "worktree-branch") {
 		t.Fatalf("expected refreshed worktree git branch in status line, got %q", status)
 	}

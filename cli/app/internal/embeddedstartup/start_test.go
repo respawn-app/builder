@@ -10,17 +10,6 @@ import (
 	"builder/shared/config"
 )
 
-type stubOnboardingHandler struct {
-	run func(context.Context, OnboardingRequest) (config.App, error)
-}
-
-func (h stubOnboardingHandler) EnsureOnboardingReady(ctx context.Context, req OnboardingRequest) (config.App, error) {
-	if h.run == nil {
-		return req.Config, nil
-	}
-	return h.run(ctx, req)
-}
-
 func TestBuildStartupRequestMapsOptions(t *testing.T) {
 	req := buildStartupRequest(Request{
 		WorkspaceRoot:         "/tmp/workspace",
@@ -61,7 +50,7 @@ func TestAdaptOnboardingHandlerMapsRequest(t *testing.T) {
 	reload := func() (config.App, error) {
 		return config.App{WorkspaceRoot: "/reloaded"}, nil
 	}
-	adapter := adaptOnboardingHandler(stubOnboardingHandler{run: func(ctx context.Context, req OnboardingRequest) (config.App, error) {
+	adapter := adaptOnboardingHandler(func(ctx context.Context, req OnboardingRequest) (config.App, error) {
 		if req.Config.WorkspaceRoot != "/workspace" {
 			t.Fatalf("workspace root = %q, want /workspace", req.Config.WorkspaceRoot)
 		}
@@ -76,9 +65,9 @@ func TestAdaptOnboardingHandlerMapsRequest(t *testing.T) {
 			t.Fatalf("reloaded workspace = %q, want /reloaded", reloaded.WorkspaceRoot)
 		}
 		return config.App{}, expected
-	}})
+	})
 
-	_, err := adapter.EnsureOnboardingReady(context.Background(), serverstartup.OnboardingRequest{
+	_, err := adapter(context.Background(), serverstartup.OnboardingRequest{
 		Config:       config.App{WorkspaceRoot: "/workspace"},
 		AuthManager:  mgr,
 		ReloadConfig: reload,

@@ -6,6 +6,8 @@ import (
 
 	"builder/cli/app/internal/authview"
 	"builder/cli/tui"
+	sharedtheme "builder/shared/theme"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -78,7 +80,7 @@ func newStartupPickerModel(headerMarkdown, headerFallback, theme string, notice 
 		styles:         newStartupPickerStyles(theme),
 		notice:         notice,
 	}
-	m.headerMD = newStartupMarkdownRenderer(theme)
+	m.headerMD = newStartupMarkdownRendererWithWordWrap(theme, 0)
 	return m
 }
 
@@ -132,7 +134,7 @@ func (m *startupPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *startupPickerModel) View() string {
 	var out strings.Builder
-	if banner := m.renderBanner(); banner != "" {
+	if banner := renderStartupBanner(m.banner); banner != "" {
 		out.WriteString(banner)
 		out.WriteString("\n\n")
 	}
@@ -196,10 +198,6 @@ func (m *startupPickerModel) renderHeader() string {
 		}
 	}
 	return m.styles.headerFallback.Render(m.headerFallback)
-}
-
-func (m *startupPickerModel) renderBanner() string {
-	return renderStartupBanner(m.banner)
 }
 
 func (m *startupPickerModel) renderNotice() string {
@@ -319,7 +317,7 @@ func newStartupPickerStyles(theme string) startupPickerStyles {
 	return startupPickerStyles{
 		headerFallback: lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		notice:         lipgloss.NewStyle().Foreground(palette.foreground),
-		noticeError:    lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true),
+		noticeError:    lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true),
 		row:            lipgloss.NewStyle().Foreground(palette.foreground),
 		rowSelected:    lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		marker:         lipgloss.NewStyle().Foreground(palette.muted),

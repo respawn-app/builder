@@ -17,7 +17,11 @@ func (m *uiModel) toggleTranscriptMode() tea.Cmd {
 	if m.view.Mode() == tui.ModeDetail {
 		target = tui.ModeOngoing
 	}
-	return m.transitionTranscriptMode(target, false, true)
+	return m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
+		target:           target,
+		skipDetailWarmup: false,
+		emitNativeReplay: true,
+	})
 }
 
 func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) tea.Cmd {
@@ -25,7 +29,11 @@ func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) te
 	if m.view.Mode() == tui.ModeDetail {
 		target = tui.ModeOngoing
 	}
-	return m.transitionTranscriptMode(target, false, emitNativeReplay)
+	return m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
+		target:           target,
+		skipDetailWarmup: false,
+		emitNativeReplay: emitNativeReplay,
+	})
 }
 
 type transcriptModeTransitionOptions struct {
@@ -34,14 +42,6 @@ type transcriptModeTransitionOptions struct {
 	emitNativeReplay  bool
 	suppressAltScreen bool
 	preserveSurface   bool
-}
-
-func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup bool, emitNativeReplay bool) tea.Cmd {
-	return m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
-		target:           target,
-		skipDetailWarmup: skipDetailWarmup,
-		emitNativeReplay: emitNativeReplay,
-	})
 }
 
 func (m *uiModel) transitionTranscriptModeWithOptions(options transcriptModeTransitionOptions) tea.Cmd {

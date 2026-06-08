@@ -5,6 +5,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 type runtimeTranscriptPageDecisionKind uint8
@@ -242,7 +243,7 @@ func authoritativePageCommitsLiveAssistantOngoing(state runtimeTranscriptPageSta
 		if absolute < currentStart || absolute >= currentEnd {
 			return true
 		}
-		if !transcriptEntryMatchesChatEntry(state.entries[absolute-currentStart], entry) {
+		if !transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(state.entries[absolute-currentStart]), transcriptPayloadFromClientEntry(entry)) {
 			return true
 		}
 		return false
@@ -286,7 +287,7 @@ func shouldAcceptEqualRevisionTailReplacement(state runtimeTranscriptPageState, 
 	for absolute := overlapStart; absolute < overlapEnd; absolute++ {
 		currentIndex := absolute - currentStart
 		pageIndex := absolute - pageStart
-		if !transcriptEntryMatchesChatEntry(state.entries[currentIndex], page.Entries[pageIndex]) {
+		if !transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(state.entries[currentIndex]), transcriptPayloadFromClientEntry(page.Entries[pageIndex])) {
 			hasOverlapDiff = true
 			break
 		}

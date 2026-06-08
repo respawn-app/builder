@@ -15,11 +15,9 @@ import (
 )
 
 type stubAuthInteractor struct {
-	callCount      int
-	interactive    bool
-	interactiveSet bool
-	needs          func(authInteraction) bool
-	interact       func(context.Context, authInteraction) (authflow.InteractionOutcome, error)
+	callCount int
+	needs     func(authInteraction) bool
+	interact  func(context.Context, authInteraction) (authflow.InteractionOutcome, error)
 }
 
 type storedAuthInteractor struct {
@@ -54,18 +52,11 @@ func (s *stubAuthInteractor) LookupEnv(string) string {
 	return ""
 }
 
-func (s *stubAuthInteractor) Interactive() bool {
-	if !s.interactiveSet {
-		return true
-	}
-	return s.interactive
-}
-
 func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.T) {
 	home, workspace := newRegisteredAppWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", "sk-env")
 
-	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
@@ -113,7 +104,7 @@ func TestBootstrapAppReadyEnvAuthDoesNotOpenAuthPicker(t *testing.T) {
 			return authMethodPickerResult{}, nil
 		},
 	}
-	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, interactor)
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, interactor, true)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
@@ -150,7 +141,7 @@ func TestBootstrapAppNoAuthPreferenceDoesNotOpenAuthPicker(t *testing.T) {
 		}
 		return false
 	}
-	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, OpenAIBaseURL: "http://127.0.0.1:8080/v1", OpenAIBaseURLExplicit: true}, interactor)
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, OpenAIBaseURL: "http://127.0.0.1:8080/v1", OpenAIBaseURLExplicit: true}, interactor, true)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
@@ -441,13 +432,11 @@ func TestBootstrapAppSkipAuthDoesNotPersistAuthState(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 
 	interactor := &stubAuthInteractor{
-		interactive:    false,
-		interactiveSet: true,
 		interact: func(context.Context, authInteraction) (authflow.InteractionOutcome, error) {
 			return authflow.InteractionOutcome{ProceedWithoutAuth: true}, nil
 		},
 	}
-	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, Model: "gpt-5"}, interactor)
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, Model: "gpt-5"}, interactor, false)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}

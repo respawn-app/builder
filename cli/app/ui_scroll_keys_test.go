@@ -143,13 +143,13 @@ func TestDetailModeStatusLineShowsSelectedExpansionAction(t *testing.T) {
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "line 1\nline 2"})
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Enter to expand") {
 		t.Fatalf("expected detail status line expansion hint, got %q", status)
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status = stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Enter to collapse") {
 		t.Fatalf("expected detail status line collapse hint, got %q", status)
 	}
@@ -178,14 +178,14 @@ func TestDetailModeStatusLineFallsBackWhenSelectionIsNotExpandable(t *testing.T)
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Enter to expand") {
 		t.Fatalf("expected expandable selection hint before scrolling, got %q", status)
 	}
 
 	for guard := 0; guard < 8; guard++ {
 		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
-		status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+		status = stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 		if !strings.Contains(status, "Enter to expand") && !strings.Contains(status, "Enter to collapse") {
 			break
 		}
@@ -205,14 +205,14 @@ func TestDetailModeEnterOnShortSelectedMessageDoesNotShowExpansionHintOrMutateSt
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 
 	beforeView := stripANSIAndTrimRight(m.view.View())
-	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if strings.Contains(beforeView, "▶") || strings.Contains(beforeView, "▼") || strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") {
 		t.Fatalf("did not expect expansion affordance for selected short message, view=%q status=%q", beforeView, status)
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	afterView := stripANSIAndTrimRight(m.view.View())
-	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	status = stripANSIAndTrimRight(m.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if afterView != beforeView || strings.Contains(afterView, "▶") || strings.Contains(afterView, "▼") || strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") {
 		t.Fatalf("expected enter on selected short message to be no-op with normal help, before=%q after=%q status=%q", beforeView, afterView, status)
 	}
@@ -1066,7 +1066,7 @@ func TestReviewerRunStillAllowsEditingWithoutTranscriptScroll(t *testing.T) {
 	if !locked.isReviewerBlocking() {
 		t.Fatal("expected reviewer running state")
 	}
-	if locked.isInputLocked() {
+	if locked.isInputSubmitLocked() {
 		t.Fatal("did not expect reviewer to lock input")
 	}
 

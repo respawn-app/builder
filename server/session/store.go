@@ -24,6 +24,20 @@ const (
 
 var ErrSessionNotFound = sessioncontract.ErrSessionNotFound
 
+var ErrGoalAgentOverwriteBlocked = errors.New("agent goal set cannot overwrite an active or paused goal")
+
+type GoalAgentOverwriteBlockedError struct {
+	Goal GoalState
+}
+
+func (e GoalAgentOverwriteBlockedError) Error() string {
+	return ErrGoalAgentOverwriteBlocked.Error()
+}
+
+func (e GoalAgentOverwriteBlockedError) Unwrap() error {
+	return ErrGoalAgentOverwriteBlocked
+}
+
 type Store struct {
 	mu                    sync.Mutex
 	sessionDir            string
@@ -351,6 +365,10 @@ func (s *Store) SetGoalWithEvents(objective string, actor GoalActor, extraEvents
 	now := storeTimestamp(s.options)
 	replacedGoalID := ""
 	previousGoal := cloneGoalState(s.meta.Goal)
+	if normalizedActor == GoalActorAgent && previousGoal != nil && previousGoal.Status != GoalStatusComplete {
+		s.mu.Unlock()
+		return GoalState{}, GoalAgentOverwriteBlockedError{Goal: *previousGoal}
+	}
 	if s.meta.Goal != nil {
 		replacedGoalID = strings.TrimSpace(s.meta.Goal.ID)
 	}

@@ -10,7 +10,7 @@ func normalizeReasoningEntries(entries []ReasoningEntry) []ReasoningEntry {
 	out := make([]ReasoningEntry, 0, len(entries))
 	for _, entry := range entries {
 		role := strings.TrimSpace(entry.Role)
-		summary := normalizeReasoningSummaryText(entry.Text)
+		summary := normalizeReasoningSummaryLines(textutil.SplitLinesCRLF(entry.Text))
 		if role == "" || summary == "" {
 			continue
 		}
@@ -23,12 +23,8 @@ func reasoningSummaryDeltaFromText(key, role, text string) ReasoningSummaryDelta
 	return ReasoningSummaryDelta{
 		Key:  key,
 		Role: role,
-		Text: normalizeReasoningSummaryText(text),
+		Text: normalizeReasoningSummaryLines(textutil.SplitLinesCRLF(text)),
 	}
-}
-
-func normalizeReasoningSummaryText(text string) string {
-	return normalizeReasoningSummaryLines(textutil.SplitLinesCRLF(text))
 }
 
 func normalizeReasoningSummaryLines(lines []string) string {

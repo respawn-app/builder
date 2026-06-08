@@ -8,10 +8,6 @@ import (
 	"builder/shared/toolspec"
 )
 
-func inheritReviewerDefaults(settings *Settings) {
-	inheritReviewerDefaultsWithSources(settings, nil)
-}
-
 func EffectiveReviewerSettings(settings Settings) ReviewerSettings {
 	return settings.Reviewer
 }
@@ -41,11 +37,11 @@ func ReviewerUsesIndependentProviderSelection(settings Settings) bool {
 	if strings.TrimSpace(settings.Reviewer.OpenAIBaseURL) != "" {
 		return true
 	}
-	reviewerProvider := normalizeProviderOverride(settings.Reviewer.ProviderOverride)
+	reviewerProvider := strings.ToLower(strings.TrimSpace(settings.Reviewer.ProviderOverride))
 	if reviewerProvider == "" {
 		return false
 	}
-	mainProvider := normalizeProviderOverride(settings.ProviderOverride)
+	mainProvider := strings.ToLower(strings.TrimSpace(settings.ProviderOverride))
 	if mainProvider == "" && reviewerProvider == "openai" {
 		return false
 	}
@@ -65,7 +61,7 @@ func ResolveReviewerProviderSettings(settings Settings) ReviewerProviderSettings
 }
 
 func shouldInheritMainOpenAIBaseURL(reviewerProvider string) bool {
-	switch normalizeProviderOverride(reviewerProvider) {
+	switch strings.ToLower(strings.TrimSpace(reviewerProvider)) {
 	case "", "openai":
 		return true
 	default:
@@ -73,13 +69,9 @@ func shouldInheritMainOpenAIBaseURL(reviewerProvider string) bool {
 	}
 }
 
-func hasModelCapabilitiesOverride(override ModelCapabilitiesOverride) bool {
-	return override.SupportsReasoningEffort || override.SupportsVisionInputs
-}
-
 func inheritReviewerModelCapabilities(settings *Settings, sources map[string]string) {
 	if sources == nil {
-		if !hasModelCapabilitiesOverride(settings.Reviewer.ModelCapabilities) {
+		if !settings.Reviewer.ModelCapabilities.SupportsReasoningEffort && !settings.Reviewer.ModelCapabilities.SupportsVisionInputs {
 			settings.Reviewer.ModelCapabilities = settings.ModelCapabilities
 		}
 		return
@@ -212,7 +204,7 @@ func NormalizeSettingsForPersistenceWithSources(settings Settings, sources map[s
 	}
 	effectiveSources := cloneSourceMapOrDefault(sources)
 	inheritReviewerDefaultsWithSources(&normalized, effectiveSources)
-	if err := validateSettings(normalized, effectiveSources); err != nil {
+	if err := configRegistry.validate(settingsState{Settings: normalized}, effectiveSources); err != nil {
 		return Settings{}, err
 	}
 	return normalized, nil
@@ -235,7 +227,7 @@ func cloneSourceMapOrDefault(sources map[string]string) map[string]string {
 }
 
 func ValidateSettingsWithSources(settings Settings, sources map[string]string) error {
-	return validateSettings(settings, sources)
+	return configRegistry.validate(settingsState{Settings: settings}, sources)
 }
 
 func parseEnabledToolsCSV(raw string) ([]toolspec.ID, error) {
@@ -280,7 +272,7 @@ func DisabledSkillToggles(settings Settings) map[string]bool {
 		if enabled {
 			continue
 		}
-		normalized := normalizeSkillToggleKey(name)
+		normalized := strings.ToLower(strings.Join(strings.Fields(name), " "))
 		if normalized == "" {
 			continue
 		}

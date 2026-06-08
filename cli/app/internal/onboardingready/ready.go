@@ -3,18 +3,17 @@ package onboardingready
 import (
 	"context"
 
-	"builder/cli/app/internal/serverbridge"
-	"builder/shared/auth"
+	serverauth "builder/server/auth"
+	serveronboarding "builder/server/onboarding"
+	sharedauth "builder/shared/auth"
 	"builder/shared/config"
 )
 
-type AuthManager = serverbridge.AuthManager
-type AuthState = auth.State
-type Result = serverbridge.OnboardingResult
+type AuthManager = serverauth.Manager
+type AuthState = sharedauth.State
+type Result = serveronboarding.Result
 
-type InteractiveRunner interface {
-	RunInteractiveOnboarding(ctx context.Context, cfg config.App, authState AuthState) (Result, error)
-}
+type InteractiveRunner = serveronboarding.InteractiveRunner
 
 type Request struct {
 	Config       config.App
@@ -25,7 +24,7 @@ type Request struct {
 }
 
 func Ensure(ctx context.Context, req Request) (config.App, bool, error) {
-	return serverbridge.EnsureOnboardingReady(
+	return serveronboarding.EnsureReady(
 		ctx,
 		req.Config,
 		req.AuthManager,

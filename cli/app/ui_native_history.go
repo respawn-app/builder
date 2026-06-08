@@ -20,16 +20,16 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		m.resetNativeHistoryState()
 		m.nativeHistoryReplayed = true
 		if hasPendingTransientTail || alreadyReplayed || !m.shouldEmitNativeHistory() {
-			return m.sequenceNativeStreamingScrollback(nil)
+			return sequenceCmds(nil, m.syncNativeStreamingScrollback())
 		}
-		return m.sequenceNativeStreamingScrollback(m.emitCurrentNativeScrollbackState(false))
+		return sequenceCmds(m.emitCurrentNativeScrollbackState(false), m.syncNativeStreamingScrollback())
 	}
 
 	committedCount := len(committedEntries)
 	projection := m.nativeCommittedProjection(committedEntries)
 	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > committedCount {
 		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, committedCount)
-		return m.sequenceNativeStreamingScrollback(nil)
+		return sequenceCmds(nil, m.syncNativeStreamingScrollback())
 	}
 	if !m.shouldEmitNativeHistory() && m.canFinalizeNativeStreamingCommit(committedEntries, committedCount) {
 		return nil
@@ -42,7 +42,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		if !m.shouldEmitNativeHistory() {
 			return nil
 		}
-		return m.sequenceNativeStreamingScrollback(m.emitCurrentNativeScrollbackState(false))
+		return sequenceCmds(m.emitCurrentNativeScrollbackState(false), m.syncNativeStreamingScrollback())
 	}
 	previousProjection := m.nativeRenderedProjection
 	previousBaseOffset := m.nativeRenderedBaseOffset
@@ -59,31 +59,31 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	replayPermit := m.consumeNativeHistoryReplayPermit()
 	if !ok {
 		if appendCmd, appended := m.emitNativeSlidingWindowAppend(projection, previousProjection, m.transcriptBaseOffset, previousBaseOffset); appended {
-			return m.sequenceNativeStreamingScrollback(appendCmd)
+			return sequenceCmds(appendCmd, m.syncNativeStreamingScrollback())
 		}
 		if appendCmd, appended := m.emitNativePostRewriteVisibleAppend(projection, previousProjection); appended {
-			return m.sequenceNativeStreamingScrollback(appendCmd)
+			return sequenceCmds(appendCmd, m.syncNativeStreamingScrollback())
 		}
 		if replayPermit == nativeHistoryReplayPermitContinuityRecovery {
-			return m.sequenceNativeStreamingScrollback(m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection))
+			return sequenceCmds(m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection), m.syncNativeStreamingScrollback())
 		}
 		if replayPermit == nativeHistoryReplayPermitModeRestore {
 			m.acceptNativeProjectionWithoutReplay(projection)
-			return m.sequenceNativeStreamingScrollback(nil)
+			return sequenceCmds(nil, m.syncNativeStreamingScrollback())
 		}
 		if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
 			m.acceptNativeProjectionWithoutReplay(projection)
-			return m.sequenceNativeStreamingScrollback(nil)
+			return sequenceCmds(nil, m.syncNativeStreamingScrollback())
 		}
 		m.acceptNativeProjectionWithoutReplay(projection)
-		return m.sequenceNativeStreamingScrollback(m.reportNativeProjectionDivergence(projection, previousProjection))
+		return sequenceCmds(m.reportNativeProjectionDivergence(projection, previousProjection), m.syncNativeStreamingScrollback())
 	}
 	if strings.TrimSpace(delta) == "" {
-		return m.sequenceNativeStreamingScrollback(nil)
+		return sequenceCmds(nil, m.syncNativeStreamingScrollback())
 	}
 	m.nativeRenderedProjection = projection
 	m.nativeRenderedSnapshot = projection.Render(tui.TranscriptDivider)
-	return m.sequenceNativeStreamingScrollback(m.emitNativeRenderedText(renderStyledNativeProjectionLines(projection.LinesFromBlock(previousBlockCount, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())))
+	return sequenceCmds(m.emitNativeRenderedTextWithOptions(renderStyledNativeProjectionLines(projection.LinesFromBlock(previousBlockCount, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth()), false), m.syncNativeStreamingScrollback())
 }
 
 func (m *uiModel) canFinalizeNativeStreamingCommit(committedEntries []tui.TranscriptEntry, committedCount int) bool {
@@ -172,10 +172,6 @@ func (m *uiModel) resetNativeStreamingState() {
 	m.nativeStreamingDividerFlushed = false
 }
 
-func (m *uiModel) sequenceNativeStreamingScrollback(cmd tea.Cmd) tea.Cmd {
-	return sequenceCmds(cmd, m.syncNativeStreamingScrollback())
-}
-
 func (m *uiModel) syncNativeStreamingScrollback() tea.Cmd {
 	if m == nil || !m.shouldEmitNativeHistory() {
 		return nil
@@ -193,7 +189,7 @@ func (m *uiModel) syncNativeStreamingScrollback() tea.Cmd {
 	// Stable lines are now owned by native scrollback once a flush is scheduled.
 	// Keeping them in the mutable live tail lets a final commit render the same
 	// prefix again if terminal output and runtime events interleave.
-	m.nativeStreamingTail = m.nativeStreamingLiveTail(update.tail)
+	m.nativeStreamingTail = cloneNativeStreamProjectionLines(update.tail)
 	if len(update.stable) == 0 {
 		return nil
 	}
@@ -203,7 +199,7 @@ func (m *uiModel) syncNativeStreamingScrollback() tea.Cmd {
 		m.nativeStreamingDividerFlushed = true
 	}
 	lines = append(lines, update.stable...)
-	cmd := m.emitNativeRenderedText(renderStyledNativeProjectionLines(lines, m.theme, width))
+	cmd := m.emitNativeRenderedTextWithOptions(renderStyledNativeProjectionLines(lines, m.theme, width), false)
 	if cmd != nil {
 		m.nativeStreamingStableFlushSequence = m.nativeFlushSequence
 	}
@@ -251,10 +247,10 @@ func (m *uiModel) finalizeNativeStreamingCommit(projection tui.TranscriptProject
 	var flushTail tea.Cmd
 	var postAssistant tea.Cmd
 	if strings.TrimSpace(flushTailText) != "" {
-		flushTail = m.emitNativeRenderedTextClearingBelow(flushTailText)
-		postAssistant = m.emitNativeRenderedText(postAssistantText)
+		flushTail = m.emitNativeRenderedTextWithOptions(flushTailText, true)
+		postAssistant = m.emitNativeRenderedTextWithOptions(postAssistantText, false)
 	} else {
-		postAssistant = m.emitNativeRenderedTextClearingBelow(postAssistantText)
+		postAssistant = m.emitNativeRenderedTextWithOptions(postAssistantText, true)
 	}
 	m.consumeNativeHistoryReplayPermit()
 	m.rebaseNativeProjection(projection, m.transcriptBaseOffset, committedCount)
@@ -273,10 +269,6 @@ func (m *uiModel) nativeStreamingFinalizeLines(stable []tui.TranscriptProjection
 	}
 	lines = append(lines, stable...)
 	return lines
-}
-
-func (m *uiModel) nativeStreamingLiveTail(tail []tui.TranscriptProjectionLine) []tui.TranscriptProjectionLine {
-	return cloneNativeStreamProjectionLines(tail)
 }
 
 func (m *uiModel) nativeProjectionTextForEntryRangeExcluding(projection tui.TranscriptProjection, startIndex int, endIndex int, excludedIndex int) string {
@@ -377,7 +369,7 @@ func (m *uiModel) emitEmptyNativeScrollbackSpacer(forceFull bool) tea.Cmd {
 		}
 		return nil
 	}
-	flush := m.emitNativeHistoryFlush(spacer, true)
+	flush := m.emitNativeHistoryFlushWithOptions(spacer, true, false)
 	if !forceFull {
 		return flush
 	}
@@ -397,13 +389,13 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 		return nil
 	}
 	if forceFull {
-		styled := renderStyledNativeProjection(m.nativeProjection, m.theme, m.nativeReplayRenderWidth())
+		styled := renderStyledNativeProjectionLines(m.nativeProjection.Lines(tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
 		if strings.TrimSpace(styled) == "" {
 			return nil
 		}
 		m.nativeRenderedProjection = m.nativeProjection
 		m.nativeRenderedSnapshot = rawSnapshot
-		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
+		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedTextWithOptions(styled, false))
 	}
 	rewriteRenderedHistory := m.view.Mode() == tui.ModeOngoing && !m.nativeRenderedProjection.Empty()
 	if !m.nativeRenderedProjection.Empty() {
@@ -415,7 +407,7 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 			m.nativeRenderedProjection = m.nativeProjection
 			m.nativeRenderedSnapshot = rawSnapshot
 			if strings.TrimSpace(styledDelta) != "" {
-				return m.emitNativeRenderedText(styledDelta)
+				return m.emitNativeRenderedTextWithOptions(styledDelta, false)
 			}
 		}
 		if ok && strings.TrimSpace(delta) == "" {
@@ -456,13 +448,13 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 			if strings.TrimSpace(styledDelta) == "" {
 				return nil
 			}
-			return m.emitNativeRenderedText(styledDelta)
+			return m.emitNativeRenderedTextWithOptions(styledDelta, false)
 		}
 	}
 	if rewriteRenderedHistory {
 		return nil
 	}
-	styled := renderStyledNativeProjection(m.nativeProjection, m.theme, m.nativeReplayRenderWidth())
+	styled := renderStyledNativeProjectionLines(m.nativeProjection.Lines(tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
 	if strings.TrimSpace(styled) == "" {
 		return nil
 	}
@@ -470,9 +462,9 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 	m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
 	m.nativeRenderedSnapshot = rawSnapshot
 	if forceFull {
-		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
+		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedTextWithOptions(styled, false))
 	}
-	return m.emitNativeRenderedText(styled)
+	return m.emitNativeRenderedTextWithOptions(styled, false)
 }
 
 func (m *uiModel) emitNativeSlidingWindowAppend(current tui.TranscriptProjection, rendered tui.TranscriptProjection, currentBaseOffset int, renderedBaseOffset int) (tea.Cmd, bool) {
@@ -496,7 +488,7 @@ func (m *uiModel) emitNativeSlidingWindowAppend(current tui.TranscriptProjection
 	if strings.TrimSpace(styledDelta) == "" {
 		return nil, true
 	}
-	return m.emitNativeRenderedText(styledDelta), true
+	return m.emitNativeRenderedTextWithOptions(styledDelta, false), true
 }
 
 func (m *uiModel) emitNativePostRewriteVisibleAppend(current tui.TranscriptProjection, rendered tui.TranscriptProjection) (tea.Cmd, bool) {
@@ -521,5 +513,5 @@ func (m *uiModel) emitNativePostRewriteVisibleAppend(current tui.TranscriptProje
 	if strings.TrimSpace(styledDelta) == "" {
 		return nil, true
 	}
-	return m.emitNativeRenderedText(styledDelta), true
+	return m.emitNativeRenderedTextWithOptions(styledDelta, false), true
 }

@@ -9,12 +9,13 @@ import (
 	"builder/shared/transcript"
 	"bytes"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
-	xansi "github.com/charmbracelet/x/ansi"
 	"io"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t *testing.T) {

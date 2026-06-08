@@ -1,6 +1,8 @@
 package app
 
 import (
+	appstatus "builder/cli/app/internal/status"
+	"builder/cli/app/internal/statuscollect"
 	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/server/runtime"
@@ -86,7 +88,7 @@ func withStatusWorkspaceRoot(root string) statusRequestOption {
 
 func withStatusAuthManager(manager *auth.Manager) statusRequestOption {
 	return func(req *uiStatusRequest) {
-		req.AuthCacheIdentity = statusAuthCacheIdentity(manager)
+		req.AuthCacheIdentity = statuscollect.AuthCacheIdentity(manager)
 	}
 }
 
@@ -155,7 +157,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.status.isOpen() {
+	if !updated.status.open {
 		t.Fatal("expected /status to open the status overlay")
 	}
 	if updated.surface() != uiSurfaceStatus {
@@ -196,7 +198,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.status.isOpen() {
+	if updated.status.open {
 		t.Fatal("expected esc to close the status overlay")
 	}
 	if updated.surface() == uiSurfaceStatus {
@@ -408,7 +410,7 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.status.isOpen() {
+	if !updated.status.open {
 		t.Fatal("expected /status to open immediately before prompt-history persistence completes")
 	}
 	if got := updated.promptHistory[len(updated.promptHistory)-1]; got != "/status" {
@@ -451,13 +453,13 @@ func TestStatusGroupSkillsByDirectoryKeepsBrokenSkillUnderSkillsRoot(t *testing.
 }
 
 func TestStatusSkillLineMarksGeneratedAndShadowed(t *testing.T) {
-	line := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	line := stripANSIAndTrimRight(statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
 		Path:       "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md",
 		Loaded:     true,
 		SourceKind: "generated",
 		Shadowed:   true,
-	}, nil))
+	}, nil, lipgloss.Style{}))
 	for _, want := range []string{"skill-creator", "generated", "shadowed"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("expected status skill line to contain %q, got %q", want, line)
@@ -586,7 +588,7 @@ func TestStatusEnvironmentWarnsWhenRecoveredGeneratedFilesExist(t *testing.T) {
 }
 
 func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	managerA := auth.NewManager(auth.NewMemoryStore(auth.State{
 		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a", AccountID: "acct-a", Email: "a@example.com"}},
 	}), nil, time.Now)
@@ -597,7 +599,7 @@ func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
 	reqB := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"), withStatusAuthManager(managerB))
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
 
-	repo.StoreAuth(statusAuthCacheKey(reqA), uiStatusAuthStageResult{
+	repo.StoreAuth(appstatus.AuthCacheKey(reqA), uiStatusAuthStageResult{
 		Auth:         uiStatusAuthInfo{Summary: "a@example.com"},
 		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Pro subscription"},
 	}, time.Now())
@@ -616,7 +618,7 @@ func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
 }
 
 func TestStatusRepositorySeparatesOpaqueOAuthCacheByTokenFingerprint(t *testing.T) {
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	managerA := auth.NewManager(auth.NewMemoryStore(auth.State{
 		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a"}},
 	}), nil, time.Now)
@@ -627,7 +629,7 @@ func TestStatusRepositorySeparatesOpaqueOAuthCacheByTokenFingerprint(t *testing.
 	reqB := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"), withStatusAuthManager(managerB))
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
 
-	repo.StoreAuth(statusAuthCacheKey(reqA), uiStatusAuthStageResult{
+	repo.StoreAuth(appstatus.AuthCacheKey(reqA), uiStatusAuthStageResult{
 		Auth:         uiStatusAuthInfo{Summary: "opaque-a"},
 		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Pro subscription"},
 	}, time.Now())
@@ -646,11 +648,11 @@ func TestStatusRepositorySeparatesOpaqueOAuthCacheByTokenFingerprint(t *testing.
 }
 
 func TestStatusRepositoryDoesNotSeedPathBackedAuthCache(t *testing.T) {
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	req := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"))
 	req.AuthCacheIdentity = "auth:path:/tmp/builder-auth.json"
 	req.AuthCacheUnseedable = true
-	req.CacheKeys.Auth = statusAuthCacheKey(req)
+	req.CacheKeys.Auth = appstatus.AuthCacheKey(req)
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
 
 	repo.StoreAuth(req.CacheKeys.Auth, uiStatusAuthStageResult{
@@ -688,7 +690,7 @@ func TestStatusRepositoryStoresAuthUnderCapturedIdentityKey(t *testing.T) {
 	manager := auth.NewManager(store, nil, time.Now)
 	req := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"), withStatusAuthManager(manager))
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
-	cacheKey := statusAuthCacheKey(req)
+	cacheKey := appstatus.AuthCacheKey(req)
 
 	if err := store.Save(context.Background(), auth.State{
 		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-b", AccountID: "acct-b", Email: "b@example.com"}},
@@ -696,15 +698,15 @@ func TestStatusRepositoryStoresAuthUnderCapturedIdentityKey(t *testing.T) {
 		t.Fatalf("switch auth identity: %v", err)
 	}
 
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	repo.StoreAuth(cacheKey, uiStatusAuthStageResult{
 		Auth:         uiStatusAuthInfo{Summary: "a@example.com"},
 		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Pro subscription"},
 	}, time.Now())
 
 	reqB := req
-	reqB.AuthCacheIdentity = statusAuthCacheIdentity(manager)
-	reqB.CacheKeys.Auth = statusAuthCacheKey(reqB)
+	reqB.AuthCacheIdentity = statuscollect.AuthCacheIdentity(manager)
+	reqB.CacheKeys.Auth = appstatus.AuthCacheKey(reqB)
 	seedB := repo.SeedSnapshot(reqB, base, time.Now())
 	if got := seedB.Snapshot.Auth.Summary; got != "" {
 		t.Fatalf("expected no auth cached under switched identity, got %q", got)
@@ -722,7 +724,7 @@ func TestStatusRepositoryStoresAuthUnderCapturedIdentityKey(t *testing.T) {
 }
 
 func TestStatusRequestCacheKeysSeedSnapshotLockstep(t *testing.T) {
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	req := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"))
 	now := time.Now()
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
@@ -754,9 +756,9 @@ func TestStatusRequestCacheKeysSeedSnapshotLockstep(t *testing.T) {
 }
 
 func TestStatusCommandRefreshesGitWhenCachedResultIsInvisible(t *testing.T) {
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	repo.StoreGit(
-		statusGitCacheKey("/tmp/workdir"),
+		appstatus.GitCacheKey("/tmp/workdir"),
 		uiStatusGitStageResult{Git: uiStatusGitInfo{}},
 		time.Now(),
 	)
@@ -800,10 +802,10 @@ func TestStatusCommandRefreshesGitWhenCachedResultIsInvisible(t *testing.T) {
 }
 
 func TestStatusRepositoryNormalizesGitCacheKeysAcrossSlashStyles(t *testing.T) {
-	repo := newMemoryUIStatusRepository()
+	repo := appstatus.NewMemoryRepository()
 	now := time.Now()
 	repo.StoreGit(
-		statusGitCacheKey(`C:\repo`),
+		appstatus.GitCacheKey(`C:\repo`),
 		uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "main", Ahead: 1}},
 		now,
 	)
@@ -833,7 +835,7 @@ func TestCollectGitStatusSurfacesUnexpectedErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	git := collectGitStatus(ctx, workdir)
+	git := appstatus.CollectGitStatus(ctx, workdir, statusGitTimeout, sanitizedGitEnv)
 	if !git.Visible {
 		t.Fatalf("expected git section to remain visible on unexpected errors, got %+v", git)
 	}
@@ -897,7 +899,7 @@ func TestStatusCollectorPrefersWorktreeRootForGitBranch(t *testing.T) {
 }
 
 func TestCollectGitStatusHidesOutsideRepository(t *testing.T) {
-	git := collectGitStatus(context.Background(), t.TempDir())
+	git := appstatus.CollectGitStatus(context.Background(), t.TempDir(), statusGitTimeout, sanitizedGitEnv)
 	if git.Visible {
 		t.Fatalf("expected git section hidden outside repositories, got %+v", git)
 	}
@@ -918,7 +920,7 @@ func TestCollectGitStatusDetectsNestedRepositorySubdirectory(t *testing.T) {
 		t.Fatalf("mkdir nested dir: %v", err)
 	}
 
-	git := collectGitStatus(context.Background(), nestedDir)
+	git := appstatus.CollectGitStatus(context.Background(), nestedDir, statusGitTimeout, sanitizedGitEnv)
 	if !git.Visible {
 		t.Fatalf("expected git section visible for nested repository dir, got %+v", git)
 	}
@@ -946,7 +948,7 @@ func TestCollectGitStatusDetectsSymlinkedRepositorySubdirectory(t *testing.T) {
 		t.Fatalf("symlink workdir: %v", err)
 	}
 
-	git := collectGitStatus(context.Background(), linkPath)
+	git := appstatus.CollectGitStatus(context.Background(), linkPath, statusGitTimeout, sanitizedGitEnv)
 	if !git.Visible {
 		t.Fatalf("expected git section visible for symlinked repository dir, got %+v", git)
 	}
@@ -973,7 +975,7 @@ func TestCollectGitStatusIgnoresInheritedGitRepositoryEnv(t *testing.T) {
 	t.Setenv("GIT_WORK_TREE", t.TempDir())
 	t.Setenv("GIT_COMMON_DIR", t.TempDir())
 
-	git := collectGitStatus(context.Background(), nestedDir)
+	git := appstatus.CollectGitStatus(context.Background(), nestedDir, statusGitTimeout, sanitizedGitEnv)
 	if !git.Visible {
 		t.Fatalf("expected git section visible when inherited git env points elsewhere, got %+v", git)
 	}

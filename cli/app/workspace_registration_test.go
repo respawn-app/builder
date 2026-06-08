@@ -97,7 +97,7 @@ func prepareAppRuntimePlan(t *testing.T, server launchPlannerServer, req session
 	return plan, runtimePlan
 }
 
-func newAppRuntimeEngine(t *testing.T, client llm.Client, cfg runtime.Config, handlers ...tools.Handler) (*session.Store, *runtime.Engine) {
+func newAppRuntimeEngine(t *testing.T, client llm.Client, cfg runtime.Config, handlers ...tools.HandlerRegistration) (*session.Store, *runtime.Engine) {
 	t.Helper()
 	store := createAppRuntimeSession(t)
 	return store, newAppRuntimeEngineWithStore(t, store, client, cfg, handlers...)
@@ -118,7 +118,7 @@ func createAppRuntimeSessionAt(t *testing.T, root string, workspaceContainerName
 	return store
 }
 
-func newAppRuntimeEngineWithStore(t *testing.T, store *session.Store, client llm.Client, cfg runtime.Config, handlers ...tools.Handler) *runtime.Engine {
+func newAppRuntimeEngineWithStore(t *testing.T, store *session.Store, client llm.Client, cfg runtime.Config, handlers ...tools.HandlerRegistration) *runtime.Engine {
 	t.Helper()
 	if cfg.Model == "" {
 		cfg.Model = "gpt-5"

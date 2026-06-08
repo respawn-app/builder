@@ -1,7 +1,6 @@
 package runtimewire
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -75,7 +74,17 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	if opts.Client != nil {
 		client = opts.Client
 	} else {
-		client, err = newRuntimeProviderClient(mainProvider, mgr, llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds)*time.Second))
+		client, err = llm.NewProviderClient(llm.ProviderClientOptions{
+			Provider:                     llm.Provider(strings.TrimSpace(mainProvider.ProviderOverride)),
+			Model:                        mainProvider.Model,
+			Auth:                         authProviderForPolicy(mainProvider.Auth, mgr),
+			HTTPClient:                   llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second),
+			OpenAIBaseURL:                mainProvider.OpenAIBaseURL,
+			ModelVerbosity:               string(mainProvider.ModelVerbosity),
+			Store:                        mainProvider.Store,
+			ContextWindowTokens:          mainProvider.ContextWindowTokens,
+			ProviderCapabilitiesOverride: mainProvider.ProviderCapabilitiesOverride,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +92,17 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 
 	reviewerProvider := reviewerProviderRuntimeSettings(active)
 	newReviewerClient := func() (llm.Client, error) {
-		return newRuntimeProviderClient(reviewerProvider, mgr, llm.NewHTTPClient(time.Duration(active.Reviewer.TimeoutSeconds)*time.Second))
+		return llm.NewProviderClient(llm.ProviderClientOptions{
+			Provider:                     llm.Provider(strings.TrimSpace(reviewerProvider.ProviderOverride)),
+			Model:                        reviewerProvider.Model,
+			Auth:                         authProviderForPolicy(reviewerProvider.Auth, mgr),
+			HTTPClient:                   llm.NewHTTPClient(time.Duration(active.Reviewer.TimeoutSeconds) * time.Second),
+			OpenAIBaseURL:                reviewerProvider.OpenAIBaseURL,
+			ModelVerbosity:               string(reviewerProvider.ModelVerbosity),
+			Store:                        reviewerProvider.Store,
+			ContextWindowTokens:          reviewerProvider.ContextWindowTokens,
+			ProviderCapabilitiesOverride: reviewerProvider.ProviderCapabilitiesOverride,
+		})
 	}
 
 	var reviewerClient llm.Client
@@ -246,20 +265,6 @@ func providerCapabilitiesOverridePtr(override config.ProviderCapabilitiesOverrid
 		return nil
 	}
 	return &caps
-}
-
-func newRuntimeProviderClient(settings providerRuntimeSettings, mgr *auth.Manager, httpClient *http.Client) (llm.Client, error) {
-	return llm.NewProviderClient(llm.ProviderClientOptions{
-		Provider:                     llm.Provider(strings.TrimSpace(settings.ProviderOverride)),
-		Model:                        settings.Model,
-		Auth:                         authProviderForPolicy(settings.Auth, mgr),
-		HTTPClient:                   httpClient,
-		OpenAIBaseURL:                settings.OpenAIBaseURL,
-		ModelVerbosity:               string(settings.ModelVerbosity),
-		Store:                        settings.Store,
-		ContextWindowTokens:          settings.ContextWindowTokens,
-		ProviderCapabilitiesOverride: settings.ProviderCapabilitiesOverride,
-	})
 }
 
 func authProviderForPolicy(policy string, mgr *auth.Manager) llm.AuthHeaderProvider {

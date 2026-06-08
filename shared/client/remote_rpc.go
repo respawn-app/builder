@@ -99,10 +99,6 @@ func hasExplicitTCPServerTarget(cfg config.App) bool {
 	return sources["server_host"] != "default" || sources["server_port"] != "default"
 }
 
-func dialRemoteWithPlan(ctx context.Context, plan remoteDialPlan, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
-	return dialRemoteWithTransport(ctx, plan, rpcwire.NewWebSocketTransport(), projectID, workspaceID, workspaceRoot)
-}
-
 func dialRemoteWithTransport(ctx context.Context, plan remoteDialPlan, transport rpcwire.ClientTransport, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
 	trimmedProjectID := strings.TrimSpace(projectID)
 	trimmedWorkspaceID := strings.TrimSpace(workspaceID)

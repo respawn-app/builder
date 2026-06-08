@@ -262,7 +262,7 @@ func TestTriggerHandoffSchedulesCompactionAndAppendsFutureMessageWithoutManualCa
 	foundFutureMessage := false
 	foundManualCarryover := false
 	for _, message := range messages {
-		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == handoffFutureAgentMessageContent("resume with tests") {
+		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == prompts.FormatHandoffFutureAgentMessage("resume with tests") {
 			foundFutureMessage = true
 		}
 		if message.MessageType == llm.MessageTypeManualCompactionCarryover {
@@ -279,7 +279,7 @@ func TestTriggerHandoffSchedulesCompactionAndAppendsFutureMessageWithoutManualCa
 	entries := eng.ChatSnapshot().Entries
 	foundDeveloperContext := false
 	for _, entry := range entries {
-		if entry.Role == string(transcript.EntryRoleDeveloperContext) && entry.Text == handoffFutureAgentMessageContent("resume with tests") {
+		if entry.Role == string(transcript.EntryRoleDeveloperContext) && entry.Text == prompts.FormatHandoffFutureAgentMessage("resume with tests") {
 			foundDeveloperContext = true
 		}
 		if entry.Role == string(transcript.EntryRoleManualCompactionCarryover) {
@@ -736,7 +736,7 @@ func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
 	messages := eng.snapshotMessages()
 	foundFutureMessage := false
 	for _, message := range messages {
-		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == handoffFutureAgentMessageContent("resume with tests") {
+		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == prompts.FormatHandoffFutureAgentMessage("resume with tests") {
 			foundFutureMessage = true
 			break
 		}
@@ -802,7 +802,7 @@ func TestPendingTriggerHandoffRetriesFutureMessageAfterAppendFailureWithoutRecom
 	messages := eng.snapshotMessages()
 	foundFutureMessage := false
 	for _, message := range messages {
-		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == handoffFutureAgentMessageContent(futureAgentMessage) {
+		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == prompts.FormatHandoffFutureAgentMessage(futureAgentMessage) {
 			foundFutureMessage = true
 			break
 		}
@@ -893,7 +893,7 @@ func TestReopenedSessionAfterTriggerHandoffFutureMessageAppendFailureRetriesWith
 	}
 	foundFuture := false
 	for _, item := range resumedClient.calls[0].Items {
-		if item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == handoffFutureAgentMessageContent("resume after restart") {
+		if item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == prompts.FormatHandoffFutureAgentMessage("resume after restart") {
 			foundFuture = true
 			break
 		}
@@ -930,8 +930,8 @@ func TestRunStepLoopTriggerHandoffOmitsCallAndOutputFromFollowUpRequestAndKeepsF
 
 	var eng *Engine
 	registry := tools.NewRegistry(
-		fakeTool{name: toolspec.ToolExecCommand},
-		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
+		tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}},
+		tools.HandlerRegistration{ID: toolspec.ToolTriggerHandoff, Handler: triggerhandofftool.New(func() triggerhandofftool.Controller { return eng })},
 	)
 	eng = mustNewTestEngine(t, store, client, registry, Config{
 		CompactionMode: "local",
@@ -969,7 +969,7 @@ func TestRunStepLoopTriggerHandoffOmitsCallAndOutputFromFollowUpRequestAndKeepsF
 			foundCall = true
 		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_handoff_1":
 			foundOutput = true
-		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == handoffFutureAgentMessageContent("resume with tests"):
+		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == prompts.FormatHandoffFutureAgentMessage("resume with tests"):
 			futureIdx = idx
 		}
 	}
@@ -1008,8 +1008,8 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 
 	var eng *Engine
 	registry := tools.NewRegistry(
-		fakeTool{name: toolspec.ToolExecCommand},
-		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
+		tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}},
+		tools.HandlerRegistration{ID: toolspec.ToolTriggerHandoff, Handler: triggerhandofftool.New(func() triggerhandofftool.Controller { return eng })},
 	)
 	eng = mustNewTestEngine(t, store, client, registry, Config{
 		CompactionMode:        "local",
@@ -1059,7 +1059,7 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 			foundCall = true
 		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_handoff_2":
 			foundOutput = true
-		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == handoffFutureAgentMessageContent("resume with tests"):
+		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == prompts.FormatHandoffFutureAgentMessage("resume with tests"):
 			futureIdx = idx
 		}
 	}
@@ -1096,8 +1096,8 @@ func TestReopenedSessionAfterTriggerHandoffUsesRotatedRequestSessionAndOmitsLing
 
 	var eng *Engine
 	registry := tools.NewRegistry(
-		fakeTool{name: toolspec.ToolExecCommand},
-		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
+		tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}},
+		tools.HandlerRegistration{ID: toolspec.ToolTriggerHandoff, Handler: triggerhandofftool.New(func() triggerhandofftool.Controller { return eng })},
 	)
 	eng = mustNewTestEngine(t, store, firstClient, registry, Config{
 		CompactionMode: "local",

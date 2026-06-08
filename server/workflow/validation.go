@@ -94,7 +94,7 @@ func (s *validationState) indexNodeGroups() {
 			continue
 		}
 		key := ModelKey(strings.TrimSpace(string(group.Key)))
-		if key == "" || !validModelKey(string(key)) {
+		if key == "" || !workflowkey.Valid(string(key)) {
 			s.addHard(CodeInvalidNodeGroup, "node group key is invalid", ref)
 		} else if previousID, exists := seenKeys[key]; exists && previousID != id {
 			s.addHard(CodeInvalidNodeGroup, "node group key must be unique", ref)
@@ -149,7 +149,7 @@ func (s *validationState) indexTransitionGroups() {
 		transitionID := strings.TrimSpace(string(group.TransitionID))
 		if transitionID == "" {
 			s.addHard(CodeMissingTransitionID, "transition id is required", ref)
-		} else if !validModelKey(transitionID) {
+		} else if !workflowkey.Valid(transitionID) {
 			s.addHard(CodeInvalidTransitionID, "transition id must "+workflowkey.Description, ref)
 		} else {
 			bySource := seenTransitionBySource[group.SourceNodeID]
@@ -197,7 +197,7 @@ func (s *validationState) validateNodes() {
 		ref := ValidationError{WorkflowID: s.def.ID, NodeID: node.ID}
 		if strings.TrimSpace(string(node.Key)) == "" {
 			s.addHard(CodeMissingNodeKey, "node key is required", ref)
-		} else if !validModelKey(string(node.Key)) {
+		} else if !workflowkey.Valid(string(node.Key)) {
 			s.addHard(CodeInvalidNodeKey, "node key must "+workflowkey.Description, ref)
 		} else if previousNodeID, exists := s.nodeKeys[node.Key]; exists && previousNodeID != node.ID {
 			s.addHard(CodeDuplicateNodeKey, "node key must be unique", ref)
@@ -290,7 +290,7 @@ func (s *validationState) nodeGroupV1FanoutTopologyError(branchIDs map[NodeID]bo
 	}
 	if len(fanoutGroups) != 1 {
 		if s.nodeGroupBranchesHaveStartIncoming(branchIDs) {
-			return nodeGroupStartFanoutMessage(s.startNodes[0])
+			return fmt.Sprintf("%s cannot directly fan out into a node group yet; insert one split agent after it, fan out from that agent into the group, then join the branches", fmt.Sprintf("Node %s", nodeDisplayName(s.startNodes[0])))
 		}
 		if message := s.nodeGroupSeparateFanoutMessage(branchIDs); message != "" {
 			return message
@@ -299,10 +299,10 @@ func (s *validationState) nodeGroupV1FanoutTopologyError(branchIDs map[NodeID]bo
 	}
 	source, exists := s.nodesByID[fanoutGroups[0].SourceNodeID]
 	if exists && source.Kind == NodeKindStart {
-		return nodeGroupStartFanoutMessage(source)
+		return fmt.Sprintf("%s cannot directly fan out into a node group yet; insert one split agent after it, fan out from that agent into the group, then join the branches", fmt.Sprintf("Node %s", nodeDisplayName(source)))
 	}
 	if s.nodeGroupBranchesHaveStartIncoming(branchIDs) {
-		return nodeGroupStartFanoutMessage(s.startNodes[0])
+		return fmt.Sprintf("%s cannot directly fan out into a node group yet; insert one split agent after it, fan out from that agent into the group, then join the branches", fmt.Sprintf("Node %s", nodeDisplayName(s.startNodes[0])))
 	}
 	if message := s.nodeGroupSeparateFanoutMessage(branchIDs); message != "" {
 		return message
@@ -375,13 +375,9 @@ func (s *validationState) nodeGroupSeparateFanoutMessage(branchIDs map[NodeID]bo
 		if !exists {
 			continue
 		}
-		return fmt.Sprintf("%s uses separate transitions into the node group branches; use one transition from %s with one edge to each branch, then connect every branch to the join", nodeMessageSubject(source), source.DisplayName)
+		return fmt.Sprintf("%s uses separate transitions into the node group branches; use one transition from %s with one edge to each branch, then connect every branch to the join", fmt.Sprintf("Node %s", nodeDisplayName(source)), source.DisplayName)
 	}
 	return ""
-}
-
-func nodeGroupStartFanoutMessage(start Node) string {
-	return fmt.Sprintf("%s cannot directly fan out into a node group yet; insert one split agent after it, fan out from that agent into the group, then join the branches", nodeMessageSubject(start))
 }
 
 func (s *validationState) nodeHasOutgoingEdgeTo(sourceID NodeID, targetID NodeID) bool {
@@ -418,7 +414,7 @@ func (s *validationState) validateTransitionGroups() {
 		}
 		seenEdgeKeys := map[ModelKey]EdgeID{}
 		for _, edge := range s.edgesByGroup[group.ID] {
-			if strings.TrimSpace(string(edge.Key)) == "" || !validModelKey(string(edge.Key)) {
+			if strings.TrimSpace(string(edge.Key)) == "" || !workflowkey.Valid(string(edge.Key)) {
 				continue
 			}
 			if previousID, exists := seenEdgeKeys[edge.Key]; exists && previousID != edge.ID {
@@ -437,7 +433,7 @@ func (s *validationState) validateEdges() {
 		}
 		if strings.TrimSpace(string(edge.Key)) == "" {
 			s.addHard(CodeMissingEdgeKey, "edge key is required", ref)
-		} else if !validModelKey(string(edge.Key)) {
+		} else if !workflowkey.Valid(string(edge.Key)) {
 			s.addHard(CodeInvalidEdgeKey, "edge key must "+workflowkey.Description, ref)
 		}
 		if strings.TrimSpace(string(edge.TargetNodeID)) == "" {
@@ -457,7 +453,7 @@ func (s *validationState) validateEdgeInvocationContract(edge Edge, ref Validati
 	source, sourceExists := s.edgeSource(edge)
 	prompt := strings.TrimSpace(edge.PromptTemplate)
 	if targetExists && target.Kind == NodeKindAgent {
-		if prompt == "" {
+		if prompt == "" && s.context != ValidationContextDraft {
 			s.addHard(CodeTransitionPromptRequired, "transition into an agent node requires a prompt", ref)
 		}
 	} else if prompt != "" {
@@ -494,18 +490,18 @@ func (s *validationState) validateParameters(edge Edge, ref ValidationError) {
 		key := strings.TrimSpace(parameter.Key)
 		parameterRef := ref
 		parameterRef.FieldName = key
-		if key == "" || !validModelKey(key) || len(key) > MaxParameterKeyChars || reservedParameterKeys[key] {
-			s.addHard(CodeInvalidParameter, edgeParameterMessage(edge, ordinal, "key is invalid"), parameterRef)
+		if key == "" || !workflowkey.Valid(key) || len(key) > MaxParameterKeyChars || reservedParameterKeys[key] {
+			s.addHard(CodeInvalidParameter, fmt.Sprintf("%s: parameter #%d %s", edgeMessageSubject(edge), ordinal, "key is invalid"), parameterRef)
 		}
 		if seen[key] {
-			s.addHard(CodeDuplicateParameter, edgeParameterMessage(edge, ordinal, "key must be unique per transition branch"), parameterRef)
+			s.addHard(CodeDuplicateParameter, fmt.Sprintf("%s: parameter #%d %s", edgeMessageSubject(edge), ordinal, "key must be unique per transition branch"), parameterRef)
 		}
 		seen[key] = true
 		description := strings.TrimSpace(parameter.Description)
 		if description == "" {
-			s.addHard(CodeParameterDescriptionRequired, edgeParameterMessage(edge, ordinal, "description is required"), parameterRef)
+			s.addHard(CodeParameterDescriptionRequired, fmt.Sprintf("%s: parameter #%d %s", edgeMessageSubject(edge), ordinal, "description is required"), parameterRef)
 		} else if len(description) > MaxParameterDescriptionChars {
-			s.addHard(CodeParameterSchemaTooLarge, edgeParameterMessage(edge, ordinal, "description is too large"), parameterRef)
+			s.addHard(CodeParameterSchemaTooLarge, fmt.Sprintf("%s: parameter #%d %s", edgeMessageSubject(edge), ordinal, "description is too large"), parameterRef)
 		}
 	}
 }
@@ -520,10 +516,10 @@ func (s *validationState) validateGraph() {
 	reachable := s.reachableFrom(s.startNodes[0].ID)
 	for nodeID, node := range s.nodesByID {
 		if !reachable[nodeID] {
-			s.addSemantic(CodeNodeUnreachableFromStart, fmt.Sprintf("%s not reachable", nodeMessageSubject(node)), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
+			s.addSemantic(CodeNodeUnreachableFromStart, fmt.Sprintf("%s not reachable", fmt.Sprintf("Node %s", nodeDisplayName(node))), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
 		}
 		if node.Kind != NodeKindTerminal && !s.canReachTerminal(nodeID) {
-			s.addSemantic(CodeNonTerminalCannotReachTerminal, fmt.Sprintf("%s cannot reach a terminal", nodeMessageSubject(node)), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
+			s.addSemantic(CodeNonTerminalCannotReachTerminal, fmt.Sprintf("%s cannot reach a terminal", fmt.Sprintf("Node %s", nodeDisplayName(node))), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
 		}
 	}
 	s.validatePromptPlaceholders()
@@ -610,7 +606,7 @@ func (s *validationState) validateContextSource(edge Edge, source Node, sourceEx
 			return contextSource, false
 		}
 		nodeKey := strings.TrimSpace(string(contextSource.NodeKey))
-		if nodeKey == "" || !validModelKey(nodeKey) {
+		if nodeKey == "" || !workflowkey.Valid(nodeKey) {
 			s.addSemantic(CodeInvalidContextSource, "selected context source node key is invalid", ref)
 			return contextSource, false
 		}
@@ -729,7 +725,7 @@ func (s *validationState) validatePromptPlaceholders() {
 			paramRef := ref
 			paramRef.InputName = name
 			paramRef.Placeholder = param.Placeholder
-			if name == "" || !validModelKey(name) || !currentParams[name] {
+			if name == "" || !workflowkey.Valid(name) || !currentParams[name] {
 				s.addHard(CodeInvalidTemplatePlaceholder, "prompt template references an unknown transition parameter", paramRef)
 			}
 		}
@@ -767,7 +763,7 @@ func (s *validationState) validatePriorParameterReference(edge Edge, param Promp
 	ref := baseRef
 	ref.FieldName = parameterKey
 	ref.Placeholder = param.Placeholder
-	if transitionKey == "" || !validModelKey(transitionKey) || parameterKey == "" || !validModelKey(parameterKey) {
+	if transitionKey == "" || !workflowkey.Valid(transitionKey) || parameterKey == "" || !workflowkey.Valid(parameterKey) {
 		s.addHard(CodeInvalidTemplatePlaceholder, "prompt template previous parameter reference is invalid", ref)
 		return
 	}
@@ -1033,10 +1029,6 @@ func (s *validationState) addSemantic(code ValidationErrorCode, message string, 
 	s.errors = append(s.errors, ref)
 }
 
-func edgeParameterMessage(edge Edge, ordinal int, message string) string {
-	return fmt.Sprintf("%s: parameter #%d %s", edgeMessageSubject(edge), ordinal, message)
-}
-
 func edgeMessageSubject(edge Edge) string {
 	if key := strings.TrimSpace(string(edge.Key)); key != "" {
 		return fmt.Sprintf("Transition branch %s", key)
@@ -1045,10 +1037,6 @@ func edgeMessageSubject(edge Edge) string {
 		return fmt.Sprintf("Transition branch %s", id)
 	}
 	return "Transition branch unknown"
-}
-
-func nodeMessageSubject(node Node) string {
-	return fmt.Sprintf("Node %s", nodeDisplayName(node))
 }
 
 func nodeDisplayName(node Node) string {
@@ -1067,10 +1055,6 @@ func nodeDisplayName(node Node) string {
 func validDisplayName(value string) bool {
 	trimmed := strings.TrimSpace(value)
 	return trimmed != "" && len(trimmed) <= MaxDisplayNameChars
-}
-
-func validModelKey(value string) bool {
-	return workflowkey.Valid(value)
 }
 
 func validContextMode(value ContextMode) bool {

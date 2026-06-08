@@ -153,7 +153,7 @@ func (m *uiModel) suppressLocalEntryEchoesInEvent(evt clientui.Event) clientui.E
 	}
 	filtered := evt.TranscriptEntries[:0]
 	for _, entry := range evt.TranscriptEntries {
-		if m.shouldSuppressLocalEntryEcho(entry.NoticeID) {
+		if m.acknowledgeLocalEntryEcho(entry.NoticeID) {
 			m.clearMirroredTransientStatusByNoticeID(entry.NoticeID)
 			continue
 		}

@@ -21,9 +21,7 @@ type AuthHandler interface {
 	Interact(ctx context.Context, req authflow.InteractionRequest) (authflow.InteractionOutcome, error)
 }
 
-type OnboardingHandler interface {
-	EnsureOnboardingReady(ctx context.Context, req OnboardingRequest) (config.App, error)
-}
+type OnboardingHandler func(ctx context.Context, req OnboardingRequest) (config.App, error)
 
 type OnboardingRequest struct {
 	Config       config.App
@@ -63,7 +61,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		return nil, err
 	}
 	if hooks.Onboarding != nil {
-		cfg, err = hooks.Onboarding.EnsureOnboardingReady(ctx, OnboardingRequest{
+		cfg, err = hooks.Onboarding(ctx, OnboardingRequest{
 			Config:      cfg,
 			AuthManager: authSupport.AuthManager,
 			ReloadConfig: func() (config.App, error) {

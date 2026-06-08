@@ -1,6 +1,7 @@
 package app
 
 import (
+	sharedtheme "builder/shared/theme"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +12,6 @@ import (
 )
 
 const statusSubscriptionBarMaxWidth = 18
-
-func statusSubscriptionFillHex(theme string, remaining float64) string {
-	return statusContextZoneHex(theme, int(100-remaining))
-}
 
 func statusSubscriptionRemaining(usedPercent float64) float64 {
 	remaining := 100 - statusClampPercent(usedPercent)
@@ -228,22 +225,6 @@ func statusPercent(value, total int) string {
 	return fmt.Sprintf("%d%%", pct)
 }
 
-func statusPercentInt(value, total int) string {
-	return statusPercent(value, total)
-}
-
-func statusContextRemainingSummary(context uiStatusContextInfo) string {
-	return fmt.Sprintf("%s (%s) left of %s", statusPercentInt(context.AvailableTokens, context.WindowTokens), statusTokenShort(context.AvailableTokens), statusTokenShort(context.WindowTokens))
-}
-
-func statusContextCompactionSummary(context uiStatusContextInfo) string {
-	return fmt.Sprintf("Compaction at %s (%s).", statusTokenShort(context.ThresholdTokens), statusPercentInt(context.ThresholdTokens, context.WindowTokens))
-}
-
-func statusSkillLine(skill uiStatusSkillInspection, tokenCounts map[string]int) string {
-	return statusSkillLineStyled(skill, tokenCounts, lipgloss.Style{})
-}
-
 func statusSkillLineStyled(skill uiStatusSkillInspection, tokenCounts map[string]int, generatedStyle lipgloss.Style) string {
 	name := strings.TrimSpace(skill.Name)
 	if name == "" {
@@ -254,7 +235,7 @@ func statusSkillLineStyled(skill uiStatusSkillInspection, tokenCounts map[string
 		labels = append(labels, generatedStyle.Render("generated"))
 	}
 	if skill.Disabled {
-		labels = append(labels, lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("disabled"))
+		labels = append(labels, lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Error.Adaptive()).Bold(true).Render("disabled"))
 	}
 	if skill.Shadowed {
 		labels = append(labels, "shadowed")
@@ -279,10 +260,6 @@ func statusSkillFailureLine(skill uiStatusSkillInspection) string {
 		return name
 	}
 	return fmt.Sprintf("%s (%s)", name, reason)
-}
-
-func statusAgentTokenLine(path string, tokenCounts map[string]int, workdir string) string {
-	return fmt.Sprintf("%s (%s)", statusDisplayPath(path, workdir), statusTokenShort(tokenCounts[strings.TrimSpace(path)]))
 }
 
 type statusSkillDirectoryGroup struct {

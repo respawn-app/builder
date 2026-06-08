@@ -292,15 +292,15 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
+	}, stubPromptControlClient{}, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	if first.req.PromptID != "ask-1" || first.req.Question != "First?" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
 
-	second := waitPromptEvent(t, events)
+	second := waitPromptEventWithin(t, events, time.Second)
 	if second.req.PromptID != "ask-2" || second.req.Question != "Second?" {
 		t.Fatalf("unexpected second prompt event: %+v", second.req)
 	}
@@ -327,18 +327,18 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 			return nil, serverapi.ErrStreamGap
 		}
 		return resubscribed, nil
-	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
+	}, stubPromptControlClient{}, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
-	resolved := waitPromptEvent(t, events)
+	resolved := waitPromptEventWithin(t, events, time.Second)
 	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
 		t.Fatalf("expected resolution event for ask-1 after resubscribe, got %+v", resolved)
 	}
-	second := waitPromptEvent(t, events)
+	second := waitPromptEventWithin(t, events, time.Second)
 	if second.req.PromptID != "ask-2" || second.req.Question != "Second?" {
 		t.Fatalf("unexpected second prompt event: %+v", second.req)
 	}
@@ -365,10 +365,10 @@ func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotStreamFails(t *te
 			return nil, errors.New("snapshot stream unavailable")
 		}
 		return secondResubscribe, nil
-	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
+	}, stubPromptControlClient{}, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
@@ -394,16 +394,16 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context, uint64) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, control, staticControllerLeaseManager("lease-test-controller"))
+	}, control, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt id: %q", first.req.PromptID)
 	}
 	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 
-	retried := waitPromptEvent(t, events)
+	retried := waitPromptEventWithin(t, events, time.Second)
 	if retried.req.PromptID != "ask-1" || retried.req.Question != "First?" {
 		t.Fatalf("unexpected retried prompt event: %+v", retried.req)
 	}
@@ -437,9 +437,9 @@ func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context, uint64) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, control, staticControllerLeaseManager("lease-test-controller"))
+	}, control, newControllerLeaseManager("lease-test-controller"))
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	stop()
 	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 	select {
@@ -463,14 +463,14 @@ func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context, uint64) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
+	}, stubPromptControlClient{}, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
-	resolved := waitPromptEvent(t, events)
+	resolved := waitPromptEventWithin(t, events, time.Second)
 	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
 		t.Fatalf("expected resolution event for ask-1, got %+v", resolved)
 	}
@@ -485,10 +485,10 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context, uint64) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, control, staticControllerLeaseManager("lease-test-controller"))
+	}, control, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 	waitForPromptAskCallCount(t, control, 1)
 	select {
@@ -513,16 +513,16 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context, uint64) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, control, staticControllerLeaseManager("lease-test-controller"))
+	}, control, newControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
 	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 
-	resolved := waitPromptEvent(t, events)
+	resolved := waitPromptEventWithin(t, events, time.Second)
 	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
 		t.Fatalf("expected prompt resolution event, got %+v", resolved)
 	}
@@ -553,7 +553,7 @@ func TestPendingPromptEventRetryUsesLatestControllerLease(t *testing.T) {
 	}, control, leaseManager)
 	defer stop()
 
-	first := waitPromptEvent(t, events)
+	first := waitPromptEventWithin(t, events, time.Second)
 	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 
 	waitForPromptAskCallCount(t, control, 2)
@@ -687,14 +687,6 @@ func waitSessionActivityEvent(t *testing.T, events <-chan clientui.Event) client
 		t.Fatal("timed out waiting for session activity event")
 		return clientui.Event{}
 	}
-}
-
-func staticControllerLeaseManager(leaseID string) *controllerLeaseManager {
-	return newControllerLeaseManager(leaseID)
-}
-
-func waitPromptEvent(t *testing.T, events <-chan askEvent) askEvent {
-	return waitPromptEventWithin(t, events, time.Second)
 }
 
 func waitPromptEventWithin(t *testing.T, events <-chan askEvent, timeout time.Duration) askEvent {

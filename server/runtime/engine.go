@@ -228,7 +228,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 			if !disabled {
 				continue
 			}
-			normalized := normalizeSkillToggleName(name)
+			normalized := strings.ToLower(sanitizeSkillSingleLine(name))
 			if normalized == "" {
 				continue
 			}

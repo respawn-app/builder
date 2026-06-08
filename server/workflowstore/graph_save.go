@@ -10,6 +10,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 type WorkflowGraphSaveRequest struct {
@@ -317,7 +318,7 @@ func prepareWorkflowGraphSave(workflowID workflow.WorkflowID, displayName string
 	for i, group := range prepared.transitionGroups {
 		group.WorkflowID = defaultWorkflowID(group.WorkflowID, workflowID)
 		prepared.transitionGroups[i] = group
-		def.TransitionGroups = append(def.TransitionGroups, workflow.TransitionGroup{WorkflowID: group.WorkflowID, ID: group.ID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName})
+		def.TransitionGroups = append(def.TransitionGroups, workflow.TransitionGroup{WorkflowID: group.WorkflowID, ID: group.ID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName, Description: group.Description})
 	}
 	for i, edge := range prepared.edges {
 		edge.WorkflowID = defaultWorkflowID(edge.WorkflowID, workflowID)
@@ -495,6 +496,7 @@ type comparableWorkflowGraphSaveTransitionGroup struct {
 	SourceNodeID workflow.NodeID
 	TransitionID workflow.TransitionID
 	DisplayName  string
+	Description  string
 	SortOrder    int64
 }
 
@@ -540,7 +542,7 @@ func workflowGraphSaveComparable(prepared preparedWorkflowGraphSave) comparableW
 		out.Nodes = append(out.Nodes, comparableWorkflowGraphSaveNode{ID: node.ID, WorkflowID: node.WorkflowID, Key: node.Key, Kind: node.Kind, DisplayName: strings.TrimSpace(node.DisplayName), GroupID: strings.TrimSpace(node.GroupID), SubagentRole: strings.TrimSpace(node.SubagentRole), PromptTemplate: strings.TrimSpace(node.PromptTemplate), InputFields: node.InputFields, JoinInputProviders: node.JoinInputProviders, OutputFields: node.OutputFields, SortOrder: int64(index * 100)})
 	}
 	for index, group := range prepared.transitionGroups {
-		out.TransitionGroups = append(out.TransitionGroups, comparableWorkflowGraphSaveTransitionGroup{ID: group.ID, WorkflowID: group.WorkflowID, SourceNodeID: group.SourceNodeID, TransitionID: workflow.TransitionID(strings.TrimSpace(string(group.TransitionID))), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: int64(index * 100)})
+		out.TransitionGroups = append(out.TransitionGroups, comparableWorkflowGraphSaveTransitionGroup{ID: group.ID, WorkflowID: group.WorkflowID, SourceNodeID: group.SourceNodeID, TransitionID: workflow.TransitionID(strings.TrimSpace(string(group.TransitionID))), DisplayName: strings.TrimSpace(group.DisplayName), Description: strings.TrimSpace(group.Description), SortOrder: int64(index * 100)})
 	}
 	for index, edge := range prepared.edges {
 		contextSource := workflow.CanonicalContextSource(edge.ContextSource)
@@ -600,7 +602,7 @@ func applyWorkflowGraphSave(ctx context.Context, tx *sql.Tx, q *sqlitegen.Querie
 }
 
 func upsertWorkflowNodeGroup(ctx context.Context, tx *sql.Tx, group NodeGroupRecord) error {
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowNodeGroupQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowNodeGroupQuery, "\n"),
 		group.ID,
 		string(group.WorkflowID),
 		string(group.Key),
@@ -611,19 +613,19 @@ func upsertWorkflowNodeGroup(ctx context.Context, tx *sql.Tx, group NodeGroupRec
 }
 
 func upsertWorkflowNode(ctx context.Context, tx *sql.Tx, node NodeRecord, sortOrder int64) error {
-	inputFields, err := marshalJSON(node.InputFields)
+	inputFields, err := workflowjson.MarshalString(node.InputFields)
 	if err != nil {
 		return err
 	}
-	joinProviders, err := marshalJSON(node.JoinInputProviders)
+	joinProviders, err := workflowjson.MarshalString(node.JoinInputProviders)
 	if err != nil {
 		return err
 	}
-	outputFields, err := marshalJSON(node.OutputFields)
+	outputFields, err := workflowjson.MarshalString(node.OutputFields)
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowNodeQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowNodeQuery, "\n"),
 		string(node.ID),
 		string(node.WorkflowID),
 		string(node.Key),
@@ -641,11 +643,12 @@ func upsertWorkflowNode(ctx context.Context, tx *sql.Tx, node NodeRecord, sortOr
 }
 
 func upsertWorkflowTransitionGroup(ctx context.Context, tx *sql.Tx, group TransitionGroupRecord, sortOrder int64) error {
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowTransitionGroupQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowTransitionGroupQuery, "\n"),
 		string(group.ID),
 		string(group.SourceNodeID),
 		strings.TrimSpace(string(group.TransitionID)),
 		strings.TrimSpace(group.DisplayName),
+		strings.TrimSpace(group.Description),
 		sortOrder,
 		string(group.WorkflowID),
 	)
@@ -658,15 +661,15 @@ func upsertWorkflowEdge(ctx context.Context, tx *sql.Tx, edge EdgeRecord, sortOr
 	if err != nil {
 		return err
 	}
-	inputs, err := marshalJSON(edge.InputBindings)
+	inputs, err := workflowjson.MarshalString(edge.InputBindings)
 	if err != nil {
 		return err
 	}
-	requirements, err := marshalJSON(edge.OutputRequirements)
+	requirements, err := workflowjson.MarshalString(edge.OutputRequirements)
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, workflowStoreQuery(upsertWorkflowEdgeQuery),
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(upsertWorkflowEdgeQuery, "\n"),
 		string(edge.ID),
 		string(edge.TransitionGroupID),
 		string(edge.Key),

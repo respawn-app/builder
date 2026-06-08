@@ -63,9 +63,9 @@ func mustNewTestEngine(t *testing.T, store *session.Store, client llm.Client, re
 
 func mustNewFakeToolEngine(t *testing.T, store *session.Store, client llm.Client, cfg Config, toolIDs ...toolspec.ID) *Engine {
 	t.Helper()
-	handlers := make([]tools.Handler, 0, len(toolIDs))
+	handlers := make([]tools.HandlerRegistration, 0, len(toolIDs))
 	for _, id := range toolIDs {
-		handlers = append(handlers, fakeTool{name: id})
+		handlers = append(handlers, tools.HandlerRegistration{ID: id, Handler: fakeTool{name: id}})
 	}
 	return mustNewTestEngine(t, store, client, tools.NewRegistry(handlers...), cfg)
 }
@@ -149,7 +149,7 @@ func runChatEntryCases(t *testing.T, cases []chatEntryCase) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newChatStore()
 			tc.seed(store)
-			assertChatEntries(t, store.snapshot().Entries, tc.want)
+			assertChatEntries(t, store.snapshotWithMetadata().Snapshot.Entries, tc.want)
 		})
 	}
 }

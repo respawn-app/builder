@@ -7,30 +7,36 @@ import (
 )
 
 type EventBridge struct {
-	ch      chan runtime.Event
-	gapCh   chan struct{}
-	dropped atomic.Uint64
-	onDrop  func(total uint64, evt runtime.Event)
+	Events    <-chan runtime.Event
+	GapEvents <-chan struct{}
+	Dropped   atomic.Uint64
+	events    chan runtime.Event
+	gapEvents chan struct{}
+	onDrop    func(total uint64, evt runtime.Event)
 }
 
 func NewEventBridge(buffer int, onDrop func(total uint64, evt runtime.Event)) *EventBridge {
 	if buffer <= 0 {
 		buffer = 1
 	}
+	events := make(chan runtime.Event, buffer)
+	gapEvents := make(chan struct{}, 1)
 	return &EventBridge{
-		ch:     make(chan runtime.Event, buffer),
-		gapCh:  make(chan struct{}, 1),
-		onDrop: onDrop,
+		Events:    events,
+		GapEvents: gapEvents,
+		events:    events,
+		gapEvents: gapEvents,
+		onDrop:    onDrop,
 	}
 }
 
 func (b *EventBridge) Publish(evt runtime.Event) {
 	select {
-	case b.ch <- evt:
+	case b.events <- evt:
 	default:
-		total := b.dropped.Add(1)
+		total := b.Dropped.Add(1)
 		select {
-		case b.gapCh <- struct{}{}:
+		case b.gapEvents <- struct{}{}:
 		default:
 		}
 		if b.onDrop != nil {
@@ -38,14 +44,3 @@ func (b *EventBridge) Publish(evt runtime.Event) {
 		}
 	}
 }
-
-func (b *EventBridge) Channel() <-chan runtime.Event { return b.ch }
-
-func (b *EventBridge) GapChannel() <-chan struct{} {
-	if b == nil {
-		return nil
-	}
-	return b.gapCh
-}
-
-func (b *EventBridge) Dropped() uint64 { return b.dropped.Load() }

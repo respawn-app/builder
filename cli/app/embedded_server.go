@@ -176,7 +176,7 @@ func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
 	return s.inner.RunPromptClient()
 }
 
-func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
+func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	if s == nil || s.inner == nil {
 		return errors.New("embedded server is required")
 	}
@@ -188,13 +188,13 @@ func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authI
 	if interactive, ok := interactor.(*interactiveAuthInteractor); ok {
 		return interactive.completeRemoteAuthBootstrap(ctx, s.AuthBootstrapClient(), cfg.Settings, status, true)
 	}
-	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor, interactiveAuth)
 }
 
-func (s *embeddedAppServer) EnsureAuthReady(ctx context.Context, interactor authInteractor) error {
+func (s *embeddedAppServer) EnsureAuthReady(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	if s == nil || s.inner == nil {
 		return errors.New("embedded server is required")
 	}
 	cfg := s.inner.Config()
-	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor, interactiveAuth)
 }

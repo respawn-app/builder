@@ -56,7 +56,7 @@ func TestFirstMetaInjectionUsesPendingWorktreeCWD(t *testing.T) {
 	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "start in the new worktree"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -100,7 +100,7 @@ func TestSubmitUserMessageInjectsPendingWorktreeEnterReminder(t *testing.T) {
 	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -158,7 +158,7 @@ func TestRunStepLoopMaterializesPendingWorktreeReminder(t *testing.T) {
 		EffectiveCwd:  "/tmp/wt-direct",
 	})
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.runStepLoop(context.Background(), "step-1"); err != nil {
 		t.Fatalf("runStepLoop: %v", err)
@@ -220,7 +220,7 @@ func TestRunStepLoopCountsPendingWorktreeReminderBeforeAutoCompaction(t *testing
 			Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
 		}},
 	}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "native",
@@ -281,7 +281,7 @@ func TestWorktreeReminderPersistFailureDoesNotDuplicateMaterializedReminder(t *t
 		EffectiveCwd:  "/tmp/wt-fail",
 	})
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err == nil || !strings.Contains(err.Error(), "persist observer failed") {
 		t.Fatalf("submit error = %v, want reminder state persistence failure", err)
@@ -324,7 +324,7 @@ func TestSubmitUserMessageInjectsPendingWorktreeExitReminder(t *testing.T) {
 	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -361,7 +361,7 @@ func TestSubmitUserMessageMaterializesWorktreeReminderBeforeModelFailure(t *test
 	})
 
 	failingClient := &hookClient{beforeReturn: func() error { return context.DeadlineExceeded }}
-	eng := mustNewTestEngine(t, store, failingClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, failingClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err == nil {
 		t.Fatal("expected submit failure")
@@ -411,7 +411,7 @@ func TestSubmitUserMessageUsesLatestPendingWorktreeReminder(t *testing.T) {
 	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -452,7 +452,7 @@ func TestSubmitUserMessageReinjectsWorktreeReminderAfterCompactionGenerationChan
 		finalOutputItemResponse("ok-1"),
 		finalOutputItemResponse("ok-2"),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 	eng.compactionRuntimeState().SetCount(1)
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err != nil {
@@ -503,7 +503,7 @@ func TestSubmitUserMessagePreservesHistoricalWorktreeRemindersInRequest(t *testi
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok-1"}, OutputItems: []llm.ResponseItem{firstOutput}, Usage: llm.Usage{WindowTokens: 200000}},
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok-2"}, OutputItems: []llm.ResponseItem{secondOutput}, Usage: llm.Usage{WindowTokens: 200000}},
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{})
 
 	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{Mode: session.WorktreeReminderModeEnter, Branch: "feature/enter", WorktreePath: "/tmp/wt-enter", WorkspaceRoot: "/tmp/workspace", EffectiveCwd: "/tmp/wt-enter"})
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {

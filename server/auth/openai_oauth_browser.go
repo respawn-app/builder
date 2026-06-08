@@ -192,7 +192,7 @@ func StartOAuthCallbackListener() (*OAuthCallbackListener, error) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(authCompleteHTML()))
+		_, _ = w.Write([]byte(strings.TrimSuffix(authCompleteHTMLContent, "\n")))
 		select {
 		case resultCh <- result:
 		default:
@@ -210,10 +210,6 @@ func StartOAuthCallbackListener() (*OAuthCallbackListener, error) {
 		server:      srv,
 		listener:    ln,
 	}, nil
-}
-
-func authCompleteHTML() string {
-	return strings.TrimSuffix(authCompleteHTMLContent, "\n")
 }
 
 func (l *OAuthCallbackListener) RedirectURI() string {

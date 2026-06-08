@@ -13,16 +13,14 @@ type stubHandler struct {
 	id toolspec.ID
 }
 
-func (s stubHandler) Name() toolspec.ID { return s.id }
-
 func (s stubHandler) Call(_ context.Context, c Call) (Result, error) {
 	return Result{CallID: c.ID, Name: c.Name, Output: json.RawMessage(`{}`)}, nil
 }
 
 func TestRegistryDefinitionsFollowCentralCatalog(t *testing.T) {
 	r := NewRegistry(
-		stubHandler{id: toolspec.ToolPatch},
-		stubHandler{id: toolspec.ToolExecCommand},
+		HandlerRegistration{ID: toolspec.ToolPatch, Handler: stubHandler{id: toolspec.ToolPatch}},
+		HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: stubHandler{id: toolspec.ToolExecCommand}},
 	)
 	defs := r.Definitions()
 	if len(defs) != 2 {
@@ -42,15 +40,18 @@ func TestRegistryRejectsUnknownToolDefinition(t *testing.T) {
 			t.Fatal("expected panic for unknown tool definition")
 		}
 	}()
-	_ = NewRegistry(stubHandler{id: toolspec.ID("unknown_tool")})
+	_ = NewRegistry(HandlerRegistration{ID: toolspec.ID("unknown_tool"), Handler: stubHandler{id: toolspec.ID("unknown_tool")}})
 }
 
 func TestRegistryReplaceHandlersSwapsDefinitionsAtomically(t *testing.T) {
-	r := NewRegistry(stubHandler{id: toolspec.ToolExecCommand})
+	r := NewRegistry(HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: stubHandler{id: toolspec.ToolExecCommand}})
 	if defs := r.Definitions(); len(defs) != 1 || defs[0].ID != toolspec.ToolExecCommand {
 		t.Fatalf("unexpected initial definitions: %+v", defs)
 	}
-	r.ReplaceHandlers(stubHandler{id: toolspec.ToolPatch}, stubHandler{id: toolspec.ToolWriteStdin})
+	r.ReplaceHandlers(
+		HandlerRegistration{ID: toolspec.ToolPatch, Handler: stubHandler{id: toolspec.ToolPatch}},
+		HandlerRegistration{ID: toolspec.ToolWriteStdin, Handler: stubHandler{id: toolspec.ToolWriteStdin}},
+	)
 	defs := r.Definitions()
 	if len(defs) != 2 {
 		t.Fatalf("definitions count=%d want 2", len(defs))

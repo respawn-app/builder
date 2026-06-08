@@ -5,6 +5,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -66,12 +67,12 @@ func TestRuntimeSyncPolicyReleasesDeferredTranscriptWhenProcessOverlayCloses(t *
 	m.startupCmds = nil
 	m.openProcessList()
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         4,
 		CommittedEntryCount:        3,
-	})
+	}, true).cmd
 	assertNoRuntimeTranscriptRefreshMsg(t, collectCmdMessages(t, cmd))
 	if !m.runtimeTranscriptPendingSet {
 		t.Fatal("expected routine transcript sync deferred while /ps is open")
@@ -168,7 +169,7 @@ func TestRuntimeSyncPolicyDefersAndReleasesMainViewRefresh(t *testing.T) {
 	}
 	m.setBusy(true)
 
-	if cmd := m.requestRuntimeMainViewRefresh(); cmd != nil {
+	if cmd := m.startRuntimeMainViewRefreshRequest(runtimeMainViewRefreshRequestForCause(runtimeMainViewRefreshCauseWorktreeMutation)).cmd; cmd != nil {
 		t.Fatalf("expected main-view refresh deferred while streaming/busy, got %T", cmd)
 	}
 	if client.refreshMainViewCalls != 0 {
@@ -201,7 +202,7 @@ func TestRuntimeSyncPolicyDropsRoutineMainViewResponseWhenBlockerAppears(t *test
 	client.mainView = clientui.RuntimeMainView{
 		Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "server-name"},
 	}
-	cmd := m.requestRuntimeMainViewRefresh()
+	cmd := m.startRuntimeMainViewRefreshRequest(runtimeMainViewRefreshRequestForCause(runtimeMainViewRefreshCauseWorktreeMutation)).cmd
 	if cmd == nil {
 		t.Fatal("expected unblocked main-view refresh to start")
 	}
@@ -360,7 +361,7 @@ func TestStartupUpdateNoticePendingRefreshSurvivesWorktreeRefreshCoalescing(t *t
 	if m.runtimeMainViewPending.cause != runtimeMainViewRefreshCauseStartupUpdate {
 		t.Fatalf("pending main-view cause = %q, want startup_update", m.runtimeMainViewPending.cause)
 	}
-	if cmd := m.requestRuntimeMainViewRefresh(); cmd != nil {
+	if cmd := m.startRuntimeMainViewRefreshRequest(runtimeMainViewRefreshRequestForCause(runtimeMainViewRefreshCauseWorktreeMutation)).cmd; cmd != nil {
 		t.Fatalf("expected blocked worktree refresh to coalesce, got %T", cmd)
 	}
 	if m.runtimeMainViewPending.cause != runtimeMainViewRefreshCauseStartupUpdate {

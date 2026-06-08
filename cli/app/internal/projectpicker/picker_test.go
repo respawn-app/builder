@@ -25,21 +25,14 @@ func TestVisibleRowsBudgetPreviewAndGroup(t *testing.T) {
 }
 
 func TestEnsureCursorVisibleScrollsAndCompactsOffset(t *testing.T) {
-	visibleRows := func(offset int) []VisibleRow {
-		end := offset + 2
-		rows := make([]VisibleRow, 0, 2)
-		for index := offset; index < end && index < 5; index++ {
-			rows = append(rows, VisibleRow{Index: index})
-		}
-		return rows
-	}
-	if got := EnsureCursorVisible(4, 0, 5, visibleRows); got != 3 {
+	req := VisibleRowsRequest{ItemCount: 5, LineBudget: 3}
+	if got := EnsureCursorVisible(4, 0, req); got != 3 {
 		t.Fatalf("offset for cursor 4 = %d, want 3", got)
 	}
-	if got := EnsureCursorVisible(2, 4, 5, visibleRows); got != 1 {
+	if got := EnsureCursorVisible(2, 4, req); got != 1 {
 		t.Fatalf("offset for cursor 2 = %d, want 1", got)
 	}
-	if got := EnsureCursorVisible(1, 3, 5, visibleRows); got != 0 {
+	if got := EnsureCursorVisible(1, 3, req); got != 0 {
 		t.Fatalf("compacted offset = %d, want 0", got)
 	}
 }
@@ -81,13 +74,7 @@ func TestVisibleRowsClampZeroAndNegativeBudgets(t *testing.T) {
 }
 
 func TestEnsureCursorVisibleClampsOffsetWhenSelectedRowDisappears(t *testing.T) {
-	visibleRows := func(offset int) []VisibleRow {
-		if offset >= 2 {
-			return nil
-		}
-		return []VisibleRow{{Index: offset}}
-	}
-	if got := EnsureCursorVisible(4, 4, 2, visibleRows); got != 1 {
+	if got := EnsureCursorVisible(4, 4, VisibleRowsRequest{ItemCount: 2, LineBudget: 1}); got != 1 {
 		t.Fatalf("clamped offset = %d, want 1", got)
 	}
 }

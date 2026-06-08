@@ -45,6 +45,9 @@ describe("layoutWorkflowGraph node group bounds", () => {
     expectPointCloseTo(points[0], workflowGraphEndpointPoint(branch, edge.sourceHandle, "source", graph.nodes));
     expectPointCloseTo(points[points.length - 1], workflowGraphEndpointPoint(join, edge.targetHandle, "target", graph.nodes));
     expectPointCloseTo(outgoingPoints[0], workflowGraphEndpointPoint(join, outgoingEdge.sourceHandle, "source", graph.nodes));
+    expect(outgoingPoints.length).toBeGreaterThan(2);
+    expectRouteSegmentsToBeOrthogonal(outgoingPoints);
+    expectRouteToHaveCorner(outgoingPoints);
     expect(points.some((point) => point.x > rectRight(group) && point.x < joinRect.x)).toBe(true);
     expect(points.every((point) => point.x >= branchRect.x + branchRect.width)).toBe(true);
   });
@@ -103,6 +106,29 @@ function expectPointCloseTo(actual: WorkflowGraphPoint | undefined, expected: Wo
   }
   expect(actual.x).toBeCloseTo(expected.x, 6);
   expect(actual.y).toBeCloseTo(expected.y, 6);
+}
+
+function expectRouteSegmentsToBeOrthogonal(points: readonly WorkflowGraphPoint[]): void {
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous !== undefined) {
+      expect(point.x === previous.x || point.y === previous.y).toBe(true);
+    }
+  }
+}
+
+function expectRouteToHaveCorner(points: readonly WorkflowGraphPoint[]): void {
+  expect(
+    points.some((point, index) => {
+      const previous = points[index - 1];
+      const next = points[index + 1];
+      return (
+        previous !== undefined &&
+        next !== undefined &&
+        (previous.x - point.x) * (next.y - point.y) !== (previous.y - point.y) * (next.x - point.x)
+      );
+    }),
+  ).toBe(true);
 }
 
 const emptyValidation: WorkflowValidation = { valid: true, errors: [] };
@@ -166,7 +192,7 @@ function workflowNode(id: string, name: string, kind: string, groupID: string) {
 }
 
 function workflowTransitionGroup(id: string, sourceNodeID: string, transitionID: string, name: string) {
-  return { id, workflowID: "workflow-1", sourceNodeID, transitionID, name };
+  return { description: "", id, workflowID: "workflow-1", sourceNodeID, transitionID, name };
 }
 
 function workflowEdge(id: string, transitionGroupID: string, targetNodeID: string) {

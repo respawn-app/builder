@@ -51,7 +51,7 @@ func (e *Engine) buildReviewerRequest(ctx context.Context, reviewerClient llm.Cl
 		StructuredOutput:        reviewerSuggestionsStructuredOutput(),
 	}
 	if supportsPromptCacheKeyForClient(ctx, reviewerClient) {
-		if cacheKey := reviewerPromptCacheKey(e.store.Meta().SessionID, e.compactionCountSnapshot()); cacheKey != "" {
+		if cacheKey := conversationPromptCacheKey(reviewerSessionID(e.store.Meta().SessionID), e.compactionCountSnapshot()); cacheKey != "" {
 			req.PromptCacheKey = cacheKey
 			req.PromptCacheScope = cachewarn.ScopeReviewer
 		}

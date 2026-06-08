@@ -47,7 +47,7 @@ func TestBackgroundCompletionDoesNotBlockOnHiddenProcessRefresh(t *testing.T) {
 
 	done := make(chan tea.Cmd, 1)
 	go func() {
-		done <- m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		done <- m.runtimeAdapter().applyProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
 			Kind: runtime.EventBackgroundUpdated,
 			Background: &runtime.BackgroundShellEvent{
 				Type:       "completed",
@@ -55,7 +55,7 @@ func TestBackgroundCompletionDoesNotBlockOnHiddenProcessRefresh(t *testing.T) {
 				State:      "completed",
 				NoticeText: "Background shell 1000 completed.\nOutput:\nhello",
 			},
-		}))
+		}), true).cmd
 	}()
 
 	var cmd tea.Cmd

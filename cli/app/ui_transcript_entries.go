@@ -36,17 +36,13 @@ func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEnt
 	return entries
 }
 
-func transcriptEntryCommittedForApp(entry tui.TranscriptEntry) bool {
-	return !entry.Transient || entry.Committed
-}
-
 func committedTranscriptEntriesForApp(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
 	if len(entries) == 0 {
 		return nil
 	}
 	normalized := make([]tui.TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
-		if !transcriptEntryCommittedForApp(entry) {
+		if entry.Transient && !entry.Committed {
 			continue
 		}
 		copyEntry := entry
@@ -161,14 +157,6 @@ func eventTranscriptEntriesReconcileWithCommittedTail(evt clientui.Event) bool {
 	}
 	_, _, ok := projectedTranscriptEventRange(evt, len(evt.TranscriptEntries))
 	return ok
-}
-
-func eventTranscriptEntriesAreCommitted(evt clientui.Event) bool {
-	return evt.CommittedTranscriptChanged
-}
-
-func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clientui.ChatEntry) bool {
-	return transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(existing), transcriptPayloadFromClientEntry(incoming))
 }
 
 func transcriptPayloadFromTUIEntry(entry tui.TranscriptEntry) transcript.EntryPayload {

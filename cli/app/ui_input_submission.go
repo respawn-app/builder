@@ -45,24 +45,12 @@ func (c uiInputController) startSubmissionWithPreSubmitQueuePosition(text string
 	}
 	m.syncViewport()
 	if isUserShell {
-		return tea.Batch(c.submitUserShellCmd(text, command), m.ensureSpinnerTicking())
+		return tea.Batch(c.submitUserShellCmd(text, command), m.reconcileSpinnerTicking(false))
 	}
 	if m.hasRuntimeClient() {
-		return tea.Batch(c.submitCmd(text, queuedID), m.ensureSpinnerTicking())
+		return tea.Batch(c.submitCmd(text, queuedID), m.reconcileSpinnerTicking(false))
 	}
-	return tea.Batch(c.submitCmd(text, queuedID), m.ensureSpinnerTicking())
-}
-
-func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
-	return c.startSubmissionWithPromptHistoryAndQueuePosition(text, preSubmitQueueBack)
-}
-
-func (c uiInputController) startQueuedSubmissionWithPromptHistory(item queuedInputItem) tea.Cmd {
-	return c.startSubmissionWithPromptHistoryAndQueuePositionAndID(item.Text, preSubmitQueueFront, item.ID)
-}
-
-func (c uiInputController) startSubmissionWithPromptHistoryAndQueuePosition(text string, queuePosition preSubmitQueuePosition) tea.Cmd {
-	return c.startSubmissionWithPromptHistoryAndQueuePositionAndID(text, queuePosition, "")
+	return tea.Batch(c.submitCmd(text, queuedID), m.reconcileSpinnerTicking(false))
 }
 
 func (c uiInputController) startSubmissionWithPromptHistoryAndQueuePositionAndID(text string, queuePosition preSubmitQueuePosition, queuedID string) tea.Cmd {
@@ -175,21 +163,13 @@ const (
 	uiCompactionOriginQueued
 )
 
-func (c uiInputController) startCompaction(args string) tea.Cmd {
-	return c.startCompactionWithOrigin(args, uiCompactionOriginManual)
-}
-
-func (c uiInputController) startQueuedCompaction(args string) tea.Cmd {
-	return c.startCompactionWithOrigin(args, uiCompactionOriginQueued)
-}
-
 func (c uiInputController) startCompactionWithOrigin(args string, origin uiCompactionOrigin) tea.Cmd {
 	m := c.model
 	c.startBusyActivity(true)
 	m.compactionOrigin = origin
 	m.logf("compaction.start args_chars=%d", len(strings.TrimSpace(args)))
 	m.syncViewport()
-	return tea.Batch(c.compactCmd(args), m.ensureSpinnerTicking())
+	return tea.Batch(c.compactCmd(args), m.reconcileSpinnerTicking(false))
 }
 
 func (c uiInputController) compactCmd(args string) tea.Cmd {
@@ -256,21 +236,21 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		if m.turnQueueHook != nil {
 			m.turnQueueHook.OnTurnQueueAborted()
 		}
-		unlockCmd := c.unlockInputAfterSubmissionError()
+		unlockCmd := c.releaseLockedInjectedInput(true)
 		restoreInjectedCmd := c.restorePendingInjectedIntoInput()
 		if restoreSubmittedText {
 			c.restoreSubmittedTextIntoInput(msg.submittedText)
 		}
 		c.restoreQueuedMessagesIntoInput()
-		if isInterruptedRuntimeError(msg.err) {
+		if submissionerror.IsInterrupted(msg.err) {
 			m.activity = uiActivityInterrupted
 			m.logf("step.interrupted")
 			m.syncViewport()
 			return m, batchCmds(unlockCmd, restoreInjectedCmd)
 		}
-		detailErr := formatSubmissionError(msg.err)
+		detailErr := submissionerror.Format(msg.err)
 		m.activity = uiActivityError
-		appendCmd := m.appendOperatorErrorFeedback(detailErr)
+		appendCmd := m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, detailErr, "")
 		m.logf("step.error err=%q", detailErr)
 		m.syncViewport()
 		return m, tea.Batch(unlockCmd, restoreInjectedCmd, appendCmd)
@@ -367,15 +347,15 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	if msg.err != nil {
 		restoreInjectedCmd := c.restorePendingInjectedIntoInput()
 		c.restoreQueuedMessagesIntoInput()
-		if isInterruptedRuntimeError(msg.err) {
+		if submissionerror.IsInterrupted(msg.err) {
 			m.activity = uiActivityInterrupted
 			m.logf("step.interrupted")
 			m.syncViewport()
 			return m, tea.Batch(releaseCmd, restoreInjectedCmd)
 		}
-		detailErr := formatSubmissionError(msg.err)
+		detailErr := submissionerror.Format(msg.err)
 		m.activity = uiActivityError
-		appendCmd := m.appendOperatorErrorFeedback(detailErr)
+		appendCmd := m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, detailErr, "")
 		m.logf("compaction.error err=%q", detailErr)
 		m.syncViewport()
 		return m, tea.Batch(releaseCmd, restoreInjectedCmd, appendCmd)

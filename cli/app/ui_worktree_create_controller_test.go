@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"builder/shared/serverapi"
@@ -92,7 +93,7 @@ func TestWorktreeCreateControllerSubmitStartsResolution(t *testing.T) {
 		resolveResp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "feature/new", Kind: serverapi.WorktreeCreateTargetResolutionKindNewBranch}},
 	}
 	model := newWorktreeCreateControllerTestModel(t, client)
-	setSingleLineEditorValue(&model.worktrees.create.branchTarget, "feature/new")
+	model.worktrees.create.branchTarget.Replace(strings.NewReplacer("\r", "", "\n", "").Replace("feature/new"))
 	model.worktrees.create.focus = uiWorktreeCreateFieldActions
 	model.worktrees.create.action = uiWorktreeCreateActionCreate
 

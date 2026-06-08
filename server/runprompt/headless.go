@@ -168,19 +168,13 @@ type headlessPromptRuntime struct {
 
 func (r *headlessPromptRuntime) SubmitUserMessage(ctx context.Context, prompt string) (PromptAssistantMessage, error) {
 	assistant, err := r.plan.engine.SubmitUserMessage(ctx, prompt)
-	return PromptAssistantMessage{Content: assistant.Content}, err
-}
-
-func (r *headlessPromptRuntime) SessionID() string   { return r.plan.engine.SessionID() }
-func (r *headlessPromptRuntime) SessionName() string { return r.plan.engine.SessionName() }
-func (r *headlessPromptRuntime) Warnings() []string {
-	if r == nil {
-		return nil
-	}
-	return append([]string(nil), r.warnings...)
-}
-func (r *headlessPromptRuntime) DroppedEvents() uint64 {
-	return r.plan.eventBridge.Dropped()
+	return PromptAssistantMessage{
+		SessionID:     r.plan.engine.SessionID(),
+		SessionName:   r.plan.engine.SessionName(),
+		Content:       assistant.Content,
+		Warnings:      append([]string(nil), r.warnings...),
+		DroppedEvents: r.plan.eventBridge.Dropped.Load(),
+	}, err
 }
 func (r *headlessPromptRuntime) Logf(format string, args ...any) { r.plan.logger.Logf(format, args...) }
 func (r *headlessPromptRuntime) Close() error {

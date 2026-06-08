@@ -7,11 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"builder/cli/app/internal/statuscollect"
 	"builder/server/auth"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	sharedtheme "builder/shared/theme"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -291,7 +294,7 @@ func TestSessionPickerHeaderRendersRemoteServerStatus(t *testing.T) {
 	m.width = 80
 
 	raw := m.renderHeader()
-	successEscape := strings.Replace(foregroundTrueColorEscape(statusGreenColor().Dark.TrueColor), "\x1b[", "\x1b[1;", 1)
+	successEscape := strings.Replace(foregroundTrueColorEscape(sharedtheme.DefaultPalette().Status.Success.Adaptive().Dark.TrueColor), "\x1b[", "\x1b[1;", 1)
 	if !strings.Contains(raw, successEscape+"Server at 127.0.0.1:53082") {
 		t.Fatalf("expected remote server line to use success color, got %q", raw)
 	}
@@ -327,7 +330,7 @@ func TestSessionPickerAuthLabelExamples(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sessionPickerAuthLabel(tt.info); got != tt.want {
+			if got := statuscollect.AuthDisplayLabel(tt.info); got != tt.want {
 				t.Fatalf("auth label = %q, want %q", got, tt.want)
 			}
 		})

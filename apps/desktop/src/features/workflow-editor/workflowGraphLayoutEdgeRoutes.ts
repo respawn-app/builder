@@ -5,6 +5,7 @@ import {
   type NodeLayoutOffset,
   type WorkflowGraphEndpointPort,
   type WorkflowGraphNodeRect,
+  workflowJoinOutgoingRouteJog,
 } from "./workflowGraphLayoutGeometry";
 import type { WorkflowGraphNode, WorkflowGraphPoint } from "./workflowGraphLayout";
 
@@ -72,7 +73,11 @@ export function workflowGraphEdgeRoutePoints(
   if (isBranchToAlignedJoin(source, target, targetAligned)) {
     return branchJoinEdgeRoutePoints(endpoints, options.groupNodeByGroupID);
   }
-  return adjustAlignedJoinEndpointRoutePoints(routedPoints, endpoints, { sourceAligned, targetAligned });
+  const adjustedPoints = adjustAlignedJoinEndpointRoutePoints(routedPoints, endpoints, {
+    sourceAligned,
+    targetAligned,
+  });
+  return joinOutgoingEdgeRoutePoints(adjustedPoints, endpoints);
 }
 
 function edgeRoutePoints(
@@ -133,6 +138,23 @@ function adjustAlignedJoinEndpointRoutePoints(
     adjusted[adjusted.length - 1] = targetHandlePoint(endpoints.target, endpoints.targetPort);
   }
   return compactRoutePoints(adjusted);
+}
+
+function joinOutgoingEdgeRoutePoints(
+  points: readonly WorkflowGraphPoint[],
+  endpoints: WorkflowGraphRouteEndpoints,
+): readonly WorkflowGraphPoint[] {
+  if (endpoints.source.kind !== "join" || points.length !== 2) {
+    return points;
+  }
+  const start = sourceHandlePoint(endpoints.source, endpoints.sourcePort);
+  const end = targetHandlePoint(endpoints.target, endpoints.targetPort);
+  const midX = start.x + (end.x - start.x) / 2;
+  if (start.y === end.y) {
+    const jogY = start.y + workflowJoinOutgoingRouteJog;
+    return compactRoutePoints([start, { x: midX, y: start.y }, { x: midX, y: jogY }, { x: end.x, y: jogY }, end]);
+  }
+  return compactRoutePoints([start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]);
 }
 
 function sourceHandlePoint(rect: WorkflowGraphNodeRect, port: WorkflowGraphEndpointPort): WorkflowGraphPoint {

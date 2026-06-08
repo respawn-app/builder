@@ -10,10 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func detailDivider() string {
-	return TranscriptDivider
-}
-
 func ongoingDividerGroup(role RenderIntent) string {
 	normalized := normalizeOngoingDividerRole(role)
 	if normalized == RenderIntentToolQuestion || normalized == RenderIntentToolQuestionError {
@@ -34,10 +30,6 @@ func normalizeOngoingDividerRole(role RenderIntent) RenderIntent {
 
 func skipInOngoing(entry TranscriptEntry) bool {
 	return !isVisibleInOngoing(entry)
-}
-
-func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
-	return transcript.CompactToolCallText(meta, text)
 }
 
 func compactOngoingShellPreviewText(command string) string {
@@ -69,10 +61,6 @@ func compactReviewerStatusForOngoing(text string) string {
 	return trimmed
 }
 
-func compactReviewerSuggestionsForOngoing(text string) string {
-	return strings.TrimSpace(text)
-}
-
 func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string, int) {
 	_ = text
 	question := ""
@@ -85,7 +73,7 @@ func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []s
 		}
 		recommendedOptionIndex = meta.RecommendedOptionIndex
 		for _, suggestion := range meta.Suggestions {
-			trimmed := normalizeAskQuestionSuggestion(suggestion)
+			trimmed := strings.TrimSpace(suggestion)
 			if trimmed == "" {
 				continue
 			}
@@ -115,7 +103,7 @@ func RenderInlineAskQuestionMarkdownLines(question string, theme string, width i
 		width = 1
 	}
 	if renderer.md != nil {
-		if rendered, err := renderer.md.render(RenderIntentToolQuestion, question, width); err == nil {
+		if rendered, err := renderer.md.renderWithRenderer(RenderIntentToolQuestion, question, width, "plain", renderer.md.getRenderer); err == nil {
 			lines := trimZeroWidthEdgeLines(splitLines(rendered))
 			if len(lines) > 0 {
 				return lines
@@ -150,10 +138,6 @@ func normalizeAskQuestionQuestion(question string) string {
 	return trimmed
 }
 
-func normalizeAskQuestionSuggestion(suggestion string) string {
-	return strings.TrimSpace(suggestion)
-}
-
 func (m Model) flattenAskQuestionEntry(role RenderIntent, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool) []string {
 	return m.flattenAskQuestionEntryWithSymbol(role, question, suggestions, recommendedOptionIndex, answer, includeSuggestions, "")
 }
@@ -177,7 +161,7 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role RenderIntent, question str
 	}
 	if includeSuggestions {
 		for index, suggestion := range suggestions {
-			suggestion = normalizeAskQuestionSuggestion(suggestion)
+			suggestion = strings.TrimSpace(suggestion)
 			if suggestion == "" {
 				continue
 			}
@@ -248,7 +232,7 @@ func (m Model) renderAskQuestionMarkdownLines(role RenderIntent, question string
 		renderWidth = 1
 	}
 	if m.md != nil {
-		if rendered, err := m.md.renderWrapped(role, question, renderWidth); err == nil {
+		if rendered, err := m.md.renderWithRenderer(role, question, renderWidth, "wrapped", m.md.getWrappedRenderer); err == nil {
 			lines := splitLines(hardWrapOverflowingRenderedLines(rendered, renderWidth))
 			if len(lines) > 0 {
 				return lines
@@ -326,22 +310,6 @@ func isWebSearchToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && strings.TrimSpace(meta.ToolName) == string(toolspec.ToolWebSearch)
 }
 
-func isToolHeadlineRole(role RenderIntent) bool {
-	return role.IsToolHeadline()
-}
-
-func isToolErrorHeadlineRole(role RenderIntent) bool {
-	return role.IsToolErrorHeadline()
-}
-
-func isShellPreviewRole(role RenderIntent) bool {
-	return role.IsShellPreview()
-}
-
-func splitToolInlineMeta(line string) (string, string) {
-	return transcript.SplitInlineMeta(line)
-}
-
 func (m Model) renderPatchSummaryContent(meta *transcript.ToolCallMeta) (transcriptRenderContent, bool) {
 	if meta == nil || meta.PatchRender == nil {
 		return transcriptRenderContent{}, false
@@ -398,7 +366,7 @@ func (m Model) renderPatchSummaryLine(line transcriptPatchSummaryLine) string {
 }
 
 func (m Model) renderToolHeadline(line string, width int) string {
-	command, meta := splitToolInlineMeta(line)
+	command, meta := transcript.SplitInlineMeta(line)
 	if meta == "" {
 		return command
 	}

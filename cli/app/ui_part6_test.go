@@ -7,11 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
@@ -79,7 +80,7 @@ func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 	if !strings.Contains(updated.input, "first-job") {
 		t.Fatalf("expected pasted shell content in input buffer, got %q", updated.input)
 	}
-	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "Pasted shell transcript") {
+	if !strings.Contains(stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark"))), "Pasted shell transcript") {
 		t.Fatal("expected ongoing status line to show pasted shell transcript notice")
 	}
 }
@@ -176,7 +177,7 @@ func TestDirectPSInlineCommandPastesTranscriptIntoInput(t *testing.T) {
 	if !strings.Contains(updated.input, "direct-inline") {
 		t.Fatalf("expected pasted shell transcript content in input, got %q", updated.input)
 	}
-	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "Pasted shell transcript") {
+	if !strings.Contains(stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark"))), "Pasted shell transcript") {
 		t.Fatal("expected direct /ps inline to show pasted shell transcript notice")
 	}
 }
@@ -248,7 +249,7 @@ func TestDirectPSLogsCommandUsesDefaultOpenSuccess(t *testing.T) {
 	if openedPath != res.OutputPath {
 		t.Fatalf("expected direct /ps logs to open %q, got %q", res.OutputPath, openedPath)
 	}
-	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "Opened logs") {
+	if !strings.Contains(stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark"))), "Opened logs") {
 		t.Fatal("expected direct /ps logs to show opened logs notice")
 	}
 	if updated.input != "" {
@@ -280,8 +281,8 @@ func TestDirectPSKillCommandSignalsBackgroundProcess(t *testing.T) {
 	updated := next.(*uiModel)
 	updated = applyProcessActionCommandForTest(t, updated, cmd)
 
-	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "sent terminate signal to "+res.SessionID) {
-		t.Fatalf("expected direct /ps kill to show kill notice, got %q", stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))))
+	if !strings.Contains(stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark"))), "sent terminate signal to "+res.SessionID) {
+		t.Fatalf("expected direct /ps kill to show kill notice, got %q", stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark"))))
 	}
 	waitForTestCondition(t, 2*time.Second, "background process kill request to be reflected in manager state", func() bool {
 		snapshot, ok := findBackgroundSnapshot(manager.List(), res.SessionID)
@@ -434,7 +435,7 @@ func TestOpenLogsReportsErrorWhenDefaultOpenFails(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	updated = applyProcessActionCommandForTest(t, updated, cmd)
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "open logs failed") {
 		t.Fatalf("expected open failure status, got %q", status)
 	}
@@ -539,7 +540,7 @@ func TestSlashCommandPickerHidesInArgumentMode(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeySpace})
 	updated = next.(*uiModel)
 
-	lines := updated.renderSlashCommandPicker(80)
+	lines := updated.layout().renderActivePicker(80)
 	if len(lines) != 0 {
 		t.Fatalf("expected hidden picker in argument mode, got %d lines", len(lines))
 	}
@@ -581,7 +582,7 @@ func TestSlashCommandArrowKeysDoNotOverrideArgumentMode(t *testing.T) {
 func TestSlashCommandTabAutocompletesSelectedCommandAndAddsSpace(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.input = "/ne"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := next.(*uiModel)
@@ -599,7 +600,7 @@ func TestSlashCommandTabAutocompletesSelectedCommandAndAddsSpace(t *testing.T) {
 func TestSlashCommandEnterExecutesSelectedPartialMatch(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.input = "/ex"
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshSlashCommandFilterFromInputWithAuth(true)
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
@@ -791,9 +792,9 @@ func TestStaleHydrateKeepsQueuedDrainReadyAfterCommittedGapUserFlush(t *testing.
 	m.transcriptRevision = 6
 	m.transcriptTotalEntries = 1
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "working"})
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"}, true).cmd
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		StepID:                       "step-1",
 		CommittedTranscriptChanged:   true,
@@ -802,7 +803,7 @@ func TestStaleHydrateKeepsQueuedDrainReadyAfterCommittedGapUserFlush(t *testing.
 		UserMessage:                  "steered message",
 		UserMessageBatchQueueItemIDs: []string{"queue-test-0"},
 		TranscriptEntries:            []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
-	})
+	}, true).cmd
 	if got := len(m.deferredCommittedTail); got != 0 {
 		t.Fatalf("expected queued user flush to stop using deferred committed tail, got %d", got)
 	}

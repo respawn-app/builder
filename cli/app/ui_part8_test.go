@@ -5,16 +5,18 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/tools"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"io"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
@@ -41,7 +43,7 @@ func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
 			ThinkingLevel: "low",
 			Client:        reviewerClient,
 		},
-	}, busyTogglePatchTool{delay: 80 * time.Millisecond})
+	}, tools.HandlerRegistration{ID: toolspec.ToolPatch, Handler: busyTogglePatchTool{delay: 80 * time.Millisecond}})
 
 	m := newProjectedEngineUIModel(eng)
 	m.setBusy(true)
@@ -298,7 +300,7 @@ func TestBusyUnsupportedSlashCommandShowsTransientErrorAndDoesNotQueue(t *testin
 	if updated.input != "" {
 		t.Fatalf("expected input cleared for blocked slash command, got %q", updated.input)
 	}
-	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "cannot run /compact while model is working") {
 		t.Fatalf("expected transient status in status line, got %q", status)
 	}
@@ -655,7 +657,7 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPrompt(t *testing.T) {
 	m := newProjectedTestUIModel(client, nil, nil)
 	m.setRuntimeDisconnected(true)
 
-	next, _ := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	next, _ := m.inputController().applyCommandResultWithPreSubmitQueuePosition(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"}, preSubmitQueueBack)
 	updated := next.(*uiModel)
 	if updated.input != "generated prompt" {
 		t.Fatalf("expected generated prompt restored into input, got %q", updated.input)
@@ -671,7 +673,7 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPromptAlongsideHiddenSteering
 	m.setRuntimeDisconnected(true)
 	m.pendingInjected = queuedUserMessagesForTest("hidden steering")
 
-	next, _ := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	next, _ := m.inputController().applyCommandResultWithPreSubmitQueuePosition(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"}, preSubmitQueueBack)
 	updated := next.(*uiModel)
 	if updated.input != "hidden steering\n\ngenerated prompt" {
 		t.Fatalf("expected generated prompt restored after hidden steering, got %q", updated.input)
@@ -686,7 +688,7 @@ func TestApplyCommandResultBackWithoutParentReturnsVisibleSystemFeedbackCmd(t *t
 	m.windowSizeKnown = true
 	m.termWidth = 120
 
-	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, Action: commands.ActionBack})
+	next, cmd := m.inputController().applyCommandResultWithPreSubmitQueuePosition(commands.Result{Handled: true, Action: commands.ActionBack}, preSubmitQueueBack)
 	updated := next.(*uiModel)
 
 	if len(updated.transcriptEntries) != 1 {

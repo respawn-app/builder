@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
@@ -113,8 +112,6 @@ func (c *cancelObservingRuntimeControlClient) ProviderCapabilities(context.Conte
 }
 
 type fakeShellHandler struct{}
-
-func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolExecCommand }
 
 func (fakeShellHandler) Call(context.Context, tools.Call) (tools.Result, error) {
 	return tools.Result{Output: json.RawMessage(`{"output":"ok","exit_code":0,"truncated":false}`)}, nil
@@ -354,22 +351,44 @@ func TestServiceSetGoalAllowsAgentWithoutExistingGoal(t *testing.T) {
 }
 
 func TestServiceSetGoalRejectsAgentOverwrite(t *testing.T) {
-	store, engine, service := newRuntimeControlTestService(t, &blockingRuntimeControlClient{}, nil, runtime.Config{})
-	if _, err := engine.SetGoal("existing goal", session.GoalActorUser); err != nil {
-		t.Fatalf("SetGoal initial: %v", err)
-	}
+	for _, tt := range []struct {
+		name   string
+		status session.GoalStatus
+	}{
+		{name: "active", status: session.GoalStatusActive},
+		{name: "paused", status: session.GoalStatusPaused},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, engine, service := newRuntimeControlTestService(t, &blockingRuntimeControlClient{}, nil, runtime.Config{})
+			if _, err := engine.SetGoal("existing goal\n\n- keep markdown", session.GoalActorUser); err != nil {
+				t.Fatalf("SetGoal initial: %v", err)
+			}
+			if tt.status == session.GoalStatusPaused {
+				if _, err := engine.SetGoalStatus(session.GoalStatusPaused, session.GoalActorUser); err != nil {
+					t.Fatalf("SetGoalStatus paused: %v", err)
+				}
+			}
 
-	_, err := service.SetGoal(context.Background(), serverapi.RuntimeGoalSetRequest{
-		ClientRequestID: "agent-goal-overwrite",
-		SessionID:       store.Meta().SessionID,
-		Objective:       "agent replacement",
-		Actor:           "agent",
-	})
-	if err == nil || !strings.Contains(err.Error(), strings.TrimSpace(prompts.GoalAgentCommandDeniedPrompt)) {
-		t.Fatalf("agent overwrite error = %v, want denied prompt", err)
-	}
-	if goal := store.Meta().Goal; goal == nil || goal.Objective != "existing goal" {
-		t.Fatalf("goal after rejected overwrite = %+v", goal)
+			_, err := service.SetGoal(context.Background(), serverapi.RuntimeGoalSetRequest{
+				ClientRequestID: "agent-goal-overwrite-" + tt.name,
+				SessionID:       store.Meta().SessionID,
+				Objective:       "agent replacement",
+				Actor:           "agent",
+			})
+			if err == nil ||
+				!strings.Contains(err.Error(), "status: "+string(tt.status)) ||
+				!strings.Contains(err.Error(), "<goal>\nexisting goal\n\n- keep markdown\n</goal>") ||
+				!strings.Contains(err.Error(), "Overwriting an existing goal is not allowed") ||
+				!strings.Contains(err.Error(), "active or paused") {
+				t.Fatalf("agent overwrite error = %v, want denied prompt", err)
+			}
+			if strings.Contains(err.Error(), "Detected invocation by the agent") {
+				t.Fatalf("agent overwrite used generic agent-denial reason: %v", err)
+			}
+			if goal := store.Meta().Goal; goal == nil || goal.Objective != "existing goal\n\n- keep markdown" || goal.Status != tt.status {
+				t.Fatalf("goal after rejected overwrite = %+v", goal)
+			}
+		})
 	}
 }
 
@@ -605,7 +624,7 @@ func TestServiceCompleteGoalFeedbackIncludesCookDuration(t *testing.T) {
 }
 
 func TestServiceSetSessionNameReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
-	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	if err := store.SetName("before"); err != nil {
 		t.Fatalf("persist initial session name: %v", err)
 	}
@@ -755,7 +774,7 @@ func TestServiceSubmitUserTurnDedupesSuccessfulRetry(t *testing.T) {
 }
 
 func TestServiceSubmitUserShellCommandDedupesSuccessfulRetry(t *testing.T) {
-	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	req := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 
 	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
@@ -775,7 +794,7 @@ func TestServiceSubmitUserShellCommandDedupesSuccessfulRetry(t *testing.T) {
 }
 
 func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
-	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, engine := newRuntimeControlTestEngine(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	verifier := &stubRuntimeLeaseVerifier{}
 	service := NewService(stubRuntimeResolver{engine: engine}, nil).
 		WithControllerLeaseVerifier(verifier)
@@ -797,7 +816,7 @@ func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidati
 }
 
 func TestServiceSubmitUserShellCommandRejectsClientRequestIDPayloadMismatch(t *testing.T) {
-	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
+	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeShellHandler{}}), runtime.Config{})
 	first := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 	if err := service.SubmitUserShellCommand(context.Background(), first); err != nil {
 		t.Fatalf("SubmitUserShellCommand first: %v", err)

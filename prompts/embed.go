@@ -108,6 +108,7 @@ var (
 	GoalCompletePrompt                             = mustPrompt("goal/complete.md")
 	GoalAlreadyCompletePrompt                      = mustPrompt("goal/already_complete.md")
 	GoalAgentCommandDeniedPrompt                   = mustPrompt("goal/agent_command_denied.md")
+	GoalAgentDuplicateSetDeniedPrompt              = mustPrompt("goal/agent_duplicate_set_denied.md")
 	GoalCompleteConfirmRequiredPrompt              = mustPrompt("goal/complete_confirm_required.md")
 	ReviewPrompt                                   = mustPrompt("review_prompt.md")
 	InitPrompt                                     = mustPrompt("init_prompt.md")
@@ -209,6 +210,19 @@ func RenderGoalAlreadyCompletePrompt(objective string) string {
 	})
 }
 
+func RenderGoalAgentDuplicateSetDeniedPrompt(objective, status string) string {
+	return renderTemplatePlaceholders(GoalAgentDuplicateSetDeniedPrompt, map[string]string{
+		"{{objective}}": strings.TrimSpace(objective),
+		"{{status}}":    strings.TrimSpace(status),
+	})
+}
+
+func RenderGoalCompleteConfirmRequiredPrompt(objective string) string {
+	return renderTemplatePlaceholders(GoalCompleteConfirmRequiredPrompt, map[string]string{
+		"{{objective}}": strings.TrimSpace(objective),
+	})
+}
+
 func RenderWorktreeModePrompt(branch, cwd, worktreePath, workspaceRoot string) string {
 	return renderTemplatePlaceholders(WorktreeModePrompt, map[string]string{
 		"{{branch}}":         strings.TrimSpace(branch),
@@ -241,15 +255,17 @@ func RenderWorkflowTaskInstructions(args WorkflowNodeContextArgs, nodeCompletion
 }
 
 func RenderWorkflowToolCompletionInstructions(workflowShortId string) (string, error) {
-	return renderWorkflowCompletionInstructions("workflow tool completion instructions", WorkflowToolCompletionInstructionsPrompt, workflowShortId)
+	return renderNamedTemplate("workflow tool completion instructions", WorkflowToolCompletionInstructionsPrompt, struct {
+		BuilderCommand  string
+		WorkflowShortId string
+	}{
+		BuilderCommand:  selfcmd.BuilderCommand(),
+		WorkflowShortId: strings.TrimSpace(workflowShortId),
+	})
 }
 
 func RenderWorkflowStructuredCompletionInstructions(workflowShortId string) (string, error) {
-	return renderWorkflowCompletionInstructions("workflow structured completion instructions", WorkflowStructuredCompletionInstructionsPrompt, workflowShortId)
-}
-
-func renderWorkflowCompletionInstructions(name string, text string, workflowShortId string) (string, error) {
-	return renderNamedTemplate(name, text, struct {
+	return renderNamedTemplate("workflow structured completion instructions", WorkflowStructuredCompletionInstructionsPrompt, struct {
 		BuilderCommand  string
 		WorkflowShortId string
 	}{
@@ -286,23 +302,28 @@ type systemPromptSections struct {
 }
 
 func renderSystemPromptSections(args SystemPromptTemplateArgs) (systemPromptSections, error) {
-	personality, err := renderSystemPromptSection("system prompt personality", SystemPromptPersonality, args)
+	runtimeTemplateData := systemPromptRuntimeTemplateData{
+		BuilderCommand:               selfcmd.BuilderCommand(),
+		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
+		EditingToolName:              strings.TrimSpace(args.EditingToolName),
+	}
+	personality, err := renderNamedTemplate("system prompt personality", SystemPromptPersonality, runtimeTemplateData)
 	if err != nil {
 		return systemPromptSections{}, err
 	}
-	harness, err := renderSystemPromptSection("system prompt harness", SystemPromptHarness, args)
+	harness, err := renderNamedTemplate("system prompt harness", SystemPromptHarness, runtimeTemplateData)
 	if err != nil {
 		return systemPromptSections{}, err
 	}
-	ambiguityAndQuality, err := renderSystemPromptSection("system prompt ambiguity and quality", SystemPromptAmbiguityAndQuality, args)
+	ambiguityAndQuality, err := renderNamedTemplate("system prompt ambiguity and quality", SystemPromptAmbiguityAndQuality, runtimeTemplateData)
 	if err != nil {
 		return systemPromptSections{}, err
 	}
-	finalAnswerAndFormatting, err := renderSystemPromptSection("system prompt final answer and formatting", SystemPromptFinalAnswerAndFormatting, args)
+	finalAnswerAndFormatting, err := renderNamedTemplate("system prompt final answer and formatting", SystemPromptFinalAnswerAndFormatting, runtimeTemplateData)
 	if err != nil {
 		return systemPromptSections{}, err
 	}
-	delegation, err := renderSystemPromptSection("system prompt delegation", SystemPromptDelegation, args)
+	delegation, err := renderNamedTemplate("system prompt delegation", SystemPromptDelegation, runtimeTemplateData)
 	if err != nil {
 		return systemPromptSections{}, err
 	}
@@ -313,14 +334,6 @@ func renderSystemPromptSections(args SystemPromptTemplateArgs) (systemPromptSect
 		finalAnswerAndFormatting: finalAnswerAndFormatting,
 		delegation:               delegation,
 	}, nil
-}
-
-func renderSystemPromptSection(name string, text string, args SystemPromptTemplateArgs) (string, error) {
-	return renderNamedTemplate(name, text, systemPromptRuntimeTemplateData{
-		BuilderCommand:               selfcmd.BuilderCommand(),
-		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
-		EditingToolName:              strings.TrimSpace(args.EditingToolName),
-	})
 }
 
 func renderDefaultSystemPromptTemplateWithSections(text string, args SystemPromptTemplateArgs, sections systemPromptSections) (string, error) {

@@ -71,7 +71,7 @@ func committedTranscriptLocalFrontierEnd(m *uiModel) int {
 	}
 	committedCount := 0
 	for _, entry := range m.transcriptEntries {
-		if transcriptEntryCommittedForApp(entry) {
+		if !entry.Transient || entry.Committed {
 			committedCount++
 		}
 	}

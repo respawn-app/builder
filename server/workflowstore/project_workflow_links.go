@@ -126,7 +126,7 @@ func (s *Store) ListProjectWorkflowLinks(ctx context.Context, projectID string) 
 }
 
 func (s *Store) ListWorkflowProjectLinks(ctx context.Context, workflowID workflow.WorkflowID) ([]ProjectWorkflowLinkRecord, error) {
-	rows, err := s.db.QueryContext(ctx, workflowStoreQuery(listWorkflowProjectLinksQuery), string(workflowID))
+	rows, err := s.db.QueryContext(ctx, strings.TrimSuffix(listWorkflowProjectLinksQuery, "\n"), string(workflowID))
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +243,7 @@ func (s *Store) UnlinkProjectWorkflow(ctx context.Context, linkID string, replac
 			return ProjectWorkflowUnlinkResult{}, fmt.Errorf("replacement default workflow link is invalid")
 		}
 	} else {
-		deleted, err := tx.ExecContext(ctx, workflowStoreQuery(unlinkProjectWorkflowQuery), link.ID)
+		deleted, err := tx.ExecContext(ctx, strings.TrimSuffix(unlinkProjectWorkflowQuery, "\n"), link.ID)
 		if err != nil {
 			return ProjectWorkflowUnlinkResult{}, err
 		}
@@ -254,7 +254,7 @@ func (s *Store) UnlinkProjectWorkflow(ctx context.Context, linkID string, replac
 		if deletedCount != 1 {
 			var defaultLinkID string
 			var activeLinkCount int
-			if err := tx.QueryRowContext(ctx, workflowStoreQuery(projectWorkflowUnlinkStateQuery), link.ProjectID).Scan(&defaultLinkID, &activeLinkCount); err != nil {
+			if err := tx.QueryRowContext(ctx, strings.TrimSuffix(projectWorkflowUnlinkStateQuery, "\n"), link.ProjectID).Scan(&defaultLinkID, &activeLinkCount); err != nil {
 				return ProjectWorkflowUnlinkResult{}, err
 			}
 			if defaultLinkID == link.ID && activeLinkCount > 1 {

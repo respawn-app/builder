@@ -256,14 +256,10 @@ func (b metaContextBuilder) discoverAgents(permissive bool) ([]llm.Message, erro
 			Role:        llm.RoleDeveloper,
 			MessageType: llm.MessageTypeAgentsMD,
 			SourcePath:  path,
-			Content:     renderAgentsContext(path, string(data)),
+			Content:     fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data)),
 		})
 	}
 	return out, nil
-}
-
-func renderAgentsContext(path, contents string) string {
-	return fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, contents)
 }
 
 func (b metaContextBuilder) subagentsMetaMessage() (llm.Message, bool) {

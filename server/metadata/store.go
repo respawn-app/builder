@@ -18,6 +18,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+
 	"github.com/google/uuid"
 	sqlitedriver "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -279,7 +280,7 @@ func (s *Store) ListWorktreeRecordsByWorkspaceID(ctx context.Context, workspaceI
 	}
 	out := make([]WorktreeRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, worktreeRecordFromListRow(row))
+		out = append(out, worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs))
 	}
 	return out, nil
 }
@@ -292,7 +293,7 @@ func (s *Store) GetWorktreeRecordByID(ctx context.Context, worktreeID string) (W
 	if err != nil {
 		return WorktreeRecord{}, fmt.Errorf("get worktree by id: %w", err)
 	}
-	return worktreeRecordFromGetByIDRow(row), nil
+	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs), nil
 }
 
 func (s *Store) GetWorktreeRecordByCanonicalRoot(ctx context.Context, worktreeRoot string) (WorktreeRecord, error) {
@@ -307,7 +308,7 @@ func (s *Store) GetWorktreeRecordByCanonicalRoot(ctx context.Context, worktreeRo
 	if err != nil {
 		return WorktreeRecord{}, fmt.Errorf("get worktree by canonical root: %w", err)
 	}
-	return worktreeRecordFromGetByCanonicalRootRow(row), nil
+	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs), nil
 }
 
 func (s *Store) UpsertWorktreeRecord(ctx context.Context, record WorktreeRecord) error {
@@ -1259,7 +1260,7 @@ func (s *Store) SetProjectKey(ctx context.Context, projectID string, projectKey 
 	if strings.TrimSpace(state.ProjectKey) == normalizedKey {
 		return nil
 	}
-	result, err := tx.ExecContext(ctx, metadataQuery(setProjectKeyQuery), normalizedKey, time.Now().UTC().UnixMilli(), trimmedProjectID, normalizedKey, trimmedProjectID)
+	result, err := tx.ExecContext(ctx, strings.TrimSuffix(setProjectKeyQuery, "\n"), normalizedKey, time.Now().UTC().UnixMilli(), trimmedProjectID, normalizedKey, trimmedProjectID)
 	if err != nil {
 		if isSQLiteUniqueConstraint(err) {
 			return fmt.Errorf("%w: %q", ErrProjectKeyAlreadyInUse, normalizedKey)
@@ -2075,10 +2076,6 @@ func runtimeLeaseRecordFromRow(row sqlitegen.RuntimeLease) RuntimeLeaseRecord {
 	}
 }
 
-func worktreeRecordFromListRow(row sqlitegen.ListWorktreesByWorkspaceIDRow) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
-}
-
 func worktreeRecordFromParts(id string, workspaceID string, canonicalRoot string, isMain bool, builderManaged bool, createdBranch bool, originSessionID string, gitMetadataJSON string, createdAtUnixMs int64, updatedAtUnixMs int64) WorktreeRecord {
 	return WorktreeRecord{
 		ID:              id,
@@ -2094,14 +2091,6 @@ func worktreeRecordFromParts(id string, workspaceID string, canonicalRoot string
 		CreatedAt:       timeFromStoredTimestamp(createdAtUnixMs),
 		UpdatedAt:       timeFromStoredTimestamp(updatedAtUnixMs),
 	}
-}
-
-func worktreeRecordFromGetByIDRow(row sqlitegen.GetWorktreeByIDRow) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
-}
-
-func worktreeRecordFromGetByCanonicalRootRow(row sqlitegen.GetWorktreeByCanonicalRootRow) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
 }
 
 func normalizeSessionCwdRelpath(value string) string {

@@ -54,7 +54,20 @@ func testAuthLookupEnv(key string) string {
 	return ""
 }
 
-type noopOnboarding struct{}
+var noopOnboarding = startup.OnboardingHandler(func(_ context.Context, req startup.OnboardingRequest) (config.App, error) {
+	path, created, err := config.WriteDefaultSettingsFile()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded, err := req.ReloadConfig()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded.Source.CreatedDefaultConfig = created
+	reloaded.Source.SettingsPath = path
+	reloaded.Source.SettingsFileExists = true
+	return reloaded, nil
+})
 
 type notifyingListener struct {
 	net.Listener
@@ -68,21 +81,6 @@ func (l *notifyingListener) Accept() (net.Conn, error) {
 		l.once.Do(func() { close(l.acceptDone) })
 	}
 	return conn, err
-}
-
-func (noopOnboarding) EnsureOnboardingReady(_ context.Context, req startup.OnboardingRequest) (config.App, error) {
-	path, created, err := config.WriteDefaultSettingsFile()
-	if err != nil {
-		return config.App{}, err
-	}
-	reloaded, err := req.ReloadConfig()
-	if err != nil {
-		return config.App{}, err
-	}
-	reloaded.Source.CreatedDefaultConfig = created
-	reloaded.Source.SettingsPath = path
-	reloaded.Source.SettingsFileExists = true
-	return reloaded, nil
 }
 
 func registerServeWorkspace(t *testing.T, workspace string) {
@@ -105,7 +103,7 @@ func newServeWorkspace(t *testing.T) string {
 	return workspace
 }
 
-func startServeTestServer(t *testing.T, request startup.Request, authHandler envAuthHandler, onboarding noopOnboarding) *Server {
+func startServeTestServer(t *testing.T, request startup.Request, authHandler envAuthHandler, onboarding startup.OnboardingHandler) *Server {
 	t.Helper()
 	server, err := Start(context.Background(), request, authHandler, onboarding)
 	if err != nil {
@@ -161,7 +159,7 @@ func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 
 	appCore, err := startup.StartCore(context.Background(), request, authHandler, onboarding)
 	if err != nil {
@@ -204,7 +202,7 @@ func TestStartRejectsSecondOwnerForSamePersistenceRoot(t *testing.T) {
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 
 	_ = startServeTestServer(t, request, authHandler, onboarding)
 
@@ -235,7 +233,7 @@ func TestServeExposesConfiguredHealthEndpoints(t *testing.T) {
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 
 	server := startServeTestServer(t, request, authHandler, onboarding)
 
@@ -295,7 +293,7 @@ func TestServeExposesDerivedLocalUnixSocketAndCleansStalePath(t *testing.T) {
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 
 	loadCfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -383,7 +381,7 @@ func TestServeDegradesToTCPWhenDerivedLocalSocketFails(t *testing.T) {
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 
 	originalLocalSocketListener := localSocketListener
 	localSocketListener = func(config.App) (net.Listener, func(), bool, error) {
@@ -435,7 +433,7 @@ func TestServeStartsUnauthenticatedAndReportsBootstrapReadiness(t *testing.T) {
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true, AllowUnauthenticated: true}
 	authHandler := envAuthHandler{lookupEnv: func(string) string { return "" }}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 
 	server := startServeTestServer(t, request, authHandler, onboarding)
 
@@ -514,7 +512,7 @@ model = "blocked-model"
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true, AllowUnauthenticated: true}
 	authHandler := envAuthHandler{lookupEnv: func(string) string { return "" }}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 	registerServeWorkspace(t, workspace)
 
 	server := startServeTestServer(t, request, authHandler, onboarding)
@@ -612,7 +610,7 @@ func TestServeFailsWhenConfiguredPortIsOccupied(t *testing.T) {
 	workspace := newServeWorkspace(t)
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
-	onboarding := noopOnboarding{}
+	onboarding := noopOnboarding
 	server := startServeTestServer(t, request, authHandler, onboarding)
 	loadCfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {

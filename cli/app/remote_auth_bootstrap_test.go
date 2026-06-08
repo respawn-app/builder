@@ -72,7 +72,7 @@ func TestRemoteAuthBootstrapHybridBrowserAcceptsCallbackOrPaste(t *testing.T) {
 				runCallbackPage:       tt.runPage,
 			}
 
-			if err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor); err != nil {
+			if err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor, true); err != nil {
 				t.Fatalf("ensureRemoteAuthReady: %v", err)
 			}
 			if remote.completeReq.CallbackInput != tt.wantInput {
@@ -110,7 +110,7 @@ func TestRemoteAuthBootstrapHybridBrowserCancelClosesListener(t *testing.T) {
 		},
 	}
 
-	err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor)
+	err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor, true)
 	if err == nil || !errors.Is(err, ErrAuthCanceledByUser) {
 		t.Fatalf("expected auth cancel, got %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRemoteAuthBootstrapRejectsMismatchedOAuthState(t *testing.T) {
 		},
 	}
 
-	err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor)
+	err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor, true)
 	if err == nil || !errors.Is(err, ErrAuthCanceledByUser) {
 		t.Fatalf("expected auth cancel, got %v", err)
 	}

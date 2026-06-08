@@ -5,6 +5,7 @@ import (
 	"builder/shared/clientui"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -129,7 +130,7 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ask.freeform && isClipboardImagePasteKey(msg) {
 		return m, m.pasteClipboardImageCmd(uiClipboardPasteTargetAsk)
 	}
-	if m.ask.freeform && handleSharedInputEditKey(msg, uiSharedInputEditActions{
+	if m.ask.freeform && handleSharedInputEditKeyForGOOS(msg, uiSharedInputEditActions{
 		Backspace:          m.backspaceAskInput,
 		DeleteForward:      m.deleteForwardAskInput,
 		DeleteBackwardWord: m.deleteBackwardWordAskInput,
@@ -138,7 +139,7 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		KillToLineEnd:      m.killAskInputToLineEnd,
 		Yank:               m.yankAskInput,
 		DeleteCurrentLine:  m.deleteCurrentAskInputLine,
-	}) {
+	}, runtime.GOOS) {
 		return m, nil
 	}
 
@@ -183,7 +184,10 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.ask.freeform {
 			commentary := strings.TrimSpace(m.ask.input)
 			if askRequiresFreeformSelectionCommentary(req, m.ask.cursor) && commentary == "" {
-				return m, c.showFreeformSelectionCommentaryRequiredError()
+				return m, sequenceCmds(
+					c.model.sendTransientStatusWithNoticeID("Write your response before submitting the freeform option", uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""),
+					ringBellCmd(),
+				)
 			}
 			resp := clientui.PromptAnswer{Answer: commentary, FreeformAnswer: commentary}
 			if optionNumber, ok := selectedAskOptionNumber(req, m.ask.cursor); ok {
@@ -294,39 +298,39 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Alt {
-			m.moveAskCursorWordLeft()
+			m.ask.inputCursor = moveBufferCursorWordLeft(m.ask.input, m.ask.inputCursor)
 			return m, nil
 		}
-		m.moveAskCursorLeft()
+		m.ask.inputCursor = moveBufferCursorLeft(m.ask.input, m.ask.inputCursor)
 		return m, nil
 	case tea.KeyRight:
 		if !m.ask.freeform {
 			return m, nil
 		}
 		if msg.Alt {
-			m.moveAskCursorWordRight()
+			m.ask.inputCursor = moveBufferCursorWordRight(m.ask.input, m.ask.inputCursor)
 			return m, nil
 		}
-		m.moveAskCursorRight()
+		m.ask.inputCursor = moveBufferCursorRight(m.ask.input, m.ask.inputCursor)
 		return m, nil
 	case tea.KeyHome, tea.KeyCtrlA:
 		if m.ask.freeform {
-			m.moveAskCursorStart()
+			m.ask.inputCursor = 0
 		}
 		return m, nil
 	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
 		if m.ask.freeform {
-			m.moveAskCursorEnd()
+			m.ask.inputCursor = -1
 		}
 		return m, nil
 	case tea.KeyCtrlLeft:
 		if m.ask.freeform {
-			m.moveAskCursorWordLeft()
+			m.ask.inputCursor = moveBufferCursorWordLeft(m.ask.input, m.ask.inputCursor)
 		}
 		return m, nil
 	case tea.KeyCtrlRight:
 		if m.ask.freeform {
-			m.moveAskCursorWordRight()
+			m.ask.inputCursor = moveBufferCursorWordRight(m.ask.input, m.ask.inputCursor)
 		}
 		return m, nil
 	default:
@@ -354,7 +358,7 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 	if isApprovalCommentaryPrompt(req, m.ask.freeform, m.ask.freeformMode) {
 		return []askPromptLine{
 			{Text: approvalCommentaryLabel(req, m.ask.cursor), Kind: askPromptLineKindHint},
-			{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true},
+			{Kind: askPromptLineKindInput, InputPrefix: "› ", InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true},
 		}
 	}
 	lines := askQuestionPromptTextLines(req.Question)
@@ -387,7 +391,7 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, idx, askFreeformSelectionOptionText), Kind: askPromptLineKindOption, Selected: selected})
 		}
 		if askSupportsDraftRoundTrip(req) && askHasPendingFreeformDraft(m.ask.input) {
-			lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, Disabled: true, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: false})
+			lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, Disabled: true, InputPrefix: "› ", InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: false})
 			return lines
 		}
 		hint := "Tab to add commentary • Enter to submit"
@@ -405,7 +409,7 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 	if inputLabel != "" {
 		lines = append(lines, askPromptLine{Text: inputLabel, Kind: askPromptLineKindHint})
 	}
-	lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true})
+	lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, InputPrefix: "› ", InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true})
 	hint := "Enter to submit"
 	if askSupportsDraftRoundTrip(req) {
 		hint = "Tab to return to picker • Enter to submit"
@@ -474,10 +478,6 @@ func (c uiAskController) setActiveAsk(evt askEvent) {
 	m.clearAskInput()
 	m.ask.freeform = askOptionCount(current.req) == 0
 	m.ask.freeformMode = askFreeformModeGeneric
-}
-
-func (m *uiModel) askInputPrefix() string {
-	return "› "
 }
 
 func askVisibleOptions(req clientui.PendingPromptEvent) []string {
@@ -565,15 +565,4 @@ func askHasPendingFreeformDraft(input string) bool {
 
 func askSupportsDraftRoundTrip(req clientui.PendingPromptEvent) bool {
 	return !req.Approval && len(askVisibleOptions(req)) > 0
-}
-
-func (c uiAskController) showFreeformSelectionCommentaryRequiredError() tea.Cmd {
-	return sequenceCmds(
-		c.model.setTransientStatusWithKind("Write your response before submitting the freeform option", uiStatusNoticeError),
-		ringBellCmd(),
-	)
-}
-
-func (m *uiModel) renderAskPromptLines() []askPromptLine {
-	return m.askController().renderPromptLines()
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"builder/server/tools/shell/postprocess"
-	"builder/server/tools/shell/shellenv"
 )
 
 const (
@@ -46,31 +45,11 @@ func cancellationMessage(err error) string {
 	return "Canceled by user"
 }
 
-func enrichEnv(base []string) []string {
-	return enrichEnvForSession(base, "")
-}
-
-func enrichEnvForSession(base []string, sessionID string) []string {
-	return shellenv.EnrichForSession(base, sessionID)
-}
-
-func sanitizeOutput(s string) string {
-	return postprocess.SanitizeOutput(s)
-}
-
 func formatCapturedOutput(s string, preserveRaw bool) string {
 	if preserveRaw {
 		return s
 	}
-	return sanitizeOutput(s)
-}
-
-func truncate(s string, maxLen int) (string, bool, int) {
-	return truncateWithTemplate(s, maxLen, truncationBannerTemplate)
-}
-
-func truncateBackgroundOutput(s string, maxLen int) (string, bool, int) {
-	return truncateWithTemplate(s, maxLen, backgroundTruncationBannerTemplate)
+	return postprocess.SanitizeOutput(s)
 }
 
 func truncateWithTemplate(s string, maxLen int, bannerTemplate string) (string, bool, int) {
@@ -79,7 +58,7 @@ func truncateWithTemplate(s string, maxLen int, bannerTemplate string) (string, 
 	}
 	headLen, tailLen := truncationSegmentLengths(len(s), maxLen)
 	removed := len(s) - headLen - tailLen
-	return formatTruncatedPreviewWithTemplate(s[:headLen], removed, s[len(s)-tailLen:], bannerTemplate), true, removed
+	return fmt.Sprintf("%s%s%s", s[:headLen], fmt.Sprintf(bannerTemplate, removed), s[len(s)-tailLen:]), true, removed
 }
 
 func truncationSegmentLengths(total int, maxLen int) (int, int) {
@@ -111,24 +90,4 @@ func truncationSegmentLengths(total int, maxLen int) (int, int) {
 		tail = headTailSize
 	}
 	return head, tail
-}
-
-func truncationBannerLen(removed int) int {
-	return truncationBannerLenWithTemplate(truncationBannerTemplate, removed)
-}
-
-func backgroundTruncationBannerLen(removed int) int {
-	return truncationBannerLenWithTemplate(backgroundTruncationBannerTemplate, removed)
-}
-
-func truncationBannerLenWithTemplate(bannerTemplate string, removed int) int {
-	return len(fmt.Sprintf(bannerTemplate, removed))
-}
-
-func formatBackgroundTruncatedPreview(head string, removed int, tail string) string {
-	return formatTruncatedPreviewWithTemplate(head, removed, tail, backgroundTruncationBannerTemplate)
-}
-
-func formatTruncatedPreviewWithTemplate(head string, removed int, tail string, bannerTemplate string) string {
-	return fmt.Sprintf("%s%s%s", head, fmt.Sprintf(bannerTemplate, removed), tail)
 }

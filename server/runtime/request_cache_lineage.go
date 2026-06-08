@@ -174,10 +174,6 @@ func (e *Engine) observePromptCacheRequest(stepID string, prepared preparedCache
 	return nil
 }
 
-func shouldWarnOnExactBreak(mode config.CacheWarningMode) bool {
-	return mode != config.CacheWarningModeOff
-}
-
 func cacheWarningEntryVisibility(mode config.CacheWarningMode) transcript.EntryVisibility {
 	if normalized, ok := normalizeCacheWarningMode(mode); ok && normalized == config.CacheWarningModeVerbose {
 		return transcript.EntryVisibilityAll
@@ -200,7 +196,7 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 	}
 	events := make([]session.EventInput, 0, 3)
 	var warning *cachewarn.Warning
-	if prepared.exactWarning != nil && shouldWarnOnExactBreak(e.cfg.CacheWarningMode) {
+	if prepared.exactWarning != nil && e.cfg.CacheWarningMode != config.CacheWarningModeOff {
 		lostInputTokens := lostCachedInputTokens(prepared, usage)
 		if lostInputTokens > 0 {
 			warning = prepared.exactWarning
@@ -283,7 +279,7 @@ func applyPersistedCacheWarningToChat(chat *chatStore, payload []byte, mode conf
 		return fmt.Errorf("decode %s event: %w", sessionEventCacheWarning, err)
 	}
 	if chat != nil {
-		chat.appendLocalEntryWithVisibility(cacheWarningTranscriptRole, cachewarn.Text(warning), cacheWarningEntryVisibility(mode))
+		chat.appendLocalEntryRecord(ChatEntry{Visibility: cacheWarningEntryVisibility(mode), Role: cacheWarningTranscriptRole, Text: cachewarn.Text(warning)})
 	}
 	return nil
 }

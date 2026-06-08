@@ -124,7 +124,7 @@ func TestOAuthCallbackSuccessResponseServesAuthCompleteHTML(t *testing.T) {
 }
 
 func TestAuthCompleteHTMLUsesDarkTerminalConfirmation(t *testing.T) {
-	body := authCompleteHTML()
+	body := strings.TrimSuffix(authCompleteHTMLContent, "\n")
 	for _, want := range []string{"Auth complete", "You can close this tab now.", "color-scheme: dark", "--primary:", "font-size: 16px"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected auth confirmation html to contain %q, got %q", want, body)

@@ -1,8 +1,6 @@
 package patch
 
 import (
-	"builder/server/tools"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -186,12 +184,6 @@ func attachFailureReasonContext(err error, context string) error {
 		copy.Reason = trimmedContext + ": " + trimmedReason
 	}
 	return &copy
-}
-
-func patchErrorResult(c tools.Call, err error) tools.Result {
-	return tools.ErrorResultWith(c, errorMessage(err), func(any) (json.RawMessage, error) {
-		return json.Marshal(errorPayload(err))
-	})
 }
 
 func errorPayload(err error) failurePayload {

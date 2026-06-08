@@ -97,7 +97,7 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 	}
 	inheritReviewerDefaultsWithSources(&state.Settings, sources)
 
-	if err := validateSettings(state.Settings, sources); err != nil {
+	if err := configRegistry.validate(settingsState{Settings: state.Settings}, sources); err != nil {
 		return App{}, err
 	}
 

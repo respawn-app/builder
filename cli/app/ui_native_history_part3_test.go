@@ -7,9 +7,10 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestProjectedRuntimeAssistantFinalAfterPromotionMatchesTrimmedCommittedText(t *testing.T) {
@@ -647,7 +648,7 @@ func TestNativeStreamingStableTailIsRemovedBeforeNativeFlushAck(t *testing.T) {
 		t.Fatalf("expected scheduled stable line removed from live tail before flush ack, got %q", got)
 	}
 
-	laterCmd := m.emitNativeRenderedText("later")
+	laterCmd := m.emitNativeRenderedTextWithOptions("later", false)
 	laterFlush, ok := laterCmd().(nativeHistoryFlushMsg)
 	if !ok {
 		t.Fatalf("expected later flush, got %T", laterCmd())

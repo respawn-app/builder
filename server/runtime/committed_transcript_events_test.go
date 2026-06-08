@@ -14,7 +14,7 @@ import (
 func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testing.T) {
 	store := mustCreateTestSession(t)
 	events := make([]Event, 0, 16)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -98,7 +98,7 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 func TestToolResultMirrorMessageDoesNotEmitGenericCommittedAdvance(t *testing.T) {
 	store := mustCreateTestSession(t)
 	events := make([]Event, 0, 16)
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})

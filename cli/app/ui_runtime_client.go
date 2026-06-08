@@ -11,6 +11,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"builder/shared/transcriptdiag"
+
 	"github.com/google/uuid"
 )
 
@@ -67,10 +68,6 @@ func (c *sessionRuntimeClient) isReadOnly() bool {
 	return readOnly
 }
 
-func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
-	return newUIRuntimeClientWithReads(sessionID, reads, controls)
-}
-
 func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
 	if reads == nil || controls == nil {
 		return nil
@@ -118,14 +115,6 @@ func (c *sessionRuntimeClient) controllerLeaseManager() *controllerLeaseManager 
 	return c.controllerLease
 }
 
-func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context, trigger error) error {
-	return c.recoverControllerLeaseWithWarning(ctx, trigger, true)
-}
-
-func (c *sessionRuntimeClient) recoverControllerLeaseSilently(ctx context.Context, trigger error) error {
-	return c.recoverControllerLeaseWithWarning(ctx, trigger, false)
-}
-
 func (c *sessionRuntimeClient) recoverControllerLeaseWithWarning(ctx context.Context, trigger error, appendWarning bool) error {
 	manager := c.controllerLeaseManager()
 	if manager == nil {
@@ -145,7 +134,7 @@ func (c *sessionRuntimeClient) appendLeaseRecoveryWarning(controllerLeaseID stri
 	if c == nil || c.controls == nil {
 		return
 	}
-	warningCtx, cancel := c.controlContext()
+	warningCtx, cancel := context.WithTimeout(context.Background(), uiRuntimeControlTimeout)
 	defer cancel()
 	if err := c.controls.AppendLocalEntry(warningCtx, serverapi.RuntimeAppendLocalEntryRequest{
 		ClientRequestID:   uuid.NewString(),
@@ -167,31 +156,31 @@ func isRecoverableRuntimeControlError(err error) bool {
 }
 
 func (c *sessionRuntimeClient) retryControlCallNoResult(ctx context.Context, call func(controllerLeaseID string) error) error {
-	_, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (struct{}, error) {
+	_, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLeaseWithWarning, true, func(controllerLeaseID string) (struct{}, error) {
 		return struct{}{}, call(controllerLeaseID)
 	})
 	return err
 }
 
-func retryRuntimeControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context, error) error, call func(controllerLeaseID string) (T, error)) (T, error) {
+func retryRuntimeControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context, error, bool) error, appendRecoveryWarning bool, call func(controllerLeaseID string) (T, error)) (T, error) {
 	value, err := call(currentLeaseID())
 	if !isRecoverableRuntimeControlError(err) {
 		return value, err
 	}
 	var zero T
-	if recoverErr := recoverLease(ctx, err); recoverErr != nil {
+	if recoverErr := recoverLease(ctx, err, appendRecoveryWarning); recoverErr != nil {
 		return zero, recoverErr
 	}
 	return call(currentLeaseID())
 }
 
-func retryRuntimeUnavailableCall[T any](ctx context.Context, recoverLease func(context.Context, error) error, call func() (T, error)) (T, error) {
+func retryRuntimeUnavailableCall[T any](ctx context.Context, recoverLease func(context.Context, error, bool) error, appendRecoveryWarning bool, call func() (T, error)) (T, error) {
 	value, err := call()
 	if !errors.Is(err, serverapi.ErrRuntimeUnavailable) {
 		return value, err
 	}
 	var zero T
-	if recoverErr := recoverLease(ctx, err); recoverErr != nil {
+	if recoverErr := recoverLease(ctx, err, appendRecoveryWarning); recoverErr != nil {
 		return zero, recoverErr
 	}
 	return call()
@@ -280,10 +269,6 @@ func (c *sessionRuntimeClient) SessionView() clientui.RuntimeSessionView {
 	return c.MainView().Session
 }
 
-func (c *sessionRuntimeClient) controlContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), uiRuntimeControlTimeout)
-}
-
 func (c *sessionRuntimeClient) readContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout <= 0 {
 		timeout = uiRuntimeReadTimeout
@@ -341,7 +326,7 @@ func (c *sessionRuntimeClient) observeRuntimeEventStatus(evt clientui.Event) {
 func (c *sessionRuntimeClient) refreshMainViewSync(timeout time.Duration) (clientui.RuntimeMainView, error) {
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
-	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseSilently, func() (serverapi.SessionMainViewResponse, error) {
+	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseWithWarning, false, func() (serverapi.SessionMainViewResponse, error) {
 		return c.reads.GetSessionMainView(ctx, serverapi.SessionMainViewRequest{SessionID: c.sessionID})
 	})
 	c.notifyConnectionState(err)
@@ -362,7 +347,7 @@ func (c *sessionRuntimeClient) refreshMainViewSync(timeout time.Duration) (clien
 func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.TranscriptPageRequest, timeout time.Duration) (clientui.TranscriptPage, error) {
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
-	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseSilently, func() (serverapi.SessionTranscriptPageResponse, error) {
+	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseWithWarning, false, func() (serverapi.SessionTranscriptPageResponse, error) {
 		return c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{
 			SessionID:                c.sessionID,
 			Offset:                   req.Offset,
@@ -430,7 +415,7 @@ func (c *sessionRuntimeClient) refreshCommittedTranscriptSuffixSync(req clientui
 	}
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
-	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseSilently, func() (serverapi.SessionCommittedTranscriptSuffixResponse, error) {
+	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseWithWarning, false, func() (serverapi.SessionCommittedTranscriptSuffixResponse, error) {
 		return suffixClient.GetSessionCommittedTranscriptSuffix(ctx, serverapi.SessionCommittedTranscriptSuffixRequest{
 			SessionID:       c.sessionID,
 			AfterEntryCount: req.AfterEntryCount,

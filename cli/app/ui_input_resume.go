@@ -47,20 +47,21 @@ func (c uiInputController) handleQueuedRuntimeWorkCheckDone(msg queuedRuntimeWor
 	m.observeRuntimeRequestResult(msg.err)
 	if msg.err != nil {
 		restoreCmd := c.restorePendingInjectedIntoInput()
-		if isInterruptedRuntimeError(msg.err) {
+		if submissionerror.IsInterrupted(msg.err) {
 			m.activity = uiActivityInterrupted
 			m.logf("step.interrupted")
 			m.syncViewport()
 			return m, restoreCmd
 		}
-		detailErr := formatSubmissionError(msg.err)
+		detailErr := submissionerror.Format(msg.err)
 		m.activity = uiActivityError
-		appendCmd := m.appendOperatorErrorFeedback(detailErr)
+		appendCmd := m.appendLocalEntryWithNoticeID(operatorErrorFeedbackRole, detailErr, "")
 		m.logf("queue_check.error err=%q", detailErr)
 		m.syncViewport()
 		return m, tea.Batch(restoreCmd, appendCmd)
 	}
-	if !msg.hasWork || m.injectedQueueBlocksDrain() || m.isBusy() || m.isInputLocked() {
+	if !msg.hasWork || m.injectedQueueBlocksDrain() || m.isBusy() ||
+		m.isInputSubmitLocked() {
 		if !msg.hasWork {
 			c.notifyUserCompactionCompleted(compactionOrigin, true)
 		} else {
@@ -72,7 +73,7 @@ func (c uiInputController) handleQueuedRuntimeWorkCheckDone(msg queuedRuntimeWor
 	c.startBusyActivity(false)
 	m.logf("step.resume_queued_injected pending_injected=%d", len(m.pendingInjected))
 	m.syncViewport()
-	return m, tea.Batch(c.submitQueuedUserMessagesCmd(), c.model.ensureSpinnerTicking())
+	return m, tea.Batch(c.submitQueuedUserMessagesCmd(), c.model.reconcileSpinnerTicking(false))
 }
 
 func (c uiInputController) submitQueuedUserMessagesCmd() tea.Cmd {

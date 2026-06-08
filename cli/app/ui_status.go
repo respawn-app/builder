@@ -19,22 +19,6 @@ const (
 	statusGitTimeout     = 4 * time.Second
 )
 
-func newMemoryUIStatusRepository() uiStatusRepository {
-	return appstatus.NewMemoryRepository()
-}
-
-func statusAuthCacheKey(req uiStatusRequest) string {
-	return appstatus.AuthCacheKey(req)
-}
-
-func statusGitCacheKey(workdir string) string {
-	return appstatus.GitCacheKey(workdir)
-}
-
-func statusEnvironmentCacheKey(req uiStatusRequest) string {
-	return appstatus.EnvironmentCacheKey(req)
-}
-
 type uiStatusConfig struct {
 	WorkspaceRoot   string
 	PersistenceRoot string
@@ -208,13 +192,13 @@ func (m *uiModel) statusAuthCacheUnseedable() bool {
 
 func populateStatusRequestCacheKeys(req uiStatusRequest) uiStatusRequest {
 	if strings.TrimSpace(req.CacheKeys.Auth) == "" {
-		req.CacheKeys.Auth = statusAuthCacheKey(req)
+		req.CacheKeys.Auth = appstatus.AuthCacheKey(req)
 	}
 	if strings.TrimSpace(req.CacheKeys.Git) == "" {
-		req.CacheKeys.Git = statusGitCacheKey(statusGitRoot(req))
+		req.CacheKeys.Git = appstatus.GitCacheKey(appstatus.GitRoot(req))
 	}
 	if strings.TrimSpace(req.CacheKeys.Environment) == "" {
-		req.CacheKeys.Environment = statusEnvironmentCacheKey(req)
+		req.CacheKeys.Environment = appstatus.EnvironmentCacheKey(req)
 	}
 	return req
 }
@@ -247,22 +231,6 @@ func (c defaultUIStatusCollector) adapter() statuscollect.Collector {
 		ParentSessionReadTimeout: uiRuntimeReadTimeout,
 		EnvSanitizer:             sanitizedGitEnv,
 	}
-}
-
-func enrichStatusBaseSnapshot(ctx context.Context, req uiStatusRequest, snapshot uiStatusSnapshot) uiStatusSnapshot {
-	return defaultUIStatusCollector{}.adapter().EnrichBase(ctx, req, snapshot)
-}
-
-func statusGitRoot(req uiStatusRequest) string {
-	return appstatus.GitRoot(req)
-}
-
-func collectGitStatus(ctx context.Context, workdir string) uiStatusGitInfo {
-	return appstatus.CollectGitStatus(ctx, workdir, statusGitTimeout, sanitizedGitEnv)
-}
-
-func statusAuthCacheIdentity(manager statuscollect.AuthStateLoader) string {
-	return statuscollect.AuthCacheIdentity(manager)
 }
 
 func statusOnOff(value bool) string {
@@ -341,14 +309,6 @@ func (m *uiModel) statusCombinedWarnings() string {
 	return strings.Join(parts, " | ")
 }
 
-func (m *uiModel) pushStatusOverlayIfNeeded() tea.Cmd {
-	return m.activateSurface(uiSurfaceStatus)
-}
-
-func (m *uiModel) popStatusOverlayIfNeeded() tea.Cmd {
-	return m.restoreTranscriptSurface()
-}
-
 func (m *uiModel) moveStatusScroll(delta int) {
 	m.status.scroll += delta
 	if m.status.scroll < 0 {
@@ -417,10 +377,6 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 	}
 }
 
-func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
-	return m.statusLineGitRefreshCmd()
-}
-
 func (m *uiModel) statusLineGitRefreshCmd() tea.Cmd {
 	request := m.newStatusRequest(time.Now())
 	token := m.status.refreshToken
@@ -433,12 +389,12 @@ func (m *uiModel) statusLineGitRefreshCmd() tea.Cmd {
 	if !ok {
 		progressive = defaultUIStatusCollector{authManager: m.statusConfig.AuthManager}
 	}
-	gitRoot := statusGitRoot(request)
+	gitRoot := appstatus.GitRoot(request)
 	if strings.TrimSpace(gitRoot) == "" {
 		return nil
 	}
 	base := defaultUIStatusCollector{}.CollectBase(request)
-	cacheKey := statusGitCacheKey(gitRoot)
+	cacheKey := appstatus.GitCacheKey(gitRoot)
 	m.statusGitBackgroundInFlight = true
 	return m.statusGitRefreshCmd(token, cacheKey, m.newStatusCollectorRequest(request), progressive, base, true)
 }
@@ -448,7 +404,7 @@ func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, co
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
 		defer cancel()
 		base := collector.CollectBase(request)
-		return statusBaseRefreshDoneMsg{token: token, snapshot: enrichStatusBaseSnapshot(ctx, request, base)}
+		return statusBaseRefreshDoneMsg{token: token, snapshot: defaultUIStatusCollector{}.adapter().EnrichBase(ctx, request, base)}
 	}
 }
 
@@ -481,7 +437,7 @@ func (c uiInputController) startStatusFlowCmd() tea.Cmd {
 	m := c.model
 	m.openStatusOverlay()
 	refreshCmd := m.statusRefreshCmd()
-	if overlayCmd := m.pushStatusOverlayIfNeeded(); overlayCmd != nil {
+	if overlayCmd := m.activateSurface(uiSurfaceStatus); overlayCmd != nil {
 		return tea.Batch(overlayCmd, refreshCmd)
 	}
 	return refreshCmd
@@ -489,7 +445,7 @@ func (c uiInputController) startStatusFlowCmd() tea.Cmd {
 
 func (c uiInputController) stopStatusFlowCmd() tea.Cmd {
 	m := c.model
-	overlayCmd := m.popStatusOverlayIfNeeded()
+	overlayCmd := m.restoreTranscriptSurface()
 	m.closeStatusOverlay()
 	if overlayCmd != nil {
 		return overlayCmd
@@ -505,7 +461,7 @@ func (c uiInputController) handleStatusOverlayKey(msg tea.KeyMsg) (tea.Model, te
 			return m, c.interruptBusyRuntime()
 		}
 		m.exitAction = UIActionExit
-		if overlayCmd := m.popStatusOverlayIfNeeded(); overlayCmd != nil {
+		if overlayCmd := m.restoreTranscriptSurface(); overlayCmd != nil {
 			m.closeStatusOverlay()
 			return m, tea.Sequence(overlayCmd, tea.Quit)
 		}

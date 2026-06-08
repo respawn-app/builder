@@ -199,14 +199,8 @@ func reminderIssuedFromReplayEvents(events []ReplayEvent) bool {
 	return issued
 }
 
-type reminderMessageLike interface {
-	GetRole() string
-	GetMessageType() string
-	GetContent() string
-}
-
-func isCompactionSoonReminderMessage(msg reminderMessageLike) bool {
-	return strings.TrimSpace(msg.GetRole()) == "developer" && strings.TrimSpace(msg.GetMessageType()) == "compaction_soon_reminder" && strings.TrimSpace(msg.GetContent()) != ""
+func isCompactionSoonReminderMessage(msg reminderEventMessage) bool {
+	return strings.TrimSpace(msg.Role) == "developer" && strings.TrimSpace(msg.MessageType) == "compaction_soon_reminder" && strings.TrimSpace(msg.Content) != ""
 }
 
 type reminderEventMessage struct {
@@ -214,7 +208,3 @@ type reminderEventMessage struct {
 	MessageType string `json:"message_type"`
 	Content     string `json:"content"`
 }
-
-func (m reminderEventMessage) GetRole() string        { return m.Role }
-func (m reminderEventMessage) GetMessageType() string { return m.MessageType }
-func (m reminderEventMessage) GetContent() string     { return m.Content }

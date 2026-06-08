@@ -29,7 +29,7 @@ func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersisten
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersisten
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		Model:                 "gpt-5",
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 			Model:                 "gpt-5",
 			OpenAIBaseURL:         fakeResponses.URL,
 			OpenAIBaseURLExplicit: true,
-		}, readyMemoryAuthHandler())
+		}, readyMemoryAuthHandler(), false)
 		if err != nil {
 			t.Fatalf("startEmbeddedServer: %v", err)
 		}
@@ -268,7 +268,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 			Model:                 "gpt-5",
 			OpenAIBaseURL:         fakeResponses.URL,
 			OpenAIBaseURLExplicit: true,
-		}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+		}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 		if err != nil {
 			t.Fatalf("serve.Start: %v", err)
 		}
@@ -278,7 +278,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 		defer stopServing()
 		waitForConfiguredRemoteIdentity(t, workspace)
 
-		server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+		server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor(), false)
 		if err != nil {
 			t.Fatalf("startSessionServer: %v", err)
 		}
@@ -293,7 +293,7 @@ func waitForConfiguredRemoteIdentity(t *testing.T, workspace string) protocol.Se
 	deadline := time.Now().Add(5 * time.Second)
 	opts := Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	for time.Now().Before(deadline) {
-		remote, ok := tryDialConfiguredRemote(context.Background(), opts, nil)
+		remote, ok := tryDialMatchingConfiguredRemoteWithRequirement(context.Background(), opts, nil, nil, true)
 		if ok {
 			identity := remote.Identity()
 			_ = remote.Close()

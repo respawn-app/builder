@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
@@ -99,7 +100,7 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 
 	decoded, err := service.New(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAIResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "openai responses request failed")
+		return OpenAIResponse{}, newOpenAIRequestErrorMapper(providerCaps.ProviderID).Map(err, rawResp, "openai responses request failed")
 	}
 	if decoded == nil {
 		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
@@ -153,11 +154,11 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 	for stream.Next() {
 		accumulator.Consume(stream.Current())
 		if err := accumulator.Err(providerCaps.ProviderID); err != nil {
-			return OpenAIResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "read responses stream events")
+			return OpenAIResponse{}, newOpenAIRequestErrorMapper(providerCaps.ProviderID).Map(err, rawResp, "read responses stream events")
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return OpenAIResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "read responses stream events")
+		return OpenAIResponse{}, newOpenAIRequestErrorMapper(providerCaps.ProviderID).Map(err, rawResp, "read responses stream events")
 	}
 	return accumulator.Response(), nil
 }
@@ -193,7 +194,7 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 
 	decoded, err := service.Compact(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAICompactionResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "openai responses compact request failed")
+		return OpenAICompactionResponse{}, newOpenAIRequestErrorMapper(providerCaps.ProviderID).Map(err, rawResp, "openai responses compact request failed")
 	}
 	if len(bytes.TrimSpace(rawBody)) > 0 {
 		var parsed responses.CompactedResponse
@@ -244,7 +245,7 @@ func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request Ope
 
 	decoded, err := service.Count(ctx, payload, reqOpts...)
 	if err != nil {
-		return 0, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "openai responses input_tokens request failed")
+		return 0, newOpenAIRequestErrorMapper(providerCaps.ProviderID).Map(err, rawResp, "openai responses input_tokens request failed")
 	}
 	if decoded == nil {
 		return 0, fmt.Errorf("openai responses input_tokens request failed: empty response")

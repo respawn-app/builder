@@ -12,7 +12,7 @@ import (
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig, startupUpdateNotice bool) (tea.Model, error) {
 	terminalCursor := newUITerminalCursorState()
-	options := mainUIProgramOptions(active, terminalCursor)
+	options := mainUIProgramOptionsWithOutput(active, terminalCursor, os.Stdout)
 	runtimeClient := wiring.runtimeClient
 	if runtimeClient == nil {
 		return nil, errors.New("runtime client is required")
@@ -71,20 +71,12 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	return finalModel, nil
 }
 
-func mainUIProgramOptions(active config.Settings, terminalCursor *uiTerminalCursorState) []tea.ProgramOption {
-	return mainUIProgramOptionsWithOutput(active, terminalCursor, os.Stdout)
-}
-
 func mainUIProgramOptionsWithOutput(active config.Settings, terminalCursor *uiTerminalCursorState, output io.Writer) []tea.ProgramOption {
 	options := []tea.ProgramOption{tea.WithFilter(terminalCursorProgramFilter(terminalCursor)), tea.WithReportFocus()}
 	if terminalCursor != nil {
-		options = append(options, tea.WithOutput(mainUIProgramOutputWriter(terminalCursor, output)))
+		options = append(options, tea.WithOutput(newUITerminalCursorWriter(output, terminalCursor)))
 	}
 	return options
-}
-
-func mainUIProgramOutputWriter(terminalCursor *uiTerminalCursorState, output io.Writer) io.Writer {
-	return newUITerminalCursorWriter(output, terminalCursor)
 }
 
 func extractUITransition(model tea.Model) UITransition {

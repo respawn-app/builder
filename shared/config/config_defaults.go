@@ -35,18 +35,6 @@ const (
 	defaultServerPort                    = 53082
 )
 
-func defaultSettings() Settings {
-	return configRegistry.defaultState().Settings
-}
-
-func defaultSettingsTOML() string {
-	return settingsTOMLWithOptions(defaultSettings(), true)
-}
-
-func settingsTOML(settings Settings) string {
-	return settingsTOMLWithOptions(settings, true)
-}
-
 func settingsTOMLForOnboarding(settings Settings, preservedDefaults map[string]bool) string {
 	preserved := map[string]bool{"theme": true}
 	for key, preserve := range preservedDefaults {
@@ -62,22 +50,18 @@ func settingsTOMLForOnboarding(settings Settings, preservedDefaults map[string]b
 }
 
 func onboardingDefaultSettingsTOML(selectedTheme string) string {
-	settings := defaultSettings()
+	settings := configRegistry.defaultState().Settings
 	if normalized := theme.Normalize(selectedTheme); normalized != "" {
 		settings.Theme = normalized
 	}
 	return settingsTOMLWithRenderingOptions(settings, true, nil, map[string]bool{"debug": true})
 }
 
-func settingsTOMLWithOptions(settings Settings, includeToolSection bool) string {
-	return settingsTOMLWithRenderingOptions(settings, includeToolSection, nil, nil)
-}
-
 func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool, preservedDefaults map[string]bool, omittedKeys map[string]bool) string {
 	state := configRegistry.defaultState()
 	state.Settings = settings
 	rawLines := configRegistry.defaultLines(state)
-	inheritReviewerDefaults(&state.Settings)
+	inheritReviewerDefaultsWithSources(&state.Settings, nil)
 	lines := configRegistry.defaultLines(state)
 	defaultLines := configRegistry.defaultLines(configRegistry.defaultState())
 	rootLines := annotateRenderedLines(filterDefaultLines(lines, ""), filterDefaultLines(defaultLines, ""), preservedDefaults)

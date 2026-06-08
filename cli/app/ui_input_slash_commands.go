@@ -20,7 +20,7 @@ func (c uiInputController) handleQueuedSlashCommandInput(text string) (bool, tea
 		return false, m, nil
 	}
 	if errText, blocked := m.blockedDeferredSlashCommand(selection.commandText()); blocked {
-		return true, m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+		return true, m, sequenceCmds(c.model.appendLocalEntryWithNoticeID("error", errText, ""), c.model.sendTransientStatusWithNoticeID(errText, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	}
 	next, cmd := c.queueOrStartSubmission(selection.commandText())
 	return true, next, cmd
@@ -39,13 +39,13 @@ func (c uiInputController) handleEnteredSlashCommandInput(text string) (bool, te
 	command := selection.command
 	if m.isBusy() && !command.RunWhileBusy {
 		m.clearInput()
-		return true, m, c.showErrorStatus(fmt.Sprintf("cannot run /%s while model is working", command.Name))
+		return true, m, c.model.sendTransientStatusWithNoticeID(fmt.Sprintf("cannot run /%s while model is working", command.Name), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 	}
 	if commandResult := m.commandRegistry.Execute(commandText); commandResult.Handled {
 		draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 		recordCmd := m.recordPromptHistory(commandText)
 		m.clearCommandInput(command, draftText, draftCursor, restoreDraft)
-		next, cmd := c.applyCommandResult(commandResult)
+		next, cmd := c.applyCommandResultWithPreSubmitQueuePosition(commandResult, preSubmitQueueBack)
 		return true, next, finalizeSlashCommandCmd(commandResult.Action, cmd, recordCmd)
 	}
 	return false, m, nil

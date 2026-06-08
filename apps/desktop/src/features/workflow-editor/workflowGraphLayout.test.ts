@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { emptyWorkflowDerivedWiring, type WorkflowDefinition, type WorkflowValidation } from "../../api";
 import type { WorkflowGraphEdge, WorkflowGraphNode } from "./workflowGraphLayout";
 import { layoutWorkflowGraph } from "./workflowGraphLayout";
-import { workflowGraphEndpointPoint } from "./workflowGraphLayoutTestHelpers";
+import { workflowGraphAbsoluteNodeRect, workflowGraphEndpointPoint } from "./workflowGraphLayoutTestHelpers";
 
 describe("layoutWorkflowGraph", () => {
   it("builds grouped workflow graph nodes and labeled edges", async () => {
@@ -94,6 +94,7 @@ describe("layoutWorkflowGraph", () => {
 
   it("renders join nodes as inspectable merge diamonds with raw join edges", async () => {
     const graph = await layoutWorkflowGraph(joinWorkflow, emptyValidation);
+    const joinOutgoingRoutePoints = edgeByID(graph.edges, "edge-join-synth")?.data?.routePoints ?? [];
 
     expect(nodeByID(graph.nodes, "join")).toMatchObject({
       type: "workflowJoin",
@@ -115,6 +116,9 @@ describe("layoutWorkflowGraph", () => {
       target: "synth",
       type: "workflow",
     });
+    expect(joinOutgoingRoutePoints.length).toBeGreaterThan(2);
+    expectRouteSegmentsToBeOrthogonal(joinOutgoingRoutePoints);
+    expectRouteToHaveCorner(joinOutgoingRoutePoints);
   });
 
   it("keeps chained join hops inspectable instead of synthesizing edge chains", async () => {
@@ -128,6 +132,44 @@ describe("layoutWorkflowGraph", () => {
       target: "join-a",
       type: "workflow",
     });
+  });
+
+  it("keeps the model-order mainline layered when workflow transitions loop back", async () => {
+    const graph = await layoutWorkflowGraph(loopedWorkflow, emptyValidation);
+    const mainlineNodeIDs = ["start", "plan", "implement", "review", "approval", "done"];
+    const loopToPlanning = requireEdge(graph.edges, "edge-approval-plan");
+    const loopToImplementation = requireEdge(graph.edges, "edge-review-implement");
+
+    expectNodeXPositionsToIncrease(graph.nodes, mainlineNodeIDs);
+    expect(requireNode(graph.nodes, loopToPlanning.source).position.x).toBeGreaterThan(
+      requireNode(graph.nodes, loopToPlanning.target).position.x,
+    );
+    expect(requireNode(graph.nodes, loopToImplementation.source).position.x).toBeGreaterThan(
+      requireNode(graph.nodes, loopToImplementation.target).position.x,
+    );
+  });
+
+  it("keeps Main SWE-shaped branch and loop workflows wide instead of stacked into floors", async () => {
+    const graph = await layoutWorkflowGraph(mainSWEWorkflow, emptyValidation);
+    const mainlineNodeIDs = [
+      "start",
+      "architecture",
+      "planning",
+      "plan-review",
+      "implementation",
+      "workflow-group-code-review-parallel",
+      "approval-gate",
+      "next-agent",
+    ];
+    const planRejected = requireEdge(graph.edges, "edge-plan-review-planning");
+    const approvalRejected = requireEdge(graph.edges, "edge-approval-planning");
+
+    expectAbsoluteNodeXPositionsToIncrease(graph.nodes, mainlineNodeIDs);
+    expect(absoluteNodeX(graph.nodes, "code-review-join")).toBeGreaterThan(
+      absoluteNodeX(graph.nodes, "workflow-group-code-review-parallel"),
+    );
+    expect(absoluteNodeX(graph.nodes, planRejected.source)).toBeGreaterThan(absoluteNodeX(graph.nodes, planRejected.target));
+    expect(absoluteNodeX(graph.nodes, approvalRejected.source)).toBeGreaterThan(absoluteNodeX(graph.nodes, approvalRejected.target));
   });
 
   it("routes transition endpoints away from the reserved creation handle slot", async () => {
@@ -217,6 +259,55 @@ function assertEndpointHandle(
   const handle = side === "source" ? edge.sourceHandle : edge.targetHandle;
   const point = edge.data?.routePoints.at(side === "source" ? 0 : -1);
   expect(point?.y).toBe(workflowGraphEndpointPoint(node, handle, side, nodes).y);
+}
+
+function expectNodeXPositionsToIncrease(nodes: readonly WorkflowGraphNode[], nodeIDs: readonly string[]): void {
+  for (const [index, nodeID] of nodeIDs.entries()) {
+    const previousID = nodeIDs[index - 1];
+    if (previousID !== undefined) {
+      expect(requireNode(nodes, nodeID).position.x).toBeGreaterThan(requireNode(nodes, previousID).position.x);
+    }
+  }
+}
+
+function expectAbsoluteNodeXPositionsToIncrease(nodes: readonly WorkflowGraphNode[], nodeIDs: readonly string[]): void {
+  for (const [index, nodeID] of nodeIDs.entries()) {
+    const previousID = nodeIDs[index - 1];
+    if (previousID !== undefined) {
+      expect(absoluteNodeX(nodes, nodeID), `${previousID} -> ${nodeID}`).toBeGreaterThan(
+        absoluteNodeX(nodes, previousID),
+      );
+    }
+  }
+}
+
+function absoluteNodeX(nodes: readonly WorkflowGraphNode[], nodeID: string): number {
+  return workflowGraphAbsoluteNodeRect(requireNode(nodes, nodeID), nodes).x;
+}
+
+function expectRouteSegmentsToBeOrthogonal(
+  points: readonly Readonly<{ x: number; y: number }>[],
+): void {
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous !== undefined) {
+      expect(point.x === previous.x || point.y === previous.y).toBe(true);
+    }
+  }
+}
+
+function expectRouteToHaveCorner(points: readonly Readonly<{ x: number; y: number }>[]): void {
+  expect(
+    points.some((point, index) => {
+      const previous = points[index - 1];
+      const next = points[index + 1];
+      return (
+        previous !== undefined &&
+        next !== undefined &&
+        (previous.x - point.x) * (next.y - point.y) !== (previous.y - point.y) * (next.x - point.x)
+      );
+    }),
+  ).toBe(true);
 }
 
 const emptyValidation: WorkflowValidation = { valid: true, errors: [] };
@@ -485,6 +576,177 @@ const joinChainWorkflow: WorkflowDefinition = {
   ],
 };
 
+const loopedWorkflow: WorkflowDefinition = {
+  workflow: { id: "workflow-1", name: "Looped Delivery", description: "", version: 1 },
+  derivedWiring: emptyWorkflowDerivedWiring,
+  nodeGroups: [],
+  nodes: [
+    workflowNode("start", "Start", "start", ""),
+    workflowNode("plan", "Plan", "agent", ""),
+    workflowNode("implement", "Implement", "agent", ""),
+    workflowNode("review", "Review", "agent", ""),
+    workflowNode("approval", "Approval", "agent", ""),
+    workflowNode("done", "Done", "terminal", ""),
+  ],
+  transitionGroups: [
+    workflowTransitionGroup("tg-start-plan", "start", "plan", "Plan"),
+    workflowTransitionGroup("tg-plan-implement", "plan", "implement", "Implement"),
+    workflowTransitionGroup("tg-implement-review", "implement", "review", "Review"),
+    workflowTransitionGroup("tg-review-approval", "review", "approval", "Approval"),
+    workflowTransitionGroup("tg-approval-done", "approval", "done", "Done"),
+    workflowTransitionGroup("tg-approval-plan", "approval", "rejected", "Rejected"),
+    workflowTransitionGroup("tg-review-implement", "review", "rework", "Rework"),
+  ],
+  edges: [
+    workflowEdge({ id: "edge-start-plan", key: "plan", targetNodeID: "plan", transitionGroupID: "tg-start-plan" }),
+    workflowEdge({
+      id: "edge-plan-implement",
+      key: "implement",
+      targetNodeID: "implement",
+      transitionGroupID: "tg-plan-implement",
+    }),
+    workflowEdge({
+      id: "edge-implement-review",
+      key: "review",
+      targetNodeID: "review",
+      transitionGroupID: "tg-implement-review",
+    }),
+    workflowEdge({
+      id: "edge-review-approval",
+      key: "approval",
+      targetNodeID: "approval",
+      transitionGroupID: "tg-review-approval",
+    }),
+    workflowEdge({ id: "edge-approval-done", key: "done", targetNodeID: "done", transitionGroupID: "tg-approval-done" }),
+    workflowEdge({
+      id: "edge-approval-plan",
+      key: "rejected",
+      targetNodeID: "plan",
+      transitionGroupID: "tg-approval-plan",
+    }),
+    workflowEdge({
+      id: "edge-review-implement",
+      key: "rework",
+      targetNodeID: "implement",
+      transitionGroupID: "tg-review-implement",
+    }),
+  ],
+};
+
+const mainSWEWorkflow: WorkflowDefinition = {
+  workflow: { id: "workflow-main-swe", name: "Main SWE", description: "", version: 1 },
+  derivedWiring: emptyWorkflowDerivedWiring,
+  nodeGroups: [
+    {
+      id: "code-review-parallel",
+      workflowID: "workflow-main-swe",
+      key: "code_review_parallel",
+      name: "Code review parallel",
+      sortOrder: 1,
+      nodeIDs: ["code-review", "qa", "code-review-join"],
+    },
+  ],
+  nodes: [
+    workflowNode("start", "Start", "start", ""),
+    workflowNode("architecture", "Architecture", "agent", ""),
+    workflowNode("planning", "Planning", "agent", ""),
+    workflowNode("plan-review", "Plan Review", "agent", ""),
+    workflowNode("implementation", "Implementation", "agent", ""),
+    workflowNode("code-review", "Code review", "agent", "code-review-parallel"),
+    workflowNode("qa", "QA", "agent", "code-review-parallel"),
+    workflowNode("code-review-join", "Code review join", "join", "code-review-parallel"),
+    workflowNode("approval-gate", "Approval gate", "agent", ""),
+    workflowNode("next-agent", "New agent", "agent", ""),
+  ],
+  transitionGroups: [
+    workflowTransitionGroup("tg-start-architecture", "start", "architect", "Architect"),
+    workflowTransitionGroup("tg-architecture-planning", "architecture", "plan", "Plan"),
+    workflowTransitionGroup("tg-planning-plan-review", "planning", "review_plan", "Plan Review"),
+    workflowTransitionGroup("tg-plan-review-planning", "plan-review", "plan_rejected", "Plan Rejected"),
+    workflowTransitionGroup("tg-plan-review-implementation", "plan-review", "plan_approved", "Plan Approved"),
+    workflowTransitionGroup("tg-implementation-code-review", "implementation", "code_review", "Code review"),
+    workflowTransitionGroup("tg-code-review-join", "code-review", "join", "Code review join"),
+    workflowTransitionGroup("tg-qa-join", "qa", "join", "Code review join"),
+    workflowTransitionGroup("tg-join-approval", "code-review-join", "new_agent", "New agent"),
+    workflowTransitionGroup("tg-approval-planning", "approval-gate", "rejected", "Rejected"),
+    workflowTransitionGroup("tg-approval-next-agent", "approval-gate", "approved", "Approved"),
+  ],
+  edges: [
+    workflowEdge({
+      id: "edge-start-architecture",
+      key: "architect",
+      targetNodeID: "architecture",
+      transitionGroupID: "tg-start-architecture",
+    }),
+    workflowEdge({
+      id: "edge-architecture-planning",
+      key: "plan",
+      targetNodeID: "planning",
+      transitionGroupID: "tg-architecture-planning",
+    }),
+    workflowEdge({
+      id: "edge-planning-plan-review",
+      key: "plan_review",
+      targetNodeID: "plan-review",
+      transitionGroupID: "tg-planning-plan-review",
+    }),
+    workflowEdge({
+      id: "edge-plan-review-planning",
+      key: "plan_rejected",
+      targetNodeID: "planning",
+      transitionGroupID: "tg-plan-review-planning",
+    }),
+    workflowEdge({
+      id: "edge-plan-review-implementation",
+      key: "plan_approved",
+      targetNodeID: "implementation",
+      transitionGroupID: "tg-plan-review-implementation",
+    }),
+    workflowEdge({
+      id: "edge-implementation-code-review",
+      key: "code_review",
+      targetNodeID: "code-review",
+      transitionGroupID: "tg-implementation-code-review",
+    }),
+    workflowEdge({
+      id: "edge-implementation-qa",
+      key: "qa",
+      targetNodeID: "qa",
+      transitionGroupID: "tg-implementation-code-review",
+    }),
+    workflowEdge({
+      id: "edge-code-review-join",
+      key: "code_review",
+      targetNodeID: "code-review-join",
+      transitionGroupID: "tg-code-review-join",
+    }),
+    workflowEdge({
+      id: "edge-qa-join",
+      key: "qa",
+      targetNodeID: "code-review-join",
+      transitionGroupID: "tg-qa-join",
+    }),
+    workflowEdge({
+      id: "edge-join-approval",
+      key: "new_agent",
+      targetNodeID: "approval-gate",
+      transitionGroupID: "tg-join-approval",
+    }),
+    workflowEdge({
+      id: "edge-approval-planning",
+      key: "rejected",
+      targetNodeID: "planning",
+      transitionGroupID: "tg-approval-planning",
+    }),
+    workflowEdge({
+      id: "edge-approval-next-agent",
+      key: "approved",
+      targetNodeID: "next-agent",
+      transitionGroupID: "tg-approval-next-agent",
+    }),
+  ],
+};
+
 function workflowNode(id: string, name: string, kind: string, groupID: string) {
   return {
     id,
@@ -503,7 +765,7 @@ function workflowNode(id: string, name: string, kind: string, groupID: string) {
 }
 
 function workflowTransitionGroup(id: string, sourceNodeID: string, transitionID: string, name: string) {
-  return { id, workflowID: "workflow-1", sourceNodeID, transitionID, name };
+  return { description: "", id, workflowID: "workflow-1", sourceNodeID, transitionID, name };
 }
 
 function workflowEdge({

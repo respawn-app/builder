@@ -108,8 +108,6 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 
 type completeNodeUnavailableTool struct{}
 
-func (completeNodeUnavailableTool) Name() toolspec.ID { return toolspec.ToolCompleteNode }
-
 func (completeNodeUnavailableTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	output, err := json.Marshal(map[string]string{"error": "complete_node is only available during a workflow run"})
 	if err != nil {
@@ -144,7 +142,7 @@ func (b *LocalToolRegistryBinding) rebuild() error {
 	if b.registry == nil {
 		b.registry = tools.NewRegistry()
 	}
-	handlers := make([]tools.Handler, 0, len(b.enabled))
+	handlers := make([]tools.HandlerRegistration, 0, len(b.enabled))
 	enabledSet := make(map[toolspec.ID]struct{}, len(b.enabled))
 	for _, id := range b.enabled {
 		enabledSet[id] = struct{}{}
@@ -164,7 +162,7 @@ func (b *LocalToolRegistryBinding) rebuild() error {
 		if err != nil {
 			return wrapSessionWorkspaceRetargetHint(b.ctx.OwnerSessionID, b.ctx.WorkspaceRoot, err)
 		}
-		handlers = append(handlers, handler)
+		handlers = append(handlers, tools.HandlerRegistration{ID: id, Handler: handler})
 	}
 	b.registry.ReplaceHandlers(handlers...)
 	return nil

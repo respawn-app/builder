@@ -179,13 +179,13 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 				t.Fatalf("goal overlay open=%t, want %t", got, tt.wantGoalMode)
 			}
 			if tt.wantStatusContains != "" {
-				status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+				status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 				if !strings.Contains(status, tt.wantStatusContains) {
 					t.Fatalf("expected status line to contain %q, got %q", tt.wantStatusContains, status)
 				}
 			}
 			if tt.wantStatusOmits != "" {
-				status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+				status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 				if strings.Contains(status, tt.wantStatusOmits) {
 					t.Fatalf("did not expect status line to contain %q, got %q", tt.wantStatusOmits, status)
 				}
@@ -278,7 +278,7 @@ func TestBusyQueueSubmissionCommandBehavior(t *testing.T) {
 				if updated.input != tt.wantInput {
 					t.Fatalf("input = %q, want %q", updated.input, tt.wantInput)
 				}
-				status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+				status := stripANSIAndTrimRight(updated.layout().renderStatusLine(120, uiThemeStyles("dark")))
 				if !strings.Contains(status, tt.wantStatusContains) {
 					t.Fatalf("expected status line to contain %q, got %q", tt.wantStatusContains, status)
 				}

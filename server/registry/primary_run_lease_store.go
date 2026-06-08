@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"strings"
 	"sync"
 
 	"builder/server/primaryrun"
@@ -20,7 +21,7 @@ func (s *primaryRunLeaseStore) Acquire(sessionID string) (primaryrun.Lease, erro
 	if s == nil {
 		return nil, primaryrun.ErrActivePrimaryRun
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return nil, primaryrun.ErrActivePrimaryRun
 	}
@@ -42,7 +43,7 @@ func (s *primaryRunLeaseStore) Clear(sessionID string) {
 	if s == nil {
 		return
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return
 	}
@@ -55,7 +56,7 @@ func (s *primaryRunLeaseStore) release(sessionID string, leaseID uint64) {
 	if s == nil {
 		return
 	}
-	id := normalizeRegistrySessionID(sessionID)
+	id := strings.TrimSpace(sessionID)
 	if id == "" {
 		return
 	}

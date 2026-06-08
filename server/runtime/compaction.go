@@ -83,7 +83,7 @@ func (c *defaultContextCompactor) TriggerHandoff(ctx context.Context, stepID str
 	}
 	planningSnapshot := e.compactionPlanningSnapshot()
 	planner := e.compactionPlannerState()
-	if !planner.autoCompactionEnabled(planningSnapshot) {
+	if !planningSnapshot.autoCompactionEnabled {
 		return "", false, errors.New(handoffDisabledByUserMessage)
 	}
 	if planner.mode(planningSnapshot.compactionMode) == "none" {
@@ -576,7 +576,12 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		}
 	}
 	if result.overflowRepair.Collapsed() {
-		if err := e.appendPersistedLocalEntry(stepID, string(transcript.EntryRoleDeveloperErrorFeedback), compactionOverflowRepairDiagnosticText(result.overflowRepair)); err != nil {
+		if err := e.appendPersistedLocalEntry(stepID, string(transcript.EntryRoleDeveloperErrorFeedback), fmt.Sprintf(
+			"Context compaction succeeded after collapsing tool payloads: %d shell outputs, %d patch inputs, ~%d tokens omitted. Full original tool payloads remain in pre-compaction transcript history but are omitted from the compacted model context.",
+			result.overflowRepair.ShellOutputsCollapsed,
+			result.overflowRepair.PatchInputsCollapsed,
+			result.overflowRepair.EstimatedSavedTokens,
+		)); err != nil {
 			statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 			return compactionResult{}, errors.Join(err, statusErr)
 		}

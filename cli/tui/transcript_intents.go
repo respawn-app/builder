@@ -261,11 +261,3 @@ func (i RenderIntent) BaseToolResultIntent(resultRole TranscriptRole) RenderInte
 		return RenderIntentTool
 	}
 }
-
-func roleFromEntry(entry TranscriptEntry) TranscriptRole {
-	return TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role))
-}
-
-func intentFromEntry(entry TranscriptEntry) RenderIntent {
-	return roleFromEntry(entry).DisplayIntent(entry.Phase)
-}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -101,7 +102,7 @@ func (r uiNoticeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			m.syncViewport()
 			return handledUIFeatureUpdate(m, nil)
 		}
-		cmd := m.enqueueTransientStatusWithDuration("update available: "+strings.TrimSpace(msg.version), uiStatusNoticeUpdateAvailable, updateNoticeDuration)
+		cmd := m.sendTransientStatusWithNoticeID("update available: "+strings.TrimSpace(msg.version), uiStatusNoticeUpdateAvailable, updateNoticeDuration, uiStatusNoticeQueue, "")
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, cmd)
 	}
@@ -128,7 +129,7 @@ func (r uiInputAsyncFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		if msg.err == nil {
 			return handledUIFeatureUpdate(m, nil)
 		}
-		return handledUIFeatureUpdate(m, m.setTransientStatusWithKind("prompt history persistence failed: "+msg.err.Error(), uiStatusNoticeError))
+		return handledUIFeatureUpdate(m, m.sendTransientStatusWithNoticeID("prompt history persistence failed: "+msg.err.Error(), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 	case localEntryPersistDoneMsg:
 		m.observeRuntimeRequestResult(msg.err)
 		if msg.err == nil {
@@ -190,13 +191,13 @@ func (r uiProcessFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 	m := r.model
 	switch msg := msg.(type) {
 	case processListRefreshTickMsg:
-		if !m.processList.isOpen() {
+		if !m.processList.open {
 			m.syncViewport()
 			return handledUIFeatureUpdate(m, nil)
 		}
 		refreshCmd := m.requestProcessListRefresh()
 		m.syncViewport()
-		return handledUIFeatureUpdate(m, tea.Batch(refreshCmd, waitProcessListRefresh(), m.ensureSpinnerTicking()))
+		return handledUIFeatureUpdate(m, tea.Batch(refreshCmd, tea.Tick(processListRefreshInterval, func(time.Time) tea.Msg { return processListRefreshTickMsg{} }), m.reconcileSpinnerTicking(false)))
 	case processListRefreshDoneMsg:
 		if msg.token != m.processList.refreshToken {
 			m.syncViewport()
@@ -210,12 +211,12 @@ func (r uiProcessFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			m.applyProcessEntries(msg.entries)
 		}
 		var refreshCmd tea.Cmd
-		if m.processList.refreshDirty && m.processList.isOpen() {
+		if m.processList.refreshDirty && m.processList.open {
 			m.processList.refreshDirty = false
 			refreshCmd = m.requestProcessListRefresh()
 		}
 		m.syncViewport()
-		return handledUIFeatureUpdate(m, tea.Batch(refreshCmd, m.ensureSpinnerTicking()))
+		return handledUIFeatureUpdate(m, tea.Batch(refreshCmd, m.reconcileSpinnerTicking(false)))
 	case processActionDoneMsg:
 		cmd := m.applyProcessActionDone(msg)
 		m.syncViewport()
@@ -223,7 +224,7 @@ func (r uiProcessFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 	case openProcessLogsDoneMsg:
 		m.syncViewport()
 		if msg.err != nil {
-			return handledUIFeatureUpdate(m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError))
+			return handledUIFeatureUpdate(m, m.sendTransientStatusWithNoticeID(msg.err.Error(), uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, ""))
 		}
 		return handledUIFeatureUpdate(m, nil)
 	}

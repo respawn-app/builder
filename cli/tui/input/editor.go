@@ -268,7 +268,7 @@ func (e *Editor) CursorPosition(width int) CursorPosition {
 	}
 	return CursorPosition{
 		Line: lineIndex,
-		Col:  displayWidth(e.text[lines[lineIndex].Start:e.cursor]),
+		Col:  uniseg.StringWidth(e.text[lines[lineIndex].Start:e.cursor]),
 	}
 }
 
@@ -277,7 +277,7 @@ func (e *Editor) CursorAtDisplayColumn(line LineRange, targetCol int) int {
 }
 
 func DisplayWidth(text string) int {
-	return displayWidth(text)
+	return uniseg.StringWidth(text)
 }
 
 func (e *Editor) replaceRange(start int, end int, replacement string) {
@@ -308,7 +308,7 @@ func (e *Editor) currentPreferredColumn(line LineRange) int {
 	if e.hasPreferredCol {
 		return e.preferredColumn
 	}
-	e.preferredColumn = displayWidth(e.text[line.Start:e.cursor])
+	e.preferredColumn = uniseg.StringWidth(e.text[line.Start:e.cursor])
 	e.hasPreferredCol = true
 	return e.preferredColumn
 }
@@ -428,10 +428,6 @@ func cursorAtDisplayColumn(text string, line LineRange, targetCol int) int {
 		col += cluster.width
 	}
 	return line.End
-}
-
-func displayWidth(text string) int {
-	return uniseg.StringWidth(text)
 }
 
 func logicalLineStart(text string, cursor int) int {

@@ -8,17 +8,11 @@ import (
 	"context"
 	"errors"
 
-	"builder/server/serve"
 	"builder/server/sessionlifecycle"
-	serverstartup "builder/server/startup"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
-
-type StartupRequest = serverstartup.Request
-type StartupAuthHandler = serverstartup.AuthHandler
-type StartupOnboardingHandler = serverstartup.OnboardingHandler
 
 type ServeServer interface {
 	Close() error
@@ -62,12 +56,4 @@ func (c failingSessionLifecycleClient) RetargetSessionWorkspace(context.Context,
 
 func (c failingSessionLifecycleClient) ResolveTransition(context.Context, serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 	return serverapi.SessionResolveTransitionResponse{}, c.failure()
-}
-
-func StartServe(ctx context.Context, req StartupRequest, authHandler StartupAuthHandler, onboardingHandler StartupOnboardingHandler) (ServeServer, error) {
-	return serve.Start(ctx, req, authHandler, onboardingHandler)
-}
-
-func NewHeadlessHandlers(lookupEnv func(string) string) (StartupAuthHandler, StartupOnboardingHandler) {
-	return serverstartup.NewHeadlessHandlers(lookupEnv)
 }

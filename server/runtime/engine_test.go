@@ -274,8 +274,6 @@ type fakeTool struct {
 	out   json.RawMessage
 }
 
-func (t fakeTool) Name() toolspec.ID { return t.name }
-
 func (t fakeTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	time.Sleep(t.delay)
 	if len(t.out) > 0 {
@@ -289,8 +287,6 @@ type failingTool struct {
 	name toolspec.ID
 }
 
-func (t failingTool) Name() toolspec.ID { return t.name }
-
 func (t failingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	out, _ := json.Marshal(map[string]any{"error": "failed"})
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out, IsError: true}, nil
@@ -301,8 +297,6 @@ type blockingTool struct {
 	started chan struct{}
 	release chan struct{}
 }
-
-func (t blockingTool) Name() toolspec.ID { return t.name }
 
 func (t blockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
@@ -360,7 +354,7 @@ func (f *fakeStreamClient) GenerateStream(_ context.Context, req llm.Request, on
 func TestLastCommittedAssistantFinalAnswerSkipsTrailingReminderEntries(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
@@ -376,7 +370,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingReminderEntries(t *testin
 func TestLastCommittedAssistantFinalAnswerSkipsTrailingErrorFeedback(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
@@ -392,7 +386,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingErrorFeedback(t *testing.
 func TestLastCommittedAssistantFinalAnswerSkipsTrailingHandoffFutureMessage(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
@@ -408,7 +402,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingHandoffFutureMessage(t *t
 func TestLastCommittedAssistantFinalAnswerSkipsTrailingReviewerFeedback(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
@@ -424,7 +418,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingReviewerFeedback(t *testi
 func TestLastCommittedAssistantFinalAnswerSkipsTrailingGoalFeedback(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
@@ -440,7 +434,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingGoalFeedback(t *testing.T
 func TestLastCommittedAssistantFinalAnswerDoesNotSkipTrailingUntypedDeveloperMessage(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
@@ -612,7 +606,7 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "xhigh",
@@ -658,7 +652,7 @@ func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "high",
@@ -686,7 +680,7 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	firstEngine := mustNewTestEngine(t, store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	firstEngine := mustNewTestEngine(t, store, firstClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:         "gpt-5",
 		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: false,
@@ -702,7 +696,7 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	resumedEngine := mustNewTestEngine(t, store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	resumedEngine := mustNewTestEngine(t, store, resumedClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:         "gpt-5",
 		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: true,
@@ -722,7 +716,7 @@ func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 272_000},
 	}}}
-	firstEngine := mustNewTestEngine(t, store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	firstEngine := mustNewTestEngine(t, store, firstClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 272_000,
@@ -750,7 +744,7 @@ func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 400_000},
 	}}}
-	resumedEngine := mustNewTestEngine(t, store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	resumedEngine := mustNewTestEngine(t, store, resumedClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 400_000,
@@ -800,7 +794,7 @@ func TestSystemPromptSnapshotUsesLocalFileAndSurvivesMidSessionFileChanges(t *te
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:                "gpt-5",
 		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens:  272_000,
@@ -830,7 +824,7 @@ func TestSystemPromptSnapshotUsesLocalFileAndSurvivesMidSessionFileChanges(t *te
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 400000},
 	}}}
-	reopenedEngine := mustNewTestEngine(t, reopened, reopenedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	reopenedEngine := mustNewTestEngine(t, reopened, reopenedClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{
 		Model:                "gpt-5",
 		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens:  400_000,

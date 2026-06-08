@@ -8,12 +8,14 @@ import (
 	"builder/server/session"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 	"context"
 	"errors"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestHydrationCompletionKeepsDeferredQueuedDrainArmedUntilUnrelatedBusyStateClears(t *testing.T) {
@@ -864,7 +866,7 @@ func TestMirroredTransientStatusClearsOnlyForMatchingNoticeID(t *testing.T) {
 
 func TestLocalEntryFallbackForwardsNoticeIDToView(t *testing.T) {
 	m := newProjectedStaticUIModel()
-	_ = m.appendLocalEntryFallbackWithNoticeID("system", "Fallback notice", "notice-1")
+	_ = m.appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient("system", "Fallback notice", "notice-1", transcript.EntryVisibilityAuto, false)
 
 	loaded := m.view.LoadedTranscriptEntries()
 	if len(loaded) != 1 {

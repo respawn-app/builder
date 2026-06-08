@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"builder/cli/app/internal/statuscollect"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -43,14 +44,10 @@ func collectSessionPickerStatusCmd(header sessionPickerHeaderInfo) tea.Cmd {
 		return sessionPickerStatusMsg{
 			cwd:    statusDisplayPath(base.Workdir, ""),
 			branch: branch,
-			auth:   sessionPickerAuthLabel(authInfo),
+			auth:   statuscollect.AuthDisplayLabel(authInfo),
 			model:  strings.TrimSpace(base.Model.Summary),
 		}
 	}
-}
-
-func sessionPickerAuthLabel(info uiStatusAuthInfo) string {
-	return statuscollect.AuthDisplayLabel(info)
 }
 
 func sessionPickerStatusRequestUseful(req uiStatusRequest, authManager statuscollect.AuthStateResolver) bool {

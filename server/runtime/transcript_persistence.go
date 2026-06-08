@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	"builder/server/llm"
+	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
@@ -32,13 +34,13 @@ func (p transcriptPersistenceCoordinator) AppendLocalEntryRecord(entry ChatEntry
 
 func (p transcriptPersistenceCoordinator) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
 	if chat := p.chatProjection(); chat != nil {
-		chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
+		chat.appendLocalEntryRecord(ChatEntry{Visibility: transcript.EntryVisibilityAuto, Role: role, Text: text, OngoingText: ongoingText})
 	}
 }
 
 func (p transcriptPersistenceCoordinator) AppendLocalEntryWithVisibility(role, text string, visibility transcript.EntryVisibility) {
 	if chat := p.chatProjection(); chat != nil {
-		chat.appendLocalEntryWithVisibility(role, text, visibility)
+		chat.appendLocalEntryRecord(ChatEntry{Visibility: visibility, Role: role, Text: text})
 	}
 }
 
@@ -50,7 +52,15 @@ func (p transcriptPersistenceCoordinator) AppendOngoingDelta(delta string) {
 
 func (p transcriptPersistenceCoordinator) RecordStoredToolCompletion(completion storedToolCompletion) {
 	if chat := p.chatProjection(); chat != nil {
-		chat.recordStoredToolCompletion(completion)
+		chat.recordToolCompletionWithProviderItems(tools.Result{
+			CallID:       completion.CallID,
+			Name:         toolspec.ID(completion.Name),
+			IsError:      completion.IsError,
+			Output:       completion.Output,
+			Summary:      completion.Summary,
+			OngoingText:  completion.OngoingText,
+			Presentation: completion.Presentation,
+		}, completion.ProviderItems)
 	}
 }
 

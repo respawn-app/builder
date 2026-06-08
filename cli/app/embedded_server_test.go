@@ -21,12 +21,13 @@ import (
 	"builder/shared/serverapi"
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type testEmbeddedServer struct {
@@ -397,7 +398,7 @@ func (s *testEmbeddedServer) PrepareRuntime(ctx context.Context, plan sessionLau
 	return nil, errors.New("test embedded server prepare runtime not configured")
 }
 
-func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
+func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	if s.reauthenticate != nil {
 		return s.reauthenticate(ctx, interactor)
 	}
@@ -410,12 +411,12 @@ func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor auth
 	if interactive, ok := interactor.(*interactiveAuthInteractor); ok {
 		return interactive.completeRemoteAuthBootstrap(ctx, remote, s.cfg.Settings, status, true)
 	}
-	return ensureRemoteAuthReady(ctx, remote, s.cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, remote, s.cfg.Settings, interactor, interactiveAuth)
 }
 
-func (s *testEmbeddedServer) EnsureAuthReady(ctx context.Context, interactor authInteractor) error {
+func (s *testEmbeddedServer) EnsureAuthReady(ctx context.Context, interactor authInteractor, interactiveAuth bool) error {
 	service := authbootstrap.NewService(s.authManager, s.oauthOpts, s.cfg.Settings, rpccontract.AllowedPreAuthMethods())
-	return ensureRemoteAuthReady(ctx, client.NewLoopbackAuthBootstrapClient(service), s.cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, client.NewLoopbackAuthBootstrapClient(service), s.cfg.Settings, interactor, interactiveAuth)
 }
 
 func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
@@ -450,7 +451,7 @@ func (s *stubEmbeddedProcessControlClient) GetInlineOutput(context.Context, serv
 func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -477,7 +478,7 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -531,7 +532,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -589,7 +590,7 @@ func waitForPendingApprovalResources(t *testing.T, client client.ApprovalViewCli
 func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -677,7 +678,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -798,7 +799,7 @@ func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t
 func TestEmbeddedAppServerRoutesBackgroundCompletionToOwningSessionOnly(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler(), false)
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/app/internal/submissionerror"
 	"builder/cli/tui"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
@@ -14,7 +13,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const localEntryEchoRetentionLimit = 512
+const (
+	localEntryEchoRetentionLimit = 512
+	operatorErrorFeedbackRole    = string(transcript.EntryRoleDeveloperErrorFeedback)
+)
 
 type uiLocalEntryEchoStatus uint8
 
@@ -28,47 +30,11 @@ type uiLocalEntryEchoState struct {
 	order   []string
 }
 
-// Operator-facing turn-start failures must stay visible in ongoing scrollback.
-// Plain "error" remains reserved for detail-only diagnostics and raw failures.
-func (m *uiModel) appendOperatorErrorFeedback(text string) tea.Cmd {
-	return m.appendLocalEntry(string(transcript.EntryRoleDeveloperErrorFeedback), text)
-}
-
-func (c uiInputController) appendLocalEntry(role, text string) tea.Cmd {
-	if c.model == nil {
-		return nil
-	}
-	return c.model.appendLocalEntry(role, text)
-}
-
-func (c uiInputController) appendLocalEntryWithNoticeID(role, text, noticeID string) tea.Cmd {
-	if c.model == nil {
-		return nil
-	}
-	return c.model.appendLocalEntryWithNoticeID(role, text, noticeID)
-}
-
-func (c uiInputController) appendSystemFeedback(text string) tea.Cmd {
-	return c.appendLocalEntry("system", text)
-}
-
-func (c uiInputController) appendErrorFeedback(text string) tea.Cmd {
-	return c.appendLocalEntry("error", text)
-}
-
-func (c uiInputController) appendLocalEntryWithStatus(role, text string, status tea.Cmd) tea.Cmd {
-	return sequenceCmds(c.appendLocalEntry(role, text), status)
-}
-
-func (c uiInputController) appendErrorFeedbackWithStatus(text string, status tea.Cmd) tea.Cmd {
-	return c.appendLocalEntryWithStatus("error", text, status)
-}
-
 func (c uiInputController) appendSystemFeedbackWithMirroredStatus(text string, kind uiStatusNoticeKind) tea.Cmd {
 	noticeID := c.model.nextLocalNoticeID()
 	return sequenceCmds(
-		c.appendLocalEntryWithNoticeID("system", text, noticeID),
-		c.model.setTransientStatusWithKindAndNoticeID(text, kind, noticeID),
+		c.model.appendLocalEntryWithNoticeID("system", text, noticeID),
+		c.model.sendTransientStatusWithNoticeID(text, kind, transientStatusDuration, uiStatusNoticeReplace, noticeID),
 	)
 }
 
@@ -104,12 +70,6 @@ func (m *uiModel) nextLocalNoticeID() string {
 	return "local-notice-" + strconv.FormatUint(m.localNoticeSequence, 10)
 }
 
-func waitProcessListRefresh() tea.Cmd {
-	return tea.Tick(processListRefreshInterval, func(time.Time) tea.Msg {
-		return processListRefreshTickMsg{}
-	})
-}
-
 func tickSpinner(token uint64, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		delay = spinnerTickInterval
@@ -124,14 +84,6 @@ func (m *uiModel) shouldAnimateSpinner() bool {
 		return false
 	}
 	return m.isBusy() || m.isReviewerRunning() || m.processListHasRunningEntries() || m.worktrees.loading || m.worktrees.create.submitting || m.worktrees.deleteConfirm.submitting
-}
-
-func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
-	return m.reconcileSpinnerTicking(false)
-}
-
-func (m *uiModel) rearmSpinnerTicking() tea.Cmd {
-	return m.reconcileSpinnerTicking(true)
 }
 
 func (m *uiModel) reconcileSpinnerTicking(force bool) tea.Cmd {
@@ -192,14 +144,6 @@ func (m *uiModel) scheduleSpinnerTick(token uint64, now time.Time) tea.Cmd {
 	return tickSpinner(token, delay)
 }
 
-func formatSubmissionError(err error) string {
-	return submissionerror.Format(err)
-}
-
-func isInterruptedRuntimeError(err error) bool {
-	return submissionerror.IsInterrupted(err)
-}
-
 func (c uiInputController) interruptBusyRuntime() tea.Cmd {
 	m := c.model
 	m.setPendingInterrupt(true)
@@ -218,10 +162,6 @@ func parseUserShellCommand(text string) (string, bool) {
 	return command, true
 }
 
-func (m *uiModel) appendLocalEntry(role, text string) tea.Cmd {
-	return m.appendLocalEntryWithNoticeID(role, text, "")
-}
-
 func (m *uiModel) appendLocalEntryWithNoticeID(role, text, noticeID string) tea.Cmd {
 	role = strings.TrimSpace(role)
 	text = strings.TrimSpace(text)
@@ -233,28 +173,12 @@ func (m *uiModel) appendLocalEntryWithNoticeID(role, text, noticeID string) tea.
 		noticeID = m.nextLocalNoticeID()
 	}
 	if !m.hasRuntimeClient() {
-		return m.appendLocalEntryFallbackWithNoticeID(role, text, noticeID)
+		return m.appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient(role, text, noticeID, transcript.EntryVisibilityAuto, false)
 	}
 	m.trackPendingLocalEntryEcho(noticeID)
-	localCmd := m.appendLocalEntryFallbackWithNoticeIDTransient(role, text, noticeID)
+	localCmd := m.appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient(role, text, noticeID, transcript.EntryVisibilityAuto, true)
 	persistCmd := m.persistLocalEntryCmd(role, text, noticeID)
 	return sequenceCmds(localCmd, persistCmd)
-}
-
-func (m *uiModel) appendLocalEntryFallbackWithVisibility(role, text string, visibility transcript.EntryVisibility) tea.Cmd {
-	return m.appendLocalEntryFallbackWithNoticeIDAndVisibility(role, text, "", visibility)
-}
-
-func (m *uiModel) appendLocalEntryFallbackWithNoticeID(role, text, noticeID string) tea.Cmd {
-	return m.appendLocalEntryFallbackWithNoticeIDAndVisibility(role, text, noticeID, transcript.EntryVisibilityAuto)
-}
-
-func (m *uiModel) appendLocalEntryFallbackWithNoticeIDTransient(role, text, noticeID string) tea.Cmd {
-	return m.appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient(role, text, noticeID, transcript.EntryVisibilityAuto, true)
-}
-
-func (m *uiModel) appendLocalEntryFallbackWithNoticeIDAndVisibility(role, text, noticeID string, visibility transcript.EntryVisibility) tea.Cmd {
-	return m.appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient(role, text, noticeID, visibility, false)
 }
 
 func (m *uiModel) appendLocalEntryFallbackWithNoticeIDAndVisibilityAndTransient(role, text, noticeID string, visibility transcript.EntryVisibility, transient bool) tea.Cmd {
@@ -319,10 +243,6 @@ func (m *uiModel) acknowledgeLocalEntryEcho(noticeID string) bool {
 	}
 	m.localEntryEcho.entries[noticeID] = uiLocalEntryEchoAcknowledged
 	return true
-}
-
-func (m *uiModel) shouldSuppressLocalEntryEcho(noticeID string) bool {
-	return m.acknowledgeLocalEntryEcho(noticeID)
 }
 
 func (m *uiModel) acknowledgeLocalEntryEchoesInChatEntries(entries []clientui.ChatEntry) {

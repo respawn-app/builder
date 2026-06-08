@@ -243,7 +243,3 @@ func subagentSourceDiffers(base Settings, role SubagentRole, key string) bool {
 	}
 	return true
 }
-
-func normalizeSubagentRoleKey(raw string) string {
-	return NormalizeSubagentRole(raw)
-}

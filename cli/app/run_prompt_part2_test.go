@@ -273,7 +273,7 @@ func TestHeadlessRunPromptClientResumesExistingSessionByID(t *testing.T) {
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         server.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractor())
+	}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 		WorkspaceRootExplicit: true,
 		SessionID:             created.SessionID,
 		Model:                 "gpt-5",
-	}, newHeadlessAuthInteractor())
+	}, newHeadlessAuthInteractor(), false)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}

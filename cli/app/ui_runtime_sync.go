@@ -8,6 +8,7 @@ import (
 	"builder/cli/tui"
 	"builder/shared/clientui"
 	"builder/shared/transcriptdiag"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -50,14 +51,6 @@ type runtimeMainViewRefreshDecision struct {
 	busyPending bool
 }
 
-func (m *uiModel) requestRuntimeMainViewRefresh() tea.Cmd {
-	return m.requestRuntimeMainViewRefreshForCause(runtimeMainViewRefreshCauseWorktreeMutation)
-}
-
-func (m *uiModel) requestRuntimeMainViewRefreshForCause(cause runtimeMainViewRefreshCause) tea.Cmd {
-	return m.startRuntimeMainViewRefreshRequest(runtimeMainViewRefreshRequestForCause(cause)).cmd
-}
-
 func (m *uiModel) startRuntimeMainViewRefreshRequest(request runtimeMainViewRefreshRequest) runtimeMainViewRefreshDecision {
 	if !m.hasRuntimeClient() {
 		return runtimeMainViewRefreshDecision{}
@@ -86,22 +79,18 @@ func (m *uiModel) startRuntimeMainViewRefreshRequest(request runtimeMainViewRefr
 	return runtimeMainViewRefreshDecision{cmd: cmd, started: true}
 }
 
-func (m *uiModel) requestRuntimeTranscriptPage(request clientui.TranscriptPageRequest) tea.Cmd {
-	return m.startRuntimeTranscriptPageRequest(request, true, runtimeTranscriptSyncCauseManualTranscriptRefresh, clientui.TranscriptRecoveryCauseNone)
-}
-
 func (m *uiModel) requestRuntimeBootstrapTranscriptSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseBootstrap, clientui.TranscriptRecoveryCauseNone)
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseBootstrap, clientui.TranscriptRecoveryCauseNone)).cmd
 }
 
 func (m *uiModel) requestRuntimeCommittedConversationSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedConversation, clientui.TranscriptRecoveryCauseNone)
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedConversation, clientui.TranscriptRecoveryCauseNone)).cmd
 }
 
 func (m *uiModel) requestRuntimeCommittedTranscriptSuffix(req clientui.CommittedTranscriptSuffixRequest) tea.Cmd {
@@ -127,29 +116,21 @@ func (m *uiModel) requestRuntimeCommittedGapSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedGap, clientui.TranscriptRecoveryCauseNone)
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedGap, clientui.TranscriptRecoveryCauseNone)).cmd
 }
 
 func (m *uiModel) requestRuntimeQueuedDrainTranscriptSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseQueuedDrain, clientui.TranscriptRecoveryCauseNone)
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseQueuedDrain, clientui.TranscriptRecoveryCauseNone)).cmd
 }
 
 func (m *uiModel) requestRuntimeTranscriptSyncForContinuityLoss(cause clientui.TranscriptRecoveryCause) tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseContinuityRecovery, cause)
-}
-
-func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptPageRequest, allowDuplicateSkip bool, syncCause runtimeTranscriptSyncCause, recoveryCause clientui.TranscriptRecoveryCause) tea.Cmd {
-	return m.startRuntimeTranscriptPageRequestDecision(request, allowDuplicateSkip, syncCause, recoveryCause).cmd
-}
-
-func (m *uiModel) startRuntimeTranscriptPageRequestDecision(request clientui.TranscriptPageRequest, allowDuplicateSkip bool, syncCause runtimeTranscriptSyncCause, recoveryCause clientui.TranscriptRecoveryCause) runtimeTranscriptSyncDecision {
-	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(request, allowDuplicateSkip, syncCause, recoveryCause))
+	return m.startRuntimeTranscriptSyncRequest(runtimeTranscriptSyncRequestForPage(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseContinuityRecovery, cause)).cmd
 }
 
 func (m *uiModel) startRuntimeTranscriptSyncRequest(syncRequest runtimeTranscriptSyncRequest) runtimeTranscriptSyncDecision {
@@ -295,7 +276,7 @@ func (m *uiModel) normalizeRuntimeTranscriptSyncRequest(req runtimeTranscriptSyn
 }
 
 func (m *uiModel) runtimeSyncBlockedByProcessOverlay() bool {
-	return m != nil && m.processList.isOpen()
+	return m != nil && m.processList.open
 }
 
 func (m *uiModel) runtimeSyncBlockedByStreaming() bool {
@@ -630,7 +611,8 @@ func (m *uiModel) flushQueuedInputsAfterHydration() tea.Cmd {
 	if !m.queuedDrainReadyAfterHydration {
 		return nil
 	}
-	if m.isBusy() || m.isInputLocked() {
+	if m.isBusy() ||
+		m.isInputSubmitLocked() {
 		if len(m.queued) == 0 || strings.TrimSpace(m.activeSubmit.text) != "" {
 			m.pendingQueuedDrainAfterHydration = false
 			m.queuedDrainReadyAfterHydration = false

@@ -43,10 +43,6 @@ func (m *uiModel) resetPromptHistoryNavigation() {
 	m.promptHistoryDraftCursor = -1
 }
 
-func (m *uiModel) clearPromptHistorySelection() {
-	m.promptHistorySelection = -1
-}
-
 func (m *uiModel) promptHistorySelectionActive() bool {
 	return m.promptHistorySelection >= 0 && m.promptHistorySelection < len(m.promptHistory)
 }
@@ -67,12 +63,12 @@ func (m *uiModel) promptHistorySelectionMatchesInput() bool {
 }
 
 func (m *uiModel) inputCursorAtBoundary() bool {
-	cursor := m.cursorIndex()
+	cursor := clampCursor(m.inputCursor, len([]rune(m.input)))
 	return cursor == 0 || cursor == len([]rune(m.input))
 }
 
 func (m *uiModel) inputCursorAtStart() bool {
-	return m.cursorIndex() == 0
+	return clampCursor(m.inputCursor, len([]rune(m.input))) == 0
 }
 
 func (m *uiModel) promptHistoryCursorAtBoundary() bool {
@@ -96,7 +92,7 @@ func (m *uiModel) syncPromptHistorySelectionToInput() {
 	if m.promptHistorySelectionMatchesInput() {
 		return
 	}
-	m.clearPromptHistorySelection()
+	m.promptHistorySelection = -1
 }
 
 func (m *uiModel) shouldAttemptPromptHistoryNavigation(delta int) bool {

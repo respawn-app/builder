@@ -9,6 +9,7 @@ import (
 	"builder/cli/app/internal/worktreeview"
 	"builder/shared/client"
 	"builder/shared/serverapi"
+
 	"github.com/google/uuid"
 )
 
@@ -21,10 +22,11 @@ var (
 )
 
 type RuntimeControl struct {
-	Context        func() (context.Context, context.CancelFunc)
-	CurrentLeaseID func() string
-	RecoverLease   func(context.Context, error) error
-	ReadOnly       func() bool
+	Context               func() (context.Context, context.CancelFunc)
+	CurrentLeaseID        func() string
+	RecoverLease          func(context.Context, error, bool) error
+	AppendRecoveryWarning bool
+	ReadOnly              func() bool
 }
 
 type Service struct {
@@ -114,7 +116,7 @@ func runMutation[T any](s Service, call func(context.Context, string) (T, error)
 		return zero, err
 	}
 	defer cancel()
-	return retryControlCall(ctx, s.Runtime.CurrentLeaseID, s.Runtime.RecoverLease, func(controllerLeaseID string) (T, error) {
+	return retryControlCall(ctx, s.Runtime.CurrentLeaseID, s.Runtime.RecoverLease, s.Runtime.AppendRecoveryWarning, func(controllerLeaseID string) (T, error) {
 		return call(ctx, controllerLeaseID)
 	})
 }
@@ -160,13 +162,13 @@ func (s Service) clientRequestID() string {
 	return uuid.NewString()
 }
 
-func retryControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context, error) error, call func(string) (T, error)) (T, error) {
+func retryControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context, error, bool) error, appendRecoveryWarning bool, call func(string) (T, error)) (T, error) {
 	value, err := call(currentLeaseID())
 	if !isRecoverableControlError(err) {
 		return value, err
 	}
 	var zero T
-	if recoverErr := recoverLease(ctx, err); recoverErr != nil {
+	if recoverErr := recoverLease(ctx, err, appendRecoveryWarning); recoverErr != nil {
 		return zero, recoverErr
 	}
 	return call(currentLeaseID())

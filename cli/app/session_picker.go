@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"builder/shared/clientui"
+	sharedtheme "builder/shared/theme"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	glamouransi "github.com/charmbracelet/glamour/ansi"
@@ -145,7 +147,7 @@ func (m *sessionPickerModel) View() string {
 	out.WriteString("\n\n")
 	visible := m.visibleRowsFromOffset(m.offset)
 	for i, row := range visible {
-		if i > 0 && m.needsSeparatorAfterRow(visible[i-1]) {
+		if i > 0 {
 			out.WriteByte('\n')
 		}
 		out.WriteString(m.renderRow(row.index, row.showPreview))
@@ -214,7 +216,7 @@ func (m *sessionPickerModel) visibleRowsFromOffset(offset int) []sessionPickerVi
 	visible := make([]sessionPickerVisibleRow, 0, m.itemCount())
 	for i := offset; i < m.itemCount(); i++ {
 		separator := 0
-		if len(visible) > 0 && m.needsSeparatorAfterRow(visible[len(visible)-1]) {
+		if len(visible) > 0 {
 			separator = 1
 		}
 		available := budget - separator
@@ -248,10 +250,6 @@ func (m *sessionPickerModel) rowVisibleFromOffset(offset, index int) bool {
 		}
 	}
 	return false
-}
-
-func (m *sessionPickerModel) needsSeparatorAfterRow(_ sessionPickerVisibleRow) bool {
-	return true
 }
 
 func (m *sessionPickerModel) itemCount() int {
@@ -321,8 +319,8 @@ func newSessionPickerStyles(theme string) sessionPickerStyles {
 			BorderForeground(palette.muted),
 		headerTitle:    lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		headerText:     lipgloss.NewStyle().Foreground(palette.foreground),
-		headerWarning:  lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true),
-		headerSuccess:  lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true),
+		headerWarning:  lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Warning.Adaptive()).Bold(true),
+		headerSuccess:  lipgloss.NewStyle().Foreground(sharedtheme.DefaultPalette().Status.Success.Adaptive()).Bold(true),
 		row:            lipgloss.NewStyle().Foreground(palette.foreground),
 		rowSelected:    lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		marker:         lipgloss.NewStyle().Foreground(palette.muted),
@@ -330,10 +328,6 @@ func newSessionPickerStyles(theme string) sessionPickerStyles {
 		preview:        lipgloss.NewStyle().Foreground(palette.muted).Faint(true),
 		timestamp:      lipgloss.NewStyle().Foreground(palette.muted).Faint(true),
 	}
-}
-
-func newStartupMarkdownRenderer(theme string) *glamour.TermRenderer {
-	return newStartupMarkdownRendererWithWordWrap(theme, 0)
 }
 
 func newStartupMarkdownRendererWithWordWrap(theme string, width int) *glamour.TermRenderer {

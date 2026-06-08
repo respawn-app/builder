@@ -32,7 +32,7 @@ func (c uiInputController) startRollbackSelectionFlowCmd() tea.Cmd {
 
 func (c uiInputController) stopRollbackSelectionFlowCmd() tea.Cmd {
 	m := c.model
-	overlayCmd := m.popRollbackOverlayIfNeeded()
+	overlayCmd := m.popRollbackOverlayWithNativeReplay(true)
 	alternateScrollCmd := m.restoreRollbackAlternateScrollIfNeeded()
 	m.stopRollbackSelectionMode()
 	if overlayCmd != nil {
@@ -85,9 +85,9 @@ func (c uiInputController) startProcessListFlowCmd() tea.Cmd {
 	m := c.model
 	m.openProcessList()
 	initialRefreshCmd := m.requestProcessListRefresh()
-	refreshCmd := waitProcessListRefresh()
-	spinnerCmd := m.ensureSpinnerTicking()
-	if overlayCmd := m.pushProcessOverlayIfNeeded(); overlayCmd != nil {
+	refreshCmd := tea.Tick(processListRefreshInterval, func(time.Time) tea.Msg { return processListRefreshTickMsg{} })
+	spinnerCmd := m.reconcileSpinnerTicking(false)
+	if overlayCmd := m.activateSurface(uiSurfaceProcessList); overlayCmd != nil {
 		return tea.Batch(overlayCmd, initialRefreshCmd, refreshCmd, spinnerCmd)
 	}
 	return tea.Batch(initialRefreshCmd, refreshCmd, spinnerCmd)
@@ -95,9 +95,9 @@ func (c uiInputController) startProcessListFlowCmd() tea.Cmd {
 
 func (c uiInputController) stopProcessListFlowCmd() tea.Cmd {
 	m := c.model
-	overlayCmd := m.popProcessOverlayIfNeeded()
+	overlayCmd := m.restoreTranscriptSurface()
 	m.closeProcessList()
-	spinnerCmd := m.ensureSpinnerTicking()
+	spinnerCmd := m.reconcileSpinnerTicking(false)
 	releaseCmd := m.releaseDeferredRuntimeSyncs()
 	if overlayCmd != nil {
 		return tea.Batch(overlayCmd, spinnerCmd, releaseCmd)
@@ -129,7 +129,7 @@ func (c uiInputController) normalizePendingCSIShiftEnterOnEnter() {
 	if strings.HasSuffix(m.input, "\n") {
 		m.input = strings.TrimSuffix(m.input, "\n")
 		m.inputCursor = -1
-		m.refreshSlashCommandFilterFromInput()
+		m.refreshSlashCommandFilterFromInputWithAuth(true)
 	}
 	c.clearPendingCSIShiftEnter()
 }

@@ -48,17 +48,13 @@ func (s *applyState) hasDeletedAncestor(path string) bool {
 	return false
 }
 
-func (s *applyState) resolve(path string, mustExist bool) (string, error) {
-	return s.tool.resolvePath(s.ctx, path, mustExist, s.approvedOutside)
-}
-
 func (s *applyState) lockDocumentPaths(doc patchformat.Document) (func(), error) {
 	paths := make([]string, 0, len(doc.Hunks))
 	addPath := func(raw string, mustExist bool) error {
 		if strings.TrimSpace(raw) == "" {
 			return nil
 		}
-		resolved, err := s.resolve(raw, mustExist)
+		resolved, err := s.tool.resolvePath(s.ctx, raw, mustExist, s.approvedOutside)
 		if err != nil {
 			return err
 		}
@@ -90,7 +86,7 @@ func (s *applyState) lockDocumentPaths(doc patchformat.Document) (func(), error)
 }
 
 func (s *applyState) getState(path string) (*patchFileState, error) {
-	resolved, err := s.resolve(path, false)
+	resolved, err := s.tool.resolvePath(s.ctx, path, false, s.approvedOutside)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +106,7 @@ func (s *applyState) getState(path string) (*patchFileState, error) {
 }
 
 func (s *applyState) addFile(op patchformat.AddFile) error {
-	target, err := s.resolve(op.Path, false)
+	target, err := s.tool.resolvePath(s.ctx, op.Path, false, s.approvedOutside)
 	if err != nil {
 		return err
 	}
@@ -138,7 +134,7 @@ func (s *applyState) addFile(op patchformat.AddFile) error {
 }
 
 func (s *applyState) deleteFile(op patchformat.DeleteFile) error {
-	target, err := s.resolve(op.Path, true)
+	target, err := s.tool.resolvePath(s.ctx, op.Path, true, s.approvedOutside)
 	if err != nil {
 		return err
 	}
@@ -157,7 +153,7 @@ func (s *applyState) deleteFile(op patchformat.DeleteFile) error {
 }
 
 func (s *applyState) updateFile(op patchformat.UpdateFile) error {
-	resolved, err := s.resolve(op.Path, false)
+	resolved, err := s.tool.resolvePath(s.ctx, op.Path, false, s.approvedOutside)
 	if err != nil {
 		return err
 	}
@@ -179,7 +175,7 @@ func (s *applyState) updateFile(op patchformat.UpdateFile) error {
 	if strings.TrimSpace(op.MoveTo) == "" {
 		return nil
 	}
-	moveTarget, err := s.resolve(op.MoveTo, false)
+	moveTarget, err := s.tool.resolvePath(s.ctx, op.MoveTo, false, s.approvedOutside)
 	if err != nil {
 		return err
 	}

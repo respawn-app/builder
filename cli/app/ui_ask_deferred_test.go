@@ -78,8 +78,8 @@ func TestAskEventDefersWhileProcessListOverlayIsOpen(t *testing.T) {
 	m.input = "/ps"
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.processList.isOpen() || m.surface() != uiSurfaceProcessList {
-		t.Fatalf("expected process list surface open, visible=%t surface=%q", m.processList.isOpen(), m.surface())
+	if !m.processList.open || m.surface() != uiSurfaceProcessList {
+		t.Fatalf("expected process list surface open, visible=%t surface=%q", m.processList.open, m.surface())
 	}
 
 	m = updateUIModel(t, m, askEventMsg{event: askEvent{req: clientui.PendingPromptEvent{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}})
@@ -94,7 +94,7 @@ func TestAskEventDefersWhileProcessListOverlayIsOpen(t *testing.T) {
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.processList.isOpen() {
+	if m.processList.open {
 		t.Fatal("expected esc to close process list overlay")
 	}
 	if m.view.Mode() != tui.ModeOngoing {

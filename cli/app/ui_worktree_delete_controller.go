@@ -8,10 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (d uiWorktreeDeleteDialogState) availableActions() []uiWorktreeDeleteAction {
-	return worktreedelete.Actions(d.target)
-}
-
 func (d *uiWorktreeDeleteDialogState) clampSelection() {
 	if d == nil {
 		return
@@ -36,12 +32,8 @@ const (
 
 type worktreeDeletePreviewLine = worktreedelete.PreviewLine
 
-func worktreeDeletePreviewLines(dialog uiWorktreeDeleteDialogState) []worktreeDeletePreviewLine {
-	return worktreedelete.PreviewLines(dialog.target, dialog.selectedAction)
-}
-
 func renderWorktreeDeleteButtons(width int, theme string, dialog uiWorktreeDeleteDialogState) string {
-	actions := dialog.availableActions()
+	actions := worktreedelete.Actions(dialog.target)
 	options := make([]uiChoiceOption, 0, len(actions))
 	selectedIndex := 0
 	for _, action := range actions {

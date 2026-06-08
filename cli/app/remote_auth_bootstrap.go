@@ -7,9 +7,12 @@ import (
 	"strings"
 
 	"builder/cli/app/internal/oauthadapter"
+	serverauth "builder/server/auth"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
@@ -17,7 +20,7 @@ var (
 	ErrOAuthStateMismatch = errors.New("oauth state mismatch")
 )
 
-func ensureRemoteAuthReady(ctx context.Context, remote client.AuthBootstrapClient, settings config.Settings, interactor authInteractor) error {
+func ensureRemoteAuthReady(ctx context.Context, remote client.AuthBootstrapClient, settings config.Settings, interactor authInteractor, interactive bool) error {
 	if remote == nil {
 		return errors.New("auth bootstrap client is required")
 	}
@@ -31,7 +34,7 @@ func ensureRemoteAuthReady(ctx context.Context, remote client.AuthBootstrapClien
 	if interactor == nil {
 		return serverapi.ErrServerAuthRequired
 	}
-	if !status.AuthRequired && !interactor.Interactive() {
+	if !status.AuthRequired && !interactive {
 		return nil
 	}
 	if interactive, ok := interactor.(*interactiveAuthInteractor); ok {
@@ -84,7 +87,7 @@ func (i *interactiveAuthInteractor) completeRemoteAuthBootstrap(ctx context.Cont
 			req.FlowErr = serverapi.ErrServerAuthRequired
 			continue
 		}
-		i.printAuthSection(req.Theme, "Server Auth Ready", []string{authMetaStyle(req.Theme).Render("Builder configured auth on the server.")})
+		i.printAuthSection(req.Theme, "Server Auth Ready", []string{lipgloss.NewStyle().Foreground(uiPalette(req.Theme).muted).Faint(true).Render("Builder configured auth on the server.")})
 		return nil
 	}
 }
@@ -116,19 +119,19 @@ func (i *interactiveAuthInteractor) collectRemoteBrowserAuto(ctx context.Context
 	startListener := i.startCallbackListener
 	if startListener == nil {
 		startListener = func() (oauthCallbackListener, error) {
-			return oauthadapter.StartOAuthCallbackListener()
+			return serverauth.StartOAuthCallbackListener()
 		}
 	}
 	openBrowser := i.openBrowser
 	if openBrowser == nil {
-		openBrowser = oauthadapter.OpenBrowser
+		openBrowser = serverauth.OpenBrowser
 	}
 	listener, err := startListener()
 	if err != nil {
 		return serverapi.AuthCompleteBootstrapRequest{}, err
 	}
 	defer func() { _ = listener.Close() }()
-	session, err := oauthadapter.BeginOpenAIBrowserFlow(opts, listener.RedirectURI())
+	session, err := serverauth.BeginOpenAIBrowserFlow(opts, listener.RedirectURI())
 	if err != nil {
 		return serverapi.AuthCompleteBootstrapRequest{}, err
 	}
@@ -144,7 +147,7 @@ func (i *interactiveAuthInteractor) collectRemoteBrowserAuto(ctx context.Context
 	}, func(waitCtx context.Context) (oauthadapter.BrowserCallback, error) {
 		return listener.Wait(waitCtx, opts.PollTimeout)
 	}, func(_ context.Context, input string) (oauthadapter.Method, error) {
-		parsed, err := oauthadapter.ParseOAuthCallbackInput(input)
+		parsed, err := serverauth.ParseOAuthCallbackInput(input)
 		if err != nil {
 			return oauthadapter.Method{}, err
 		}
@@ -177,11 +180,11 @@ func (i *interactiveAuthInteractor) collectRemoteBrowserAuto(ctx context.Context
 }
 
 func (i *interactiveAuthInteractor) collectRemoteDevice(ctx context.Context, opts oauthadapter.OpenAIOAuthOptions, theme string) (serverapi.AuthCompleteBootstrapRequest, error) {
-	grant, err := oauthadapter.CollectOpenAIDeviceAuthorizationGrant(ctx, opts, func(code oauthadapter.DeviceCode) {
+	grant, err := serverauth.CollectOpenAIDeviceAuthorizationGrant(ctx, opts, func(code oauthadapter.DeviceCode) {
 		i.printAuthSection(theme, authMethodDisplayTitle(authMethodChoiceDevice), []string{
-			authURLStyle(theme).Render(code.VerificationURL),
-			authBodyStyle(theme).Render("Code: ") + authCodeStyle(theme).Render(code.UserCode),
-			authMetaStyle(theme).Render("Waiting for authorization..."),
+			lipgloss.NewStyle().Foreground(uiPalette(theme).primary).Underline(true).Render(code.VerificationURL),
+			lipgloss.NewStyle().Foreground(uiPalette(theme).foreground).Render("Code: ") + lipgloss.NewStyle().Foreground(uiPalette(theme).secondary).Bold(true).Render(code.UserCode),
+			lipgloss.NewStyle().Foreground(uiPalette(theme).muted).Faint(true).Render("Waiting for authorization..."),
 		})
 	})
 	if err != nil {

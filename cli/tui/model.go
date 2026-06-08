@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/shared/clientui"
+	"builder/shared/theme"
 	"builder/shared/transcript"
 	"fmt"
 	"strings"
@@ -164,9 +165,9 @@ func WithPreviewLines(lines int) Option {
 	}
 }
 
-func WithTheme(theme string) Option {
+func WithTheme(themeName string) Option {
 	return func(m *Model) {
-		m.theme = normalizeTheme(theme)
+		m.theme = theme.Resolve(themeName)
 	}
 }
 
@@ -376,7 +377,7 @@ func NewModel(opts ...Option) Model {
 		viewportLines: DefaultPreviewLines,
 		viewportWidth: 120,
 		toolSymbolGap: 1,
-		theme:         normalizeTheme(""),
+		theme:         theme.Resolve(""),
 		viewProjector: &TranscriptViewProjector{},
 	}
 	for _, opt := range opts {
@@ -867,10 +868,10 @@ func (m Model) ongoingLineParts() ongoingLineParts {
 		base, lastGroup = m.viewProjector.CommittedOngoingLines(input, state)
 	} else {
 		projection := projectCommittedOngoingTranscriptWithRenderer(
-			committedOngoingProjectionRenderer(state.Theme, state.ViewportWidth, input.BaseOffset),
+			transcriptProjectionRenderer(state.Theme, state.ViewportWidth, input.BaseOffset),
 			input.Entries,
 		)
-		base = projection.Lines(detailDivider())
+		base = projection.Lines(TranscriptDivider)
 		if blockCount := len(projection.Blocks); blockCount > 0 {
 			lastGroup = projection.Blocks[blockCount-1].DividerGroup
 		}
@@ -899,9 +900,9 @@ func (m Model) pendingOngoingProjectionLines(input TranscriptProjectionInput, st
 	if len(projection.Blocks) == 0 {
 		return pendingOngoingLines{}
 	}
-	lines := projection.Lines(detailDivider())
+	lines := projection.Lines(TranscriptDivider)
 	if previousGroup != "" && previousGroup != projection.Blocks[0].DividerGroup {
-		lines = append([]TranscriptProjectionLine{{Kind: VisibleLineDivider, Text: detailDivider()}}, lines...)
+		lines = append([]TranscriptProjectionLine{{Kind: VisibleLineDivider, Text: TranscriptDivider}}, lines...)
 	}
 	return pendingOngoingLines{lines: lines, lastGroup: projection.Blocks[len(projection.Blocks)-1].DividerGroup}
 }
@@ -948,7 +949,7 @@ func (p ongoingLineParts) lineAt(index int) TranscriptProjectionLine {
 	index -= len(p.base)
 	if p.streamingDivider {
 		if index == 0 {
-			return TranscriptProjectionLine{Kind: VisibleLineDivider, Text: detailDivider()}
+			return TranscriptProjectionLine{Kind: VisibleLineDivider, Text: TranscriptDivider}
 		}
 		index--
 	}

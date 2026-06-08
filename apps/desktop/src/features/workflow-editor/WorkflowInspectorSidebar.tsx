@@ -59,6 +59,7 @@ import {
   fallbackLabel,
   nodeByID,
   transitionGroupByID,
+  transitionGroupIsFanOut,
 } from "./workflowInspectorModel";
 import { workflowDefinitionFromDraft, type DraftWorkflowNode } from "./workflowEditorDraft";
 import {
@@ -226,7 +227,9 @@ function EdgeDraftDetails({
   const details = edgeDetails(definition, edge, validation);
   const derivedEdge = derivedEdgeWiring(definition, edge.id);
   const transitionGroup = transitionGroupByID(definition, edge.transitionGroupID);
+  const fanOutTransition = transitionGroupIsFanOut(definition, edge.transitionGroupID);
   const startEdge = details.sourceKind === "start";
+  const targetAgent = details.targetKind === "agent";
   const continuationAvailable = details.sourceKind === "agent" || details.targetKind === "agent";
   const disabledReason = t("workflowEditor.edgeControlNotApplicable");
   const contextModeDisabled = startEdge;
@@ -256,9 +259,19 @@ function EdgeDraftDetails({
           }}
           value={transitionGroup?.name ?? ""}
         />
+        <TextArea
+          label={t("workflowEditor.transitionDescription")}
+          onChange={(event) => {
+            controller.dispatch({
+              input: { edgeID: edge.id, transitionDescription: event.target.value },
+              type: "editEdgeRoute",
+            });
+          }}
+          value={transitionGroup?.description ?? ""}
+        />
         <TextInput
           {...identifierInputAttributes}
-          label={t("workflowEditor.transitionID")}
+          label={t("workflowEditor.key")}
           onChange={(event) => {
             controller.dispatch({
               input: { edgeID: edge.id, transitionID: event.target.value.replaceAll("\n", " ") },
@@ -267,53 +280,59 @@ function EdgeDraftDetails({
           }}
           value={details.transitionID}
         />
-        <TextInput
-          {...identifierInputAttributes}
-          label={t("workflowEditor.key")}
-          onChange={(event) => {
-            controller.dispatch({
-              input: { edgeID: edge.id, edgeKey: event.target.value.replaceAll("\n", " ") },
-              type: "editEdgeRoute",
-            });
-          }}
-          value={edge.key}
-        />
+        {fanOutTransition ? (
+          <TextInput
+            {...identifierInputAttributes}
+            label={t("workflowEditor.branchKey")}
+            onChange={(event) => {
+              controller.dispatch({
+                input: { edgeID: edge.id, edgeKey: event.target.value.replaceAll("\n", " ") },
+                type: "editEdgeRoute",
+              });
+            }}
+            value={edge.key}
+          />
+        ) : null}
         <TooltipProvider delayDuration={0}>
-          <DisabledInteractionGuard disabled={contextModeDisabled} reason={disabledReason}>
-            <SelectField
-              disabled={contextModeDisabled}
-              label={t("workflowEditor.contextMode")}
-              onValueChange={(value) => {
-                if (value !== "new_session" && !continuationAvailable) {
-                  return;
-                }
-                controller.dispatch({
-                  input: {
-                    contextMode: value,
-                    contextSource: value === "new_session" ? immediateContextSource : edge.contextSource,
-                    edgeID: edge.id,
-                  },
-                  type: "editEdgeRoute",
-                });
-              }}
-              options={contextModeOptions(t, !continuationAvailable)}
-              value={edge.contextMode}
-            />
-          </DisabledInteractionGuard>
-          <DisabledInteractionGuard disabled={contextSourceDisabled} reason={disabledReason}>
-            <SelectField
-              disabled={contextSourceDisabled}
-              label={t("workflowEditor.contextSource")}
-              onValueChange={(value) => {
-                controller.dispatch({
-                  input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
-                  type: "editEdgeRoute",
-                });
-              }}
-              options={contextSourceOptions(definition, edge, t)}
-              value={contextSourceSelectValue(definition, edge)}
-            />
-          </DisabledInteractionGuard>
+          {targetAgent ? (
+            <>
+              <DisabledInteractionGuard disabled={contextModeDisabled} reason={disabledReason}>
+                <SelectField
+                  disabled={contextModeDisabled}
+                  label={t("workflowEditor.contextMode")}
+                  onValueChange={(value) => {
+                    if (value !== "new_session" && !continuationAvailable) {
+                      return;
+                    }
+                    controller.dispatch({
+                      input: {
+                        contextMode: value,
+                        contextSource: value === "new_session" ? immediateContextSource : edge.contextSource,
+                        edgeID: edge.id,
+                      },
+                      type: "editEdgeRoute",
+                    });
+                  }}
+                  options={contextModeOptions(t, !continuationAvailable)}
+                  value={edge.contextMode}
+                />
+              </DisabledInteractionGuard>
+              <DisabledInteractionGuard disabled={contextSourceDisabled} reason={disabledReason}>
+                <SelectField
+                  disabled={contextSourceDisabled}
+                  label={t("workflowEditor.contextSource")}
+                  onValueChange={(value) => {
+                    controller.dispatch({
+                      input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
+                      type: "editEdgeRoute",
+                    });
+                  }}
+                  options={contextSourceOptions(definition, edge, t)}
+                  value={contextSourceSelectValue(definition, edge)}
+                />
+              </DisabledInteractionGuard>
+            </>
+          ) : null}
           <DisabledInteractionGuard disabled={requiresApprovalDisabled} reason={disabledReason}>
             <ApprovalToggle
               checked={edge.requiresApproval}
@@ -1042,6 +1061,8 @@ function EdgeDetails({
   const details = edgeDetails(definition, edge, validation);
   const derivedEdge = derivedEdgeWiring(definition, edge.id);
   const promptParameters = edgePromptPlaceholderParameters(definition, edge);
+  const fanOutTransition = transitionGroupIsFanOut(definition, edge.transitionGroupID);
+  const targetAgent = details.targetKind === "agent";
   return (
     <InspectorStack>
       <DetailSection
@@ -1056,14 +1077,24 @@ function EdgeDetails({
         }
         title={t("workflowEditor.route")}
       >
-        <DetailRow label={t("workflowEditor.key")} mono value={edge.key} />
-        <DetailRow label={t("workflowEditor.transitionID")} mono value={details.transitionID} />
-        <DetailRow label={t("workflowEditor.transitionGroup")} value={details.transitionGroupLabel} />
-        <DetailRow
-          label={t("workflowEditor.contextMode")}
-          value={formatContextModeLabel(edge.contextMode, t)}
-        />
-        <DetailRow label={t("workflowEditor.contextSource")} value={formatContextSourceLabel(edge, t)} />
+        <DetailRow label={t("workflowEditor.key")} mono value={details.transitionID} />
+        {fanOutTransition ? <DetailRow label={t("workflowEditor.branchKey")} mono value={edge.key} /> : null}
+        <DetailRow label={t("workflowEditor.transitionText")} value={details.transitionGroupLabel} />
+        {details.transitionDescription.length > 0 ? (
+          <DetailRow
+            label={t("workflowEditor.transitionDescription")}
+            value={details.transitionDescription}
+          />
+        ) : null}
+        {targetAgent ? (
+          <>
+            <DetailRow
+              label={t("workflowEditor.contextMode")}
+              value={formatContextModeLabel(edge.contextMode, t)}
+            />
+            <DetailRow label={t("workflowEditor.contextSource")} value={formatContextSourceLabel(edge, t)} />
+          </>
+        ) : null}
         <DetailRow
           label={t("workflowEditor.requiresApproval")}
           value={edge.requiresApproval ? t("workflowEditor.required") : t("workflowEditor.none")}
@@ -1437,6 +1468,7 @@ function edgeEndpointDetails(source: WorkflowNode | undefined, target: WorkflowN
 function edgeTransitionDetails(group: WorkflowTransitionGroup | undefined) {
   return {
     transitionGroupLabel: fallbackLabel("", group?.name, group?.id),
+    transitionDescription: group?.description ?? "",
     transitionID: group?.transitionID ?? "",
   };
 }

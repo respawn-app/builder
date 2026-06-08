@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	glamouransi "github.com/charmbracelet/glamour/ansi"
 )
 
 const markdownCacheLimit = 1024
@@ -34,14 +33,6 @@ func newMarkdownRenderer(theme string, reportErr markdownRendererErrorReporter) 
 		reportErr:        reportErr,
 		newTermRenderer:  glamour.NewTermRenderer,
 	}
-}
-
-func (r *markdownRenderer) render(role RenderIntent, text string, width int) (string, error) {
-	return r.renderWithRenderer(role, text, width, "plain", r.getRenderer)
-}
-
-func (r *markdownRenderer) renderWrapped(role RenderIntent, text string, width int) (string, error) {
-	return r.renderWithRenderer(role, text, width, "wrapped", r.getWrappedRenderer)
 }
 
 func (r *markdownRenderer) renderWithRenderer(role RenderIntent, text string, width int, variant string, rendererForWidth func(int) (*glamour.TermRenderer, error)) (string, error) {
@@ -92,7 +83,7 @@ func (r *markdownRenderer) getRenderer(width int) (*glamour.TermRenderer, error)
 	}
 	termRenderer, err := r.newTermRenderer(
 		glamour.WithWordWrap(0),
-		glamour.WithStyles(r.styleConfig()),
+		glamour.WithStyles(r.styles.markdownConfig()),
 	)
 	if err != nil {
 		return nil, err
@@ -107,17 +98,13 @@ func (r *markdownRenderer) getWrappedRenderer(width int) (*glamour.TermRenderer,
 	}
 	termRenderer, err := r.newTermRenderer(
 		glamour.WithWordWrap(width),
-		glamour.WithStyles(r.styleConfig()),
+		glamour.WithStyles(r.styles.markdownConfig()),
 	)
 	if err != nil {
 		return nil, err
 	}
 	r.wrappedRenderers[width] = termRenderer
 	return termRenderer, nil
-}
-
-func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
-	return r.styles.markdownConfig()
 }
 
 func isMarkdownRole(role RenderIntent) bool {

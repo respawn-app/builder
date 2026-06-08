@@ -38,10 +38,7 @@ func TestPromptServiceRejectsMissingClientRequestID(t *testing.T) {
 func TestPromptServiceRunsPromptThroughPreparedRuntime(t *testing.T) {
 	launcher := &stubHeadlessPromptLauncher{
 		runtime: &stubPromptSessionRuntime{
-			sessionID:   "session-1",
-			sessionName: "session one",
-			assistant:   PromptAssistantMessage{Content: "done"},
-			warnings:    []string{"warning one"},
+			assistant: PromptAssistantMessage{SessionID: "session-1", SessionName: "session one", Content: "done", Warnings: []string{"warning one"}},
 		},
 	}
 	service := NewPromptService(launcher)
@@ -87,11 +84,8 @@ func TestPromptServiceReturnsPartialResultOnRunError(t *testing.T) {
 	runErr := errors.New("boom")
 	launcher := &stubHeadlessPromptLauncher{
 		runtime: &stubPromptSessionRuntime{
-			sessionID:   "session-2",
-			sessionName: "session two",
-			assistant:   PromptAssistantMessage{Content: "partial"},
-			err:         runErr,
-			dropped:     3,
+			assistant: PromptAssistantMessage{SessionID: "session-2", SessionName: "session two", Content: "partial", DroppedEvents: 3},
+			err:       runErr,
 		},
 	}
 	service := NewPromptService(launcher)
@@ -114,8 +108,7 @@ func TestPromptServiceReturnsPartialResultOnRunError(t *testing.T) {
 func TestPromptServiceAppliesTimeoutToSubmittedRun(t *testing.T) {
 	launcher := &stubHeadlessPromptLauncher{
 		runtime: &stubPromptSessionRuntime{
-			sessionID:   "session-timeout",
-			sessionName: "timeout",
+			assistant: PromptAssistantMessage{SessionID: "session-timeout", SessionName: "timeout"},
 			onSubmit: func(ctx context.Context) {
 				deadline, ok := ctx.Deadline()
 				if !ok {
@@ -152,16 +145,12 @@ func (s *stubHeadlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, re
 }
 
 type stubPromptSessionRuntime struct {
-	sessionID   string
-	sessionName string
-	assistant   PromptAssistantMessage
-	err         error
-	dropped     uint64
-	warnings    []string
-	prompt      string
-	closed      bool
-	logs        []string
-	onSubmit    func(context.Context)
+	assistant PromptAssistantMessage
+	err       error
+	prompt    string
+	closed    bool
+	logs      []string
+	onSubmit  func(context.Context)
 }
 
 func (s *stubPromptSessionRuntime) SubmitUserMessage(ctx context.Context, prompt string) (PromptAssistantMessage, error) {
@@ -170,22 +159,6 @@ func (s *stubPromptSessionRuntime) SubmitUserMessage(ctx context.Context, prompt
 		s.onSubmit(ctx)
 	}
 	return s.assistant, s.err
-}
-
-func (s *stubPromptSessionRuntime) SessionID() string {
-	return s.sessionID
-}
-
-func (s *stubPromptSessionRuntime) SessionName() string {
-	return s.sessionName
-}
-
-func (s *stubPromptSessionRuntime) DroppedEvents() uint64 {
-	return s.dropped
-}
-
-func (s *stubPromptSessionRuntime) Warnings() []string {
-	return append([]string(nil), s.warnings...)
 }
 
 func (s *stubPromptSessionRuntime) Logf(format string, args ...any) {

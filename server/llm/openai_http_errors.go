@@ -14,10 +14,6 @@ func newOpenAIRequestErrorMapper(providerID string) openAIRequestErrorMapper {
 	return openAIRequestErrorMapper{providerID: providerID}
 }
 
-func mapOpenAIRequestError(providerID string, err error, rawResp *http.Response, prefix string) error {
-	return newOpenAIRequestErrorMapper(providerID).Map(err, rawResp, prefix)
-}
-
 func (m openAIRequestErrorMapper) Map(err error, rawResp *http.Response, prefix string) error {
 	reducer, reducerErr := providerErrorReducerForID(m.providerID)
 	if reducerErr != nil {

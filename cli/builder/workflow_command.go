@@ -15,6 +15,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+
 	"github.com/google/uuid"
 )
 
@@ -29,7 +30,10 @@ type workflowCommandRemote interface {
 	Close() error
 }
 
-var workflowCommandRemoteOpener = openWorkflowCommandRemote
+var workflowCommandRemoteOpener func(context.Context, string) (config.App, workflowCommandRemote, error) = func(ctx context.Context, path string) (config.App, workflowCommandRemote, error) {
+	cfg, remote, err := bindingCommandRemoteOpener(ctx, path)
+	return cfg, remote, err
+}
 
 func workflowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if stdout == nil {
@@ -39,7 +43,7 @@ func workflowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		stderr = io.Discard
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fs := newCommandFlagSet("builder workflow", stderr, writeWorkflowUsage)
+		fs := newCommandFlagSet("builder workflow", stderr, workflowUsage)
 		fs.Usage()
 		if len(args) == 0 {
 			return 2
@@ -67,14 +71,14 @@ func workflowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return workflowInspectSubcommand(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown workflow command: %s\n\n", args[0])
-		fs := newCommandFlagSet("builder workflow", stderr, writeWorkflowUsage)
-		writeWorkflowUsage(fs)
+		fs := newCommandFlagSet("builder workflow", stderr, workflowUsage)
+		workflowUsage.write(fs)
 		return 2
 	}
 }
 
 func workflowCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow create", stderr, writeWorkflowCreateUsage)
+	fs := newCommandFlagSet("builder workflow create", stderr, workflowCommandUsage)
 	description := fs.String("description", "", "workflow description")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -84,14 +88,14 @@ func workflowCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintln(stderr, "workflow create requires <name>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	_ = cfg
 	defer func() { _ = remote.Close() }()
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: name, Description: *description})
 	if err != nil {
@@ -103,7 +107,7 @@ func workflowCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 }
 
 func workflowListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow list", stderr, writeWorkflowUsage)
+	fs := newCommandFlagSet("builder workflow list", stderr, workflowUsage)
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
 	}
@@ -111,7 +115,7 @@ func workflowListSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 		fmt.Fprintln(stderr, "workflow list does not accept positional arguments")
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -135,7 +139,7 @@ func workflowNodeSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	if len(args) > 0 && args[0] == "update" {
 		return workflowNodeUpdateSubcommand(args[1:], stdout, stderr)
 	}
-	fs := newCommandFlagSet("builder workflow node", stderr, writeWorkflowUsage)
+	fs := newCommandFlagSet("builder workflow node", stderr, workflowUsage)
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fs.Usage()
 		if len(args) == 0 {
@@ -149,7 +153,7 @@ func workflowNodeSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 }
 
 func workflowNodeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow node add", stderr, writeWorkflowNodeAddUsage)
+	fs := newCommandFlagSet("builder workflow node add", stderr, workflowCommandUsage)
 	key := fs.String("key", "", "node model key")
 	kind := fs.String("kind", "", "node kind: start|agent|join|terminal")
 	displayName := fs.String("display-name", "", "node display name")
@@ -172,7 +176,7 @@ func workflowNodeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		*displayName = workflowDisplayNameFromKey(*key)
 	}
 	nodeID := "node-" + uuid.NewString()
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -183,7 +187,7 @@ func workflowNodeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.AddWorkflowNode(ctx, serverapi.WorkflowNodeAddRequest{WorkflowID: workflowID, NodeID: nodeID, Key: *key, Kind: *kind, DisplayName: *displayName, SubagentRole: *agent, PromptTemplate: *prompt})
 	if err != nil {
@@ -195,7 +199,7 @@ func workflowNodeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 }
 
 func workflowNodeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow node update", stderr, writeWorkflowNodeUpdateUsage)
+	fs := newCommandFlagSet("builder workflow node update", stderr, workflowCommandUsage)
 	key := fs.String("key", "", "node model key")
 	kind := fs.String("kind", "", "node kind: start|agent|join|terminal")
 	displayName := fs.String("display-name", "", "node display name")
@@ -210,7 +214,7 @@ func workflowNodeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 		fmt.Fprintln(stderr, "workflow node update requires <workflow> <node-key>")
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -242,7 +246,7 @@ func workflowNodeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 	if fs.Lookup("agent") != nil && flagWasProvided(fs, "agent") {
 		updated.SubagentRole = *agent
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.UpdateWorkflowNode(ctx, serverapi.WorkflowNodeUpdateRequest{
 		WorkflowID:         def.Workflow.ID,
@@ -271,7 +275,7 @@ func workflowEdgeSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	if len(args) > 0 && args[0] == "update" {
 		return workflowEdgeUpdateSubcommand(args[1:], stdout, stderr)
 	}
-	fs := newCommandFlagSet("builder workflow edge", stderr, writeWorkflowUsage)
+	fs := newCommandFlagSet("builder workflow edge", stderr, workflowUsage)
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fs.Usage()
 		if len(args) == 0 {
@@ -285,7 +289,7 @@ func workflowEdgeSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 }
 
 func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow edge add", stderr, writeWorkflowEdgeAddUsage)
+	fs := newCommandFlagSet("builder workflow edge add", stderr, workflowCommandUsage)
 	fromKey := fs.String("from", "", "source node key")
 	transitionID := fs.String("transition", "", "transition id")
 	edgeKey := fs.String("edge-key", "", "edge key")
@@ -312,7 +316,7 @@ func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -342,7 +346,7 @@ func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 	}
 	if groupID == "" {
 		groupID = "group-" + uuid.NewString()
-		ctx, cancel := workflowRPCContext(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 		resp, addErr := remote.AddWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupAddRequest{WorkflowID: def.Workflow.ID, GroupID: groupID, SourceNodeID: source.ID, TransitionID: *transitionID, DisplayName: workflowDisplayNameFromKey(*transitionID)})
 		cancel()
 		if addErr != nil {
@@ -352,7 +356,7 @@ func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		_ = resp
 	}
 	edgeID := "edge-" + uuid.NewString()
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	resp, err := remote.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: def.Workflow.ID, EdgeID: edgeID, TransitionGroupID: groupID, Key: *edgeKey, TargetNodeID: target.ID, ContextMode: *contextMode, ContextSource: parsedContextSource, RequiresApproval: *requiresApproval, PromptTemplate: *prompt})
 	cancel()
 	if err != nil {
@@ -364,7 +368,7 @@ func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 }
 
 func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow edge update", stderr, writeWorkflowEdgeUpdateUsage)
+	fs := newCommandFlagSet("builder workflow edge update", stderr, workflowCommandUsage)
 	transitionID := fs.String("transition", "", "transition id for the edge's transition group")
 	transitionDisplayName := fs.String("transition-display-name", "", "transition display name")
 	edgeKey := fs.String("edge-key", "", "edge key")
@@ -381,7 +385,7 @@ func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 		fmt.Fprintln(stderr, "workflow edge update requires <workflow> <edge-id>")
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -412,7 +416,7 @@ func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 		updatedGroup.DisplayName = workflowDisplayNameFromKey(*transitionID)
 	}
 	if updatedGroup != group {
-		ctx, cancel := workflowRPCContext(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 		resp, updateErr := remote.UpdateWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupUpdateRequest{WorkflowID: def.Workflow.ID, GroupID: updatedGroup.ID, SourceNodeID: updatedGroup.SourceNodeID, TransitionID: updatedGroup.TransitionID, DisplayName: updatedGroup.DisplayName})
 		cancel()
 		if updateErr != nil {
@@ -447,12 +451,12 @@ func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 	if flagWasProvided(fs, "prompt") {
 		updatedEdge.PromptTemplate = *prompt
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.UpdateWorkflowEdge(ctx, serverapi.WorkflowEdgeUpdateRequest{WorkflowID: def.Workflow.ID, EdgeID: updatedEdge.ID, TransitionGroupID: updatedEdge.TransitionGroupID, Key: updatedEdge.Key, TargetNodeID: updatedEdge.TargetNodeID, ContextMode: updatedEdge.ContextMode, ContextSource: updatedEdge.ContextSource, RequiresApproval: updatedEdge.RequiresApproval, PromptTemplate: updatedEdge.PromptTemplate, Parameters: updatedEdge.Parameters})
 	if err != nil {
 		if updatedGroup != group {
-			rollbackCtx, rollbackCancel := workflowRPCContext(context.Background())
+			rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 			_, rollbackErr := remote.UpdateWorkflowTransitionGroup(rollbackCtx, serverapi.WorkflowTransitionGroupUpdateRequest{WorkflowID: def.Workflow.ID, GroupID: group.ID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName})
 			rollbackCancel()
 			if rollbackErr != nil {
@@ -468,7 +472,7 @@ func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 }
 
 func workflowLinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow link", stderr, writeWorkflowLinkUsage)
+	fs := newCommandFlagSet("builder workflow link", stderr, workflowCommandUsage)
 	defaultLink := fs.Bool("default", false, "make workflow project default")
 	positionals, flagArgs := takeLeadingPositionals(args, 2)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
@@ -479,7 +483,7 @@ func workflowLinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 		fmt.Fprintln(stderr, "workflow link requires <project> and <workflow>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -495,7 +499,7 @@ func workflowLinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: projectID, WorkflowID: workflowID, Default: *defaultLink})
 	if err != nil {
@@ -507,7 +511,7 @@ func workflowLinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 }
 
 func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow unlink", stderr, writeWorkflowUsage)
+	fs := newCommandFlagSet("builder workflow unlink", stderr, workflowUsage)
 	positionals, flagArgs := takeLeadingPositionals(args, 2)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
 		return exitCode
@@ -517,7 +521,7 @@ func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintln(stderr, "workflow unlink requires <project> and <workflow>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -528,7 +532,7 @@ func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.ID})
 	if err != nil {
@@ -544,7 +548,7 @@ func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 }
 
 func workflowDefaultSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow default", stderr, writeWorkflowUsage)
+	fs := newCommandFlagSet("builder workflow default", stderr, workflowUsage)
 	positionals, flagArgs := takeLeadingPositionals(args, 2)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
 		return exitCode
@@ -554,7 +558,7 @@ func workflowDefaultSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, "workflow default requires <project> and <workflow>")
 		return 2
 	}
-	cfg, remote, err := workflowOpen(context.Background(), ".")
+	cfg, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -570,7 +574,7 @@ func workflowDefaultSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.SetDefaultProjectWorkflowLink(ctx, serverapi.WorkflowSetDefaultProjectLinkRequest{ProjectID: projectID, WorkflowID: workflowID})
 	if err != nil {
@@ -582,7 +586,7 @@ func workflowDefaultSubcommand(args []string, stdout io.Writer, stderr io.Writer
 }
 
 func workflowValidateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow validate", stderr, writeWorkflowValidateUsage)
+	fs := newCommandFlagSet("builder workflow validate", stderr, workflowCommandUsage)
 	mode := fs.String("mode", string(serverapi.WorkflowValidationModeExecution), "validation mode: draft|task_creation|execution")
 	_ = fs.String("project", "", "reserved project id/path")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
@@ -594,7 +598,7 @@ func workflowValidateSubcommand(args []string, stdout io.Writer, stderr io.Write
 		fmt.Fprintln(stderr, "workflow validate requires <workflow>")
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -605,7 +609,7 @@ func workflowValidateSubcommand(args []string, stdout io.Writer, stderr io.Write
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.ValidateWorkflow(ctx, serverapi.WorkflowValidateRequest{WorkflowID: workflowID, Mode: serverapi.WorkflowValidationMode(*mode)})
 	if err != nil {
@@ -623,7 +627,7 @@ func workflowValidateSubcommand(args []string, stdout io.Writer, stderr io.Write
 }
 
 func workflowInspectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder workflow inspect", stderr, writeWorkflowUsage)
+	fs := newCommandFlagSet("builder workflow inspect", stderr, workflowUsage)
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if ok, exitCode := parseCommandFlags(fs, flagArgs); !ok {
 		return exitCode
@@ -633,7 +637,7 @@ func workflowInspectSubcommand(args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprintln(stderr, "workflow inspect requires <workflow>")
 		return 2
 	}
-	_, remote, err := workflowOpen(context.Background(), ".")
+	_, remote, err := workflowCommandRemoteOpener(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -694,18 +698,6 @@ func canonicalAPIContextSource(source serverapi.WorkflowContextSource) serverapi
 	return source
 }
 
-func openWorkflowCommandRemote(ctx context.Context, path string) (config.App, workflowCommandRemote, error) {
-	return bindingCommandRemoteOpener(ctx, path)
-}
-
-func workflowOpen(ctx context.Context, path string) (config.App, workflowCommandRemote, error) {
-	return workflowCommandRemoteOpener(ctx, path)
-}
-
-func workflowRPCContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, workflowCommandTimeout)
-}
-
 func resolveWorkflowID(ctx context.Context, remote workflowCommandRemote, ref string) (string, error) {
 	def, err := resolveWorkflowDefinition(ctx, remote, ref)
 	if err != nil {
@@ -735,7 +727,7 @@ func resolveWorkflowDefinition(ctx context.Context, remote workflowCommandRemote
 	if len(matches) > 1 {
 		return serverapi.WorkflowDefinition{}, fmt.Errorf("workflow %q is ambiguous; use workflow id", trimmed)
 	}
-	getCtx, getCancel := workflowRPCContext(ctx)
+	getCtx, getCancel := context.WithTimeout(ctx, workflowCommandTimeout)
 	defer getCancel()
 	resp, err := remote.GetWorkflow(getCtx, serverapi.WorkflowGetRequest{WorkflowID: matches[0].ID})
 	if err != nil {
@@ -748,7 +740,7 @@ func listAllWorkflows(ctx context.Context, remote workflowCommandRemote) ([]serv
 	workflows := make([]serverapi.WorkflowRecord, 0)
 	pageToken := ""
 	for {
-		rpcCtx, cancel := workflowRPCContext(ctx)
+		rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 		req := serverapi.WorkflowListRequest{PageSize: workflowCommandWorkflowListPageSize, PageToken: pageToken}
 		resp, err := remote.ListWorkflows(rpcCtx, req)
 		cancel()
@@ -817,7 +809,7 @@ func resolveWorkflowProjectID(ctx context.Context, cfg config.App, remote workfl
 		if err != nil {
 			return "", err
 		}
-		rpcCtx, cancel := workflowRPCContext(ctx)
+		rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 		defer cancel()
 		resp, err := remote.ResolveProjectPath(rpcCtx, serverapi.ProjectResolvePathRequest{Path: abs})
 		if err != nil {
@@ -840,7 +832,7 @@ func resolveWorkflowProjectLink(ctx context.Context, cfg config.App, remote work
 	if err != nil {
 		return serverapi.ProjectWorkflowLink{}, err
 	}
-	rpcCtx, cancel := workflowRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 	defer cancel()
 	resp, err := remote.ListProjectWorkflowLinks(rpcCtx, serverapi.WorkflowListProjectLinksRequest{ProjectID: projectID})
 	if err != nil {
@@ -886,17 +878,13 @@ func workflowDisplayNameFromKey(key string) string {
 	return display
 }
 
-func sortedWorkflowTasks(board serverapi.WorkflowBoard) []serverapi.WorkflowTaskSummary {
-	return sortedWorkflowTasksFromCards(board, nil)
-}
-
 func workflowTasksForProject(ctx context.Context, cfg config.App, remote workflowCommandRemote, projectRef string) ([]serverapi.WorkflowTaskSummary, string, error) {
 	board, err := workflowBoardForProject(ctx, cfg, remote, projectRef)
 	if err != nil {
 		return nil, "", err
 	}
 	for pageToken := strings.TrimSpace(board.NextPageToken); pageToken != ""; {
-		rpcCtx, cancel := workflowRPCContext(ctx)
+		rpcCtx, cancel := context.WithTimeout(ctx, workflowCommandTimeout)
 		resp, err := remote.GetWorkflowBoard(rpcCtx, serverapi.WorkflowBoardRequest{
 			ProjectID:  board.ProjectID,
 			WorkflowID: board.SelectedWorkflow.WorkflowID,
@@ -910,7 +898,7 @@ func workflowTasksForProject(ctx context.Context, cfg config.App, remote workflo
 		board.Cards = append(board.Cards, resp.Board.Cards...)
 		pageToken = strings.TrimSpace(resp.Board.NextPageToken)
 	}
-	return sortedWorkflowTasks(board), board.ProjectID, nil
+	return sortedWorkflowTasksFromCards(board, nil), board.ProjectID, nil
 }
 
 func sortedWorkflowTasksFromCards(board serverapi.WorkflowBoard, cards []serverapi.WorkflowBoardTaskCard) []serverapi.WorkflowTaskSummary {

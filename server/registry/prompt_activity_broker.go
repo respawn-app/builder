@@ -44,10 +44,6 @@ func (e *runtimeEntry) SubscribePromptActivityInitial(sessionID string, beforeSu
 	if e == nil || e.promptActivity == nil {
 		return nil, fmt.Errorf("prompt activity stream is unavailable: %w", serverapi.ErrStreamUnavailable)
 	}
-	return e.subscribePromptActivityInitialLocked(sessionID, beforeSubscribe)
-}
-
-func (e *runtimeEntry) subscribePromptActivityInitialLocked(sessionID string, beforeSubscribe func()) (*promptActivitySubscription, error) {
 	return e.pendingPrompts.WithLockedSnapshotResult(func(items []PendingPromptSnapshot) (*promptActivitySubscription, error) {
 		initial := make([]clientui.PendingPromptEvent, 0, len(items)+1)
 		for _, item := range items {

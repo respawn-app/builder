@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tuiinput "builder/cli/tui/input"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -51,7 +52,7 @@ func (m *manualAltScreenInputReproModel) Update(msg tea.Msg) (tea.Model, tea.Cmd
 		case tea.KeyEsc, tea.KeyCtrlC:
 			return m, tea.Quit
 		case tea.KeyEnter:
-			setSingleLineEditorValue(&m.editor, "")
+			m.editor.Replace(strings.NewReplacer("\r", "", "\n", "").Replace(""))
 			return m, nil
 		}
 		return m, updateSingleLineEditorWithAppKeys(&m.editor, msg)

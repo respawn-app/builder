@@ -30,7 +30,7 @@ func (r uiKeyFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		}
 		if isHelpKey(keyMsg, m) && m.canShowHelp() {
 			m.lastEscAt = time.Time{}
-			m.toggleHelp()
+			m.helpVisible = !m.helpVisible
 			m.syncViewport()
 			return handledUIFeatureUpdate(m, nil)
 		}

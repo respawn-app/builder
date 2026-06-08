@@ -36,7 +36,7 @@ func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 			return projectCreateSubcommand(args[1:], stdout, stderr)
 		}
 	}
-	fs := newCommandFlagSet("builder project", stderr, writeProjectUsage)
+	fs := newCommandFlagSet("builder project", stderr, projectUsage)
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
 	}
@@ -59,7 +59,7 @@ func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func projectListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder project list", stderr, writeProjectListUsage)
+	fs := newCommandFlagSet("builder project list", stderr, projectListUsage)
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
 	}
@@ -79,7 +79,7 @@ func projectListSubcommand(args []string, stdout io.Writer, stderr io.Writer) in
 }
 
 func projectCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder project create", stderr, writeProjectCreateUsage)
+	fs := newCommandFlagSet("builder project create", stderr, projectCreateUsage)
 	name := fs.String("name", "", "project display name")
 	path := fs.String("path", "", "server-visible workspace path")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
@@ -99,7 +99,7 @@ func projectCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) 
 }
 
 func attachSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder attach", stderr, writeAttachUsage)
+	fs := newCommandFlagSet("builder attach", stderr, attachUsage)
 	projectID := fs.String("project", "", "explicit project id override")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -123,7 +123,7 @@ func attachSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder rebind", stderr, writeRebindUsage)
+	fs := newCommandFlagSet("builder rebind", stderr, rebindUsage)
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
 	}
@@ -183,36 +183,32 @@ func attachWorkspace(ctx context.Context, explicitProjectID string, targetPath s
 	return strings.TrimSpace(resp.Binding.ProjectID), nil
 }
 
-func bindingCommandRPCContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, bindingCommandRPCTimeout)
-}
-
 func attachWorkspaceToProject(ctx context.Context, remote client.ProjectViewClient, projectID string, workspaceRoot string) (serverapi.ProjectAttachWorkspaceResponse, error) {
-	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	return remote.AttachWorkspaceToProject(rpcCtx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: projectID, WorkspaceRoot: workspaceRoot})
 }
 
 func listProjectsWithTimeout(ctx context.Context, remote client.ProjectViewClient) (serverapi.ProjectListResponse, error) {
-	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	return remote.ListProjects(rpcCtx, serverapi.ProjectListRequest{})
 }
 
 func createProjectWithTimeout(ctx context.Context, remote client.ProjectViewClient, displayName string, workspaceRoot string) (serverapi.ProjectCreateResponse, error) {
-	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	return remote.CreateProject(rpcCtx, serverapi.ProjectCreateRequest{DisplayName: displayName, WorkspaceRoot: workspaceRoot})
 }
 
 func rebindWorkspaceWithTimeout(ctx context.Context, remote client.ProjectViewClient, oldWorkspaceRoot string, newWorkspaceRoot string) (serverapi.ProjectRebindWorkspaceResponse, error) {
-	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	return remote.RebindWorkspace(rpcCtx, serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: oldWorkspaceRoot, NewWorkspaceRoot: newWorkspaceRoot})
 }
 
 func retargetSessionWorkspaceWithTimeout(ctx context.Context, remote client.SessionLifecycleClient, sessionID string, workspaceRoot string) (serverapi.SessionRetargetWorkspaceResponse, error) {
-	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	return remote.RetargetSessionWorkspace(rpcCtx, serverapi.SessionRetargetWorkspaceRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID, WorkspaceRoot: workspaceRoot})
 }
@@ -323,7 +319,7 @@ func openBindingCommandRemote(ctx context.Context, path string) (config.App, *cl
 	if err != nil {
 		return config.App{}, nil, err
 	}
-	dialCtx, cancel := bindingCommandRPCContext(ctx)
+	dialCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	remote, err := client.DialConfiguredRemote(dialCtx, cfg)
 	if err != nil {
@@ -344,7 +340,7 @@ func normalizeBindingCommandPath(path string) (string, error) {
 }
 
 func resolveWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (serverapi.ProjectBinding, error) {
-	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	rpcCtx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
 	defer cancel()
 	resp, err := projectViews.ResolveProjectPath(rpcCtx, serverapi.ProjectResolvePathRequest{Path: workspaceRoot})
 	if err != nil {

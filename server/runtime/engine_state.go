@@ -474,7 +474,7 @@ func (e *Engine) restorePersistedUsageState(state *session.UsageState) {
 	if e == nil || state == nil {
 		return
 	}
-	normalized := normalizePersistedUsageState(*state)
+	normalized := normalizePersistedUsageTrackingState(*state)
 	e.applyUsageTrackingState(
 		llm.Usage{
 			InputTokens:          normalized.InputTokens,
@@ -487,10 +487,6 @@ func (e *Engine) restorePersistedUsageState(state *session.UsageState) {
 		normalized.TotalInputTokens,
 		normalized.TotalCachedInputTokens,
 	)
-}
-
-func normalizePersistedUsageState(state session.UsageState) session.UsageState {
-	return normalizePersistedUsageTrackingState(state)
 }
 
 func (e *Engine) nextUsageTrackingState(usage llm.Usage) (llm.Usage, int, int) {

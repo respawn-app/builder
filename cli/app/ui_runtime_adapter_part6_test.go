@@ -6,9 +6,10 @@ import (
 	"builder/server/runtime"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
-	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestProjectedConversationUpdatedSkipsHydrationAfterImmediateUserFlushAppend(t *testing.T) {
@@ -27,9 +28,9 @@ func TestProjectedConversationUpdatedSkipsHydrationAfterImmediateUserFlushAppend
 	m.transcriptRevision = 6
 	m.transcriptTotalEntries = 1
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "foreground done"})
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}, true).cmd
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		StepID:                       "step-1",
 		CommittedTranscriptChanged:   true,
@@ -38,18 +39,18 @@ func TestProjectedConversationUpdatedSkipsHydrationAfterImmediateUserFlushAppend
 		UserMessage:                  "steered message",
 		UserMessageBatchQueueItemIDs: []string{"queue-test-0"},
 		TranscriptEntries:            []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
-	})
+	}, true).cmd
 	if got := len(m.transcriptEntries); got != 2 {
 		t.Fatalf("expected queued user flush to append immediately once committed tail is contiguous, got %d entries", got)
 	}
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         7,
 		CommittedEntryCount:        2,
-	})
+	}, true).cmd
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect committed conversation_updated to hydrate after immediate user append, got %+v", msg)
@@ -76,9 +77,9 @@ func TestProjectedAssistantMessageMergesDeferredCommittedUserFlushWithoutHydrati
 	m.transcriptRevision = 6
 	m.transcriptTotalEntries = 1
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"})
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}, true).cmd
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	_ = m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
 		StepID:                       "step-1",
 		CommittedTranscriptChanged:   true,
@@ -87,16 +88,16 @@ func TestProjectedAssistantMessageMergesDeferredCommittedUserFlushWithoutHydrati
 		UserMessage:                  "steered message",
 		UserMessageBatchQueueItemIDs: []string{"queue-test-0"},
 		TranscriptEntries:            []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
-	})
+	}, true).cmd
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         8,
 		CommittedEntryCount:        3,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "foreground done", Phase: string(llm.MessagePhaseFinal)}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
@@ -139,7 +140,7 @@ func TestProjectedAssistantMessageReplacesNonTailCommittedRangeWithoutHydration(
 	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: len(m.transcriptEntries), Entries: m.transcriptEntries})
 	m.syncViewport()
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -152,7 +153,7 @@ func TestProjectedAssistantMessageReplacesNonTailCommittedRangeWithoutHydration(
 			Text:  "reviewed final",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
-	})
+	}, true).cmd
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect non-tail committed assistant replacement to trigger hydration, got %+v", msg)
@@ -191,7 +192,7 @@ func TestProjectedCommittedGapClearsDeferredCommittedTailBeforeHydration(t *test
 	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: 1, Entries: m.transcriptEntries, Ongoing: "foreground done"})
 	m.sawAssistantDelta = true
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventAssistantMessage,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
@@ -204,7 +205,7 @@ func TestProjectedCommittedGapClearsDeferredCommittedTailBeforeHydration(t *test
 			Text:  "authoritative tail",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	refreshFound := false
 	for _, msg := range msgs {
@@ -239,7 +240,7 @@ func TestProjectedUserMessageFlushedDoesNotDeferAfterCommittedAssistantToolProgr
 	}
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "working"})
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "steered message",
@@ -247,7 +248,7 @@ func TestProjectedUserMessageFlushedDoesNotDeferAfterCommittedAssistantToolProgr
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
@@ -272,7 +273,7 @@ func TestProjectedUserMessageFlushedDoesNotDeferWhenUIIsIdleDespiteStaleLiveAssi
 	m.sawAssistantDelta = true
 	m.forwardToView(tui.SetConversationMsg{Ongoing: "stale assistant"})
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+	cmd := m.runtimeAdapter().applyProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
 		CommittedTranscriptChanged: true,
 		UserMessage:                "steered message",
@@ -280,7 +281,7 @@ func TestProjectedUserMessageFlushedDoesNotDeferWhenUIIsIdleDespiteStaleLiveAssi
 			Role: "user",
 			Text: "steered message",
 		}},
-	})
+	}, true).cmd
 	msgs := collectCmdMessages(t, cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {

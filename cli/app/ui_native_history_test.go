@@ -730,7 +730,7 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 	appendEntry("line 3 with `code`")
 
 	combined = strings.TrimSuffix(combined, "\n")
-	expected := renderNativeScrollbackSnapshot(m.transcriptEntries, m.theme, m.nativeFormatterWidth)
+	expected := renderStyledNativeProjectionLines(tui.ProjectCommittedOngoingTranscript(m.transcriptEntries, m.theme, m.nativeFormatterWidth).Lines(tui.TranscriptDivider), m.theme, m.nativeFormatterWidth)
 	if combined != expected {
 		t.Fatalf("expected concatenated incremental flush output to match full snapshot\ncombined=%q\nexpected=%q", combined, expected)
 	}
@@ -803,7 +803,7 @@ func TestNativeScrollbackFlowIntegration(t *testing.T) {
 
 func TestRenderNativeScrollbackEntriesPreservesMeaningfulWhitespace(t *testing.T) {
 	text := "  \tline one\n\tline two\n"
-	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{{Role: "assistant", Text: text}}, "dark", 120)
+	out := renderStyledNativeProjectionLines(tui.ProjectCommittedOngoingTranscript([]tui.TranscriptEntry{{Role: "assistant", Text: text}}, "dark", 120).Lines(tui.TranscriptDivider), "dark", 120)
 	plain := stripANSIPreserve(out)
 	if !strings.Contains(plain, "line one") {
 		t.Fatalf("expected first line content preserved, got %q", out)
@@ -815,7 +815,7 @@ func TestRenderNativeScrollbackEntriesPreservesMeaningfulWhitespace(t *testing.T
 
 func TestNativeScrollbackSnapshotPreservesCodeBlockIndentation(t *testing.T) {
 	text := "```yaml\nroot:\n  key: value\n```"
-	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{{Role: "assistant", Text: text}}, "dark", 100)
+	out := renderStyledNativeProjectionLines(tui.ProjectCommittedOngoingTranscript([]tui.TranscriptEntry{{Role: "assistant", Text: text}}, "dark", 100).Lines(tui.TranscriptDivider), "dark", 100)
 	plain := stripANSIPreserve(out)
 	if !strings.Contains(plain, "root:") || !strings.Contains(plain, "  key: value") {
 		t.Fatalf("expected yaml indentation preserved in formatted snapshot, got %q", out)
@@ -823,7 +823,7 @@ func TestNativeScrollbackSnapshotPreservesCodeBlockIndentation(t *testing.T) {
 }
 
 func TestRenderNativeScrollbackSnapshotPreservesToolCallFormatting(t *testing.T) {
-	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{
+	out := renderStyledNativeProjectionLines(tui.ProjectCommittedOngoingTranscript([]tui.TranscriptEntry{
 		{
 			Role: "tool_call",
 			Text: `{"command":"echo hi"}`,
@@ -834,7 +834,7 @@ func TestRenderNativeScrollbackSnapshotPreservesToolCallFormatting(t *testing.T)
 			},
 		},
 		{Role: "tool_result_ok", Text: "hi"},
-	}, "dark", 100)
+	}, "dark", 100).Lines(tui.TranscriptDivider), "dark", 100)
 	plain := stripANSIText(out)
 	if !strings.Contains(plain, "echo hi") {
 		t.Fatalf("expected tool call command preserved, got %q", out)
@@ -856,10 +856,10 @@ func TestStyleNativeReplayDividersKeepsRawRuleLikeLinesAsContent(t *testing.T) {
 }
 
 func TestRenderNativeScrollbackSnapshotPreservesAskQuestionStructuredAnswerText(t *testing.T) {
-	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{
+	out := renderStyledNativeProjectionLines(tui.ProjectCommittedOngoingTranscript([]tui.TranscriptEntry{
 		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_ask", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"full", "Fast only"}, RecommendedOptionIndex: 1}},
 		{Role: "tool_result_ok", Text: "ask result summary", ToolCallID: "call_ask"},
-	}, "dark", 100)
+	}, "dark", 100).Lines(tui.TranscriptDivider), "dark", 100)
 	plain := stripANSIText(out)
 	if !strings.Contains(plain, "Choose scope?") {
 		t.Fatalf("expected ask question preserved, got %q", out)
@@ -880,17 +880,17 @@ func TestNativeCommittedEntriesStopsAtFirstUnresolvedToolCall(t *testing.T) {
 		{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
 	}
 
-	committed := nativeCommittedEntries(entries)
+	committed := committedTranscriptEntriesForApp(entries)
 	if len(committed) != 1 || committed[0].Text != "prompt" {
 		t.Fatalf("expected only stable prefix committed, got %#v", committed)
 	}
-	pending := nativePendingEntries(entries)
+	pending := tui.PendingOngoingEntries(entries)
 	if len(pending) != 3 {
 		t.Fatalf("expected unresolved tool tail to stay pending, got %d entries", len(pending))
 	}
 
 	entries = append(entries, tui.TranscriptEntry{Role: "tool_result_ok", Text: "out-a", ToolCallID: "call_a"})
-	committed = nativeCommittedEntries(entries)
+	committed = committedTranscriptEntriesForApp(entries)
 	if len(committed) != len(entries) {
 		t.Fatalf("expected full transcript committed once first unresolved call completes, got %d of %d entries", len(committed), len(entries))
 	}

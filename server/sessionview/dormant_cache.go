@@ -35,10 +35,6 @@ type dormantTranscriptCacheEntry struct {
 	lastUsed                     uint64
 }
 
-func newDormantTranscriptCache(build func(context.Context, *session.Store) (dormantTranscriptCacheEntry, error)) *dormantTranscriptCache {
-	return newDormantTranscriptCacheWithLimit(dormantTranscriptCacheMaxEntries, build)
-}
-
 func newDormantTranscriptCacheWithLimit(limit int, build func(context.Context, *session.Store) (dormantTranscriptCacheEntry, error)) *dormantTranscriptCache {
 	if build == nil {
 		build = buildDormantTranscriptCacheEntry
@@ -176,10 +172,6 @@ func (e dormantTranscriptCacheEntry) mainView(meta session.Meta, freshness clien
 	}
 }
 
-func (e dormantTranscriptCacheEntry) transcriptPageFromTail(meta session.Meta, freshness clientui.ConversationFreshness, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
-	return runtimeview.TranscriptPageFromOngoingTailWindow(meta.SessionID, meta.Name, freshness, meta.LastSequence, e.ongoingTail, req)
-}
-
 func (e dormantTranscriptCacheEntry) transcriptPageCoveredByTail(meta session.Meta, freshness clientui.ConversationFreshness, req clientui.TranscriptPageRequest) (clientui.TranscriptPage, bool) {
 	if req.Limit <= 0 {
 		return clientui.TranscriptPage{}, false
@@ -240,10 +232,6 @@ type dormantTranscriptPageCacheKey struct {
 type dormantTranscriptPageCacheEntry struct {
 	page     clientui.TranscriptPage
 	lastUsed uint64
-}
-
-func newDormantTranscriptPageCache() *dormantTranscriptPageCache {
-	return newDormantTranscriptPageCacheWithLimit(dormantTranscriptPageCacheMaxEntries)
 }
 
 func newDormantTranscriptPageCacheWithLimit(limit int) *dormantTranscriptPageCache {

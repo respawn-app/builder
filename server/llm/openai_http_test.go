@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	openai "github.com/openai/openai-go/v3"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +14,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	openai "github.com/openai/openai-go/v3"
 
 	"github.com/openai/openai-go/v3/responses"
 )
@@ -297,12 +298,10 @@ func TestBuildResponsesInput_ToolOutputSupportsStructuredInputImageItems(t *test
 }
 
 func TestMapOpenAIRequestError_UsesOpenAISDKContractError(t *testing.T) {
-	err := mapOpenAIRequestError(
-		"openai",
-		&openai.Error{StatusCode: 400, Code: "context_length_exceeded", Type: "invalid_request_error", Message: "prompt too long"},
+	err := newOpenAIRequestErrorMapper("openai").Map(&openai.Error{StatusCode: 400, Code: "context_length_exceeded", Type: "invalid_request_error", Message: "prompt too long"},
 		nil,
-		"openai responses compact request failed",
-	)
+		"openai responses compact request failed")
+
 	if !IsContextLengthOverflowError(err) {
 		t.Fatalf("expected overflow classification, got err=%v", err)
 	}
@@ -354,7 +353,7 @@ func TestMapOpenAIRequestError_UsesOpenAIErrorEnvelopeFromRawResponse(t *testing
 			`{"error":{"type":"invalid_request_error","code":"input_too_long","param":"input","message":"too many tokens"}}`,
 		)),
 	}
-	err := mapOpenAIRequestError("openai", nil, rawResp, "openai responses compact request failed")
+	err := newOpenAIRequestErrorMapper("openai").Map(nil, rawResp, "openai responses compact request failed")
 	if !IsContextLengthOverflowError(err) {
 		t.Fatalf("expected overflow classification from raw response contract, got err=%v", err)
 	}
@@ -375,7 +374,7 @@ func TestMapOpenAIRequestError_UnknownProviderIDFailsFast(t *testing.T) {
 			`{"error":{"type":"invalid_request_error","code":"context_length_exceeded","param":"input","message":"too many tokens"}}`,
 		)),
 	}
-	err := mapOpenAIRequestError("ollama", nil, rawResp, "openai responses compact request failed")
+	err := newOpenAIRequestErrorMapper("ollama").Map(nil, rawResp, "openai responses compact request failed")
 	if err == nil {
 		t.Fatal("expected missing provider reducer error")
 	}
@@ -396,7 +395,7 @@ func TestMapOpenAIRequestError_UnknownProviderIDFailsFast(t *testing.T) {
 
 func TestMapOpenAIRequestError_HandlesNilResponseBody(t *testing.T) {
 	rawResp := &http.Response{StatusCode: 500, Body: nil}
-	err := mapOpenAIRequestError("openai", nil, rawResp, "openai responses compact request failed")
+	err := newOpenAIRequestErrorMapper("openai").Map(nil, rawResp, "openai responses compact request failed")
 
 	var providerErr *ProviderAPIError
 	if !errors.As(err, &providerErr) {
@@ -410,7 +409,7 @@ func TestMapOpenAIRequestError_HandlesNilResponseBody(t *testing.T) {
 func TestMapOpenAIRequestError_RepopulatesRawResponseBody(t *testing.T) {
 	body := `{"error":{"type":"invalid_request_error","code":"context_length_exceeded","param":"input","message":"too many tokens"}}`
 	rawResp := &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(body))}
-	_ = mapOpenAIRequestError("openai", nil, rawResp, "openai responses compact request failed")
+	_ = newOpenAIRequestErrorMapper("openai").Map(nil, rawResp, "openai responses compact request failed")
 	if rawResp.Body == nil {
 		t.Fatal("expected response body to be re-populated")
 	}
@@ -425,12 +424,10 @@ func TestMapOpenAIRequestError_RepopulatesRawResponseBody(t *testing.T) {
 }
 
 func TestMapOpenAIRequestError_UnwrapStabilityAcrossWrappingLayers(t *testing.T) {
-	err := mapOpenAIRequestError(
-		"openai",
-		&openai.Error{StatusCode: 400, Code: "context_length_exceeded", Type: "invalid_request_error", Message: "prompt too long"},
+	err := newOpenAIRequestErrorMapper("openai").Map(&openai.Error{StatusCode: 400, Code: "context_length_exceeded", Type: "invalid_request_error", Message: "prompt too long"},
 		nil,
-		"openai responses compact request failed",
-	)
+		"openai responses compact request failed")
+
 	err = fmt.Errorf("openai compact: %w", err)
 
 	var providerErr *ProviderAPIError

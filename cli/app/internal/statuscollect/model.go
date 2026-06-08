@@ -3,8 +3,8 @@ package statuscollect
 import (
 	"strings"
 
-	"builder/cli/app/internal/serverbridge"
 	appstatus "builder/cli/app/internal/status"
+	"builder/server/llm"
 	"builder/shared/config"
 )
 
@@ -37,15 +37,11 @@ func ModelSummary(req appstatus.Request) string {
 	if modelName == "" {
 		modelName = "<unset>"
 	}
-	parts := []string{ModelDisplayLabel(modelName, strings.TrimSpace(req.ThinkingLevel))}
+	parts := []string{llm.ModelDisplayLabel(modelName, strings.TrimSpace(req.ThinkingLevel))}
 	if req.FastModeAvailable && req.FastModeEnabled {
 		parts = append(parts, "fast")
 	}
 	return strings.Join(parts, " ")
-}
-
-func ModelDisplayLabel(modelName string, thinkingLevel string) string {
-	return serverbridge.ModelDisplayLabel(modelName, thinkingLevel)
 }
 
 func UpdateInfo(req appstatus.Request) appstatus.UpdateInfo {

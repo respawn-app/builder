@@ -50,10 +50,10 @@
 - The assignee dropdown is sourced from server readiness `subagent_roles`.
 - If a workflow references a legacy role no longer configured, the legacy role remains visible/selectable instead of forcing the placeholder state.
 - Node inspectors are identity-focused. Transition configuration is edited by selecting transition visuals.
-- Transition inspectors edit label, key, prompt when the target is an agent, parameters when the source is an agent, approval, context-preservation mode, context source, routing, and validation issues.
-- Transition display labels are separate from transition keys and derive from keys until manually edited. Internal transition IDs are hidden from the editor.
+- Transition inspectors edit label, key, model-facing description, prompt/context when the target is an agent, parameters when the source is an agent, approval, routing, and validation issues.
+- Transition display labels are separate from transition keys and model-facing descriptions, and derive from keys until manually edited. The transition inspector labels the human display text as `Label`, the model-facing `transition_id` as `Key`, and the prompt-visible description as `Model-facing description`; it does not expose a separate `Transition ID` label.
 - Selecting a normal transition opens its transition inspector. Selecting a fan-out branch opens the branch invocation editor and includes compact fan-out parent metadata. The fan-out parent owns source-choice label/key and approval; branches own target prompt, parameters, context, and routing.
-- Normal transitions hide the generated branch key. Fan-out branch keys are generated from target node keys, editable in the branch editor, must use workflow model-key format, and are unique within the parent fan-out transition.
+- Normal transitions hide the generated branch key. Fan-out branch inspectors expose `Branch key` for the concrete edge key; fan-out branch keys are generated from target node keys, editable in the branch editor, must use workflow model-key format, and are unique within the parent fan-out transition.
 - Parameter fields contain a stable key and `Model-facing description`. Parameters are string-only and required when declared.
 - Parameter keys cannot be `transition` or `commentary`.
 - Fan-out branch parameters are unioned into one source result contract. Matching branch parameter keys share one produced value only when their trimmed descriptions are identical; the merged parameter uses that trimmed description. Different descriptions for the same key are validation errors.
@@ -61,11 +61,11 @@
 - Transition prompt built-in field placeholders are exactly `.TaskId`, `.TaskShortId`, `.TaskTitle`, `.TaskBody`, `.NodeId`, `.NodeKey`, and `.NodeDisplayName`. Unsupported top-level prompt field references are validation errors.
 - Prompts can reference previous transition parameters with `.Params.<transition_key>.<parameter_key>`. Previous-transition references are typed manually and validate only against guaranteed-prior transitions. A transition is guaranteed-prior when every path from Start to the prompt-owning branch source passes through the referenced transition. Inside a parallel batch, previous-transition lookup is scoped to the same batch.
 - `.Nodes.<node_key>.<field>` prompt references are not a user-authored workflow editor concept.
-- Transition prompts into agent nodes are required. Transitions into non-agent nodes cannot have prompts.
+- Transition prompts into agent nodes are required for task start/execution. Drafts may be saved with empty agent-target prompts. Transitions into non-agent nodes cannot have prompts.
 - Start transitions can have prompts for their first agent target and cannot declare parameters. Start transition prompts can use built-in prompt fields but show no parameter chips.
 - Join inspectors show the read-only aggregated parameter set and same-key collision errors. Join outgoing transitions do not declare parameters. Join-to-agent prompts can reference aggregate parameters through `.Params.<parameter_key>`. A same-key parameter shared by branches of one fan-out transition de-duplicates at the join because it has one producing transition result; same-key parameters from different producing transitions collide.
 - Inspector validation sections keep their section header and render errors as plain bullet lists without card containers or code chips.
-- Context source remains visible but disabled for `new_session` transitions. `Previous run of this target` is visible for continuation modes and disabled unless the target is an agent node that dominates the transition source, meaning every path from Start to the source passes through the target. Runtime resolves the latest completed run of that target before the transition event, scoped to the same parallel batch when applicable, and fails without fallback when no matching run exists.
+- Context mode and context source are visible only for transitions into agent nodes. Context source remains visible but disabled for `new_session` transitions. `Previous run of this target` is visible for continuation modes and disabled unless the target is an agent node that dominates the transition source, meaning every path from Start to the source passes through the target. Runtime resolves the latest completed run of that target before the transition event, scoped to the same parallel batch when applicable, and fails without fallback when no matching run exists.
 - Transition targets are assigned through canvas connections instead of inspector dropdowns.
 - Editable non-terminal nodes show one always-visible `+` creation handle in a reserved right-side interaction rail. Routed transition endpoints use layout ports that do not occupy the creation-handle slot.
 - Reconnect handles appear on transition hover. Operators reconnect by dragging a transition endpoint onto a node body or side; the editor does not show node-side target connection handles.
@@ -88,7 +88,7 @@
 - The status island owns unsaved state, validation issues, save blockers, remote conflict state, and save errors.
 - Draft validation and execution validation are shown separately. Draft validation blocks graph-dirty saves when it has blocking errors.
 - Execution validation errors remain visible but do not block metadata-only saves.
-- Draft validation blocks empty prompts into agent targets, prompts into non-agent targets, duplicate transition keys, invalid or duplicate fan-out branch keys, invalid parameter keys/descriptions, invalid previous-parameter references, and join aggregate key collisions.
+- Draft validation blocks prompts into non-agent targets, duplicate transition keys, invalid or duplicate fan-out branch keys, invalid parameter keys/descriptions, invalid previous-parameter references, and join aggregate key collisions. Task start/execution validation blocks empty prompts into agent targets.
 - Definitions do not fall back from legacy node-owned prompt/contract fields. Legacy-authored contracts must be reauthored as transition prompts and parameters.
 - Legacy node-owned contract fields are round-tripped as inert metadata. Validation and runtime ignore them for execution. Active-work edit blockers continue to apply; blocked legacy definitions cannot become runnable through fallback behavior.
 - Metadata-only and no-op saves bypass graph edit policy and active-work blockers.
@@ -96,6 +96,7 @@
 - Save preview returns draft validation, execution validation, active-task blockers, destructive/removal impact, and confirmation requirement.
 - Destructive graph saves are confirmed inside the bottom-right workflow-editor status island. The editor does not open a modal or sidebar for graph-save confirmation.
 - Save recomputes validation and impact transactionally, rejects stale workflow versions, rejects active blockers, rejects unconfirmed or changed destructive impact, applies metadata and graph changes atomically, increments workflow version once, publishes linked-project events, and returns the saved definition plus validations.
+- Desktop and server protocol versions gate workflow graph contract compatibility before the editor can communicate with the service.
 - Workflow definitions use one monotonic `version` over persisted definition changes. Metadata-only changes and graph changes each increment it once; combined metadata+graph saves also increment it once; no-op saves increment neither.
 - If a subscription event changes the same workflow while the local draft is dirty, keep the local draft and show a conflict banner.
 - Conflict banner actions are Reload remote and Keep editing.

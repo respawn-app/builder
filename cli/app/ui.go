@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"builder/cli/app/internal/worktreeview"
 	"builder/cli/tui"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -20,10 +21,6 @@ type uiLogger interface {
 
 var nativeResizeReplayDebounce = time.Second
 var nativeResizeReplayNow = time.Now
-
-func (m *uiModel) isInputLocked() bool {
-	return m.isInputSubmitLocked()
-}
 
 func (m *uiModel) clearReviewerState() {
 	m.setReviewerRunning(false)
@@ -77,7 +74,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	if m.hasRuntimeClient() {
 		seedView := mainView.Session
 		_ = m.runtimeAdapter().applyProjectedSessionMetadata(seedView)
-		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.startupRuntimeTranscript())
+		_ = m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, m.startupRuntimeTranscript(), clientui.TranscriptRecoveryCauseNone)
 		startupNativeHistoryCmd = m.requestRuntimeBootstrapTranscriptSync()
 		m.runtimeTranscriptBusy = false
 	} else {
@@ -98,7 +95,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	if startupNativeHistoryCmd != nil {
 		m.startupCmds = append(m.startupCmds, startupNativeHistoryCmd)
 	}
-	if gitStartupCmd := m.statusLineGitStartupCmd(); gitStartupCmd != nil {
+	if gitStartupCmd := m.statusLineGitRefreshCmd(); gitStartupCmd != nil {
 		m.statusGitBackgroundInFlight = true
 		m.startupCmds = append(m.startupCmds, gitStartupCmd)
 	}
@@ -147,7 +144,7 @@ func (m *uiModel) applyRenderDiagnostic(diag tui.RenderDiagnostic) tea.Cmd {
 	default:
 		kind = uiStatusNoticeNeutral
 	}
-	return m.setTransientStatusWithKind(message, kind)
+	return m.sendTransientStatusWithNoticeID(message, kind, transientStatusDuration, uiStatusNoticeReplace, "")
 }
 
 func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
@@ -159,7 +156,7 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 	if diag.Err != nil {
 		m.logf("run_logger.diagnostic.err kind=%s err=%q", strings.TrimSpace(diag.Kind), diag.Err.Error())
 	}
-	return m.setTransientStatusWithKind(message, uiStatusNoticeError)
+	return m.sendTransientStatusWithNoticeID(message, uiStatusNoticeError, transientStatusDuration, uiStatusNoticeReplace, "")
 }
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
@@ -174,7 +171,7 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	}))
 	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
 	cmd := result.cmd
-	cmd = tea.Batch(cmd, m.rearmSpinnerTicking())
+	cmd = tea.Batch(cmd, m.reconcileSpinnerTicking(true))
 	if !result.awaitsHydration {
 		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
 		cmd = sequenceCmds(cmd, m.inputController().resumeQueuedInputsAfterIdleRuntime())
@@ -246,7 +243,7 @@ func (m *uiModel) Init() tea.Cmd {
 		m.waitRuntimeEventCmd(),
 		waitAskEvent(m.askEvents),
 		waitPathReferenceSearchEvent(m.pathReferenceEvents),
-		tea.SetWindowTitle(m.windowTitle()),
+		tea.SetWindowTitle(sessionTitle(m.sessionName)),
 		tea.WindowSize(),
 	}
 	if m.runtimeConnectionEvents != nil {
@@ -257,7 +254,7 @@ func (m *uiModel) Init() tea.Cmd {
 	}
 	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	if startupText := strings.TrimSpace(m.startupSubmit); startupText != "" {
-		cmds = append(cmds, m.inputController().startSubmissionWithPromptHistory(startupText))
+		cmds = append(cmds, m.inputController().startSubmissionWithPromptHistoryAndQueuePositionAndID(startupText, preSubmitQueueBack, ""))
 	}
 	if len(m.startupCmds) > 0 {
 		cmds = append(cmds, m.startupCmds...)
@@ -281,7 +278,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if result := m.reduceFeatureMessage(msg); result.handled {
-		return result.bubbleTea()
+		return result.model, result.cmd
 	}
 
 	if _, ok := msg.(tea.MouseMsg); ok && m.rollback.isActive() {
@@ -377,10 +374,6 @@ func (m *uiModel) Transition() UITransition {
 	}
 }
 
-func (m *uiModel) windowTitle() string {
-	return sessionTitle(m.sessionName)
-}
-
 func (m *uiModel) logf(format string, args ...any) {
 	if m.logger != nil {
 		m.logger.Logf(format, args...)
@@ -415,7 +408,7 @@ func (m *uiModel) inputController() uiInputController {
 }
 
 func worktreeDeleteSuccessStatus(resp serverapi.WorktreeDeleteResponse) string {
-	status := "Deleted worktree " + worktreeDisplayName(resp.Worktree)
+	status := "Deleted worktree " + worktreeview.DisplayName(resp.Worktree)
 	if cleanup := strings.TrimSpace(resp.BranchCleanupMessage); cleanup != "" {
 		status += ". " + cleanup
 	}
@@ -428,30 +421,6 @@ func (m *uiModel) askController() uiAskController {
 
 func (m *uiModel) runtimeAdapter() uiRuntimeAdapter {
 	return uiRuntimeAdapter{model: m}
-}
-
-func (m *uiModel) setTransientStatus(message string) tea.Cmd {
-	return m.setTransientStatusWithKind(message, uiStatusNoticeNeutral)
-}
-
-func (m *uiModel) setTransientStatusWithKind(message string, kind uiStatusNoticeKind) tea.Cmd {
-	return m.sendTransientStatus(message, kind, transientStatusDuration, uiStatusNoticeReplace)
-}
-
-func (m *uiModel) setTransientStatusWithKindAndNoticeID(message string, kind uiStatusNoticeKind, noticeID string) tea.Cmd {
-	return m.sendTransientStatusWithNoticeID(message, kind, transientStatusDuration, uiStatusNoticeReplace, noticeID)
-}
-
-func (m *uiModel) enqueueTransientStatus(message string, kind uiStatusNoticeKind) tea.Cmd {
-	return m.sendTransientStatus(message, kind, transientStatusDuration, uiStatusNoticeQueue)
-}
-
-func (m *uiModel) enqueueTransientStatusWithDuration(message string, kind uiStatusNoticeKind, duration time.Duration) tea.Cmd {
-	return m.sendTransientStatus(message, kind, duration, uiStatusNoticeQueue)
-}
-
-func (m *uiModel) sendTransientStatus(message string, kind uiStatusNoticeKind, duration time.Duration, delivery uiStatusNoticeDelivery) tea.Cmd {
-	return m.sendTransientStatusWithNoticeID(message, kind, duration, delivery, "")
 }
 
 func (m *uiModel) sendTransientStatusWithNoticeID(message string, kind uiStatusNoticeKind, duration time.Duration, delivery uiStatusNoticeDelivery, noticeID string) tea.Cmd {
@@ -511,7 +480,7 @@ func (m *uiModel) startupUpdateNoticeCmd(status clientui.UpdateStatus) tea.Cmd {
 	if status.Checked {
 		return nil
 	}
-	return m.requestRuntimeMainViewRefreshForCause(runtimeMainViewRefreshCauseStartupUpdate)
+	return m.startRuntimeMainViewRefreshRequest(runtimeMainViewRefreshRequestForCause(runtimeMainViewRefreshCauseStartupUpdate)).cmd
 }
 
 func batchCmds(cmds ...tea.Cmd) tea.Cmd {

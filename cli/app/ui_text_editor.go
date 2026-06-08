@@ -1,16 +1,14 @@
 package app
 
 import (
+	"runtime"
 	"strings"
 
 	tuiinput "builder/cli/tui/input"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
-
-func singleLineText(text string) string {
-	return strings.NewReplacer("\r", "", "\n", "").Replace(text)
-}
 
 func singleLineRunes(runes []rune) []rune {
 	out := make([]rune, 0, len(runes))
@@ -25,28 +23,8 @@ func singleLineRunes(runes []rune) []rune {
 
 func newSingleLineEditor(value string) tuiinput.Editor {
 	editor := tuiinput.NewEditor()
-	editor.Replace(singleLineText(value))
+	editor.Replace(strings.NewReplacer("\r", "", "\n", "").Replace(value))
 	return editor
-}
-
-func singleLineEditorValue(editor tuiinput.Editor) string {
-	return editor.Text()
-}
-
-func setSingleLineEditorValue(editor *tuiinput.Editor, value string) {
-	editor.Replace(singleLineText(value))
-}
-
-func singleLineEditorPosition(editor tuiinput.Editor) int {
-	return runeOffsetForByteCursor(editor.Text(), editor.Cursor())
-}
-
-func setSingleLineEditorPosition(editor *tuiinput.Editor, cursor int) {
-	editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), cursor))
-}
-
-func moveSingleLineEditorEnd(editor *tuiinput.Editor) {
-	editor.SetCursor(len(editor.Text()))
 }
 
 func updateSingleLineEditorWithAppKeys(editor *tuiinput.Editor, msg tea.Msg) tea.Cmd {
@@ -55,14 +33,14 @@ func updateSingleLineEditorWithAppKeys(editor *tuiinput.Editor, msg tea.Msg) tea
 		return nil
 	}
 	text := editor.Text()
-	cursor := singleLineEditorPosition(*editor)
+	cursor := runeOffsetForByteCursor(editor.Text(), editor.Cursor())
 	killBuffer := editor.KillBuffer()
 	apply := func(updated string, nextCursor int, nextKill string) {
-		editor.Replace(singleLineText(updated))
+		editor.Replace(strings.NewReplacer("\r", "", "\n", "").Replace(updated))
 		editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), nextCursor))
 		editor.SetKillBuffer(nextKill)
 	}
-	if handleSharedInputEditKey(key, uiSharedInputEditActions{
+	if handleSharedInputEditKeyForGOOS(key, uiSharedInputEditActions{
 		Backspace: func() bool {
 			updated, nextCursor, changed := backspaceBuffer(text, cursor)
 			if changed {
@@ -119,7 +97,7 @@ func updateSingleLineEditorWithAppKeys(editor *tuiinput.Editor, msg tea.Msg) tea
 			}
 			return changed
 		},
-	}) {
+	}, runtime.GOOS) {
 		return nil
 	}
 	switch key.Type {
@@ -130,24 +108,24 @@ func updateSingleLineEditorWithAppKeys(editor *tuiinput.Editor, msg tea.Msg) tea
 		}
 	case tea.KeyLeft:
 		if key.Alt {
-			setSingleLineEditorPosition(editor, moveBufferCursorWordLeft(text, cursor))
+			editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), moveBufferCursorWordLeft(text, cursor)))
 		} else {
-			setSingleLineEditorPosition(editor, moveBufferCursorLeft(text, cursor))
+			editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), moveBufferCursorLeft(text, cursor)))
 		}
 	case tea.KeyRight:
 		if key.Alt {
-			setSingleLineEditorPosition(editor, moveBufferCursorWordRight(text, cursor))
+			editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), moveBufferCursorWordRight(text, cursor)))
 		} else {
-			setSingleLineEditorPosition(editor, moveBufferCursorRight(text, cursor))
+			editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), moveBufferCursorRight(text, cursor)))
 		}
 	case tea.KeyHome, tea.KeyCtrlA:
-		setSingleLineEditorPosition(editor, moveBufferCursorStart())
+		editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), 0))
 	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
-		moveSingleLineEditorEnd(editor)
+		editor.SetCursor(len(editor.Text()))
 	case tea.KeyCtrlLeft:
-		setSingleLineEditorPosition(editor, moveBufferCursorWordLeft(text, cursor))
+		editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), moveBufferCursorWordLeft(text, cursor)))
 	case tea.KeyCtrlRight:
-		setSingleLineEditorPosition(editor, moveBufferCursorWordRight(text, cursor))
+		editor.SetCursor(byteOffsetForRuneCursor(editor.Text(), moveBufferCursorWordRight(text, cursor)))
 	case tea.KeyRunes:
 		updated, nextCursor, changed := insertBufferRunes(text, cursor, singleLineRunes(key.Runes))
 		if changed {
@@ -168,13 +146,9 @@ func renderSingleLineEditor(width int, maxContentLines int, editor tuiinput.Edit
 	return field.Render(width)
 }
 
-func renderSingleLineEditorSoftCursorLines(width int, maxContentLines int, editor tuiinput.Editor, prefix string, renderCursor bool, lineStyle lipgloss.Style, mask rune, placeholder string) []string {
-	return renderEditableInputSoftCursorLines(width, renderSingleLineEditor(width, maxContentLines, editor, prefix, renderCursor, mask, placeholder), lineStyle)
-}
-
 func renderSingleLineEditorFramedSoftCursorLines(width int, maxContentLines int, editor tuiinput.Editor, prefix string, renderCursor bool, lineStyle lipgloss.Style, borderStyle lipgloss.Style, mask rune, placeholder string) []string {
 	border := borderStyle.Render(strings.Repeat("─", max(0, width)))
-	lines := renderSingleLineEditorSoftCursorLines(width, maxContentLines, editor, prefix, renderCursor, lineStyle, mask, placeholder)
+	lines := tuiinput.RenderSoftCursorLines(width, renderSingleLineEditor(width, maxContentLines, editor, prefix, renderCursor, mask, placeholder), lineStyle)
 	out := make([]string, 0, len(lines)+2)
 	out = append(out, border)
 	out = append(out, lines...)

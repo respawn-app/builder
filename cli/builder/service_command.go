@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -44,7 +43,7 @@ func serviceSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		stderr = io.Discard
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fs := newCommandFlagSet("builder service", stderr, writeServiceUsage)
+		fs := newCommandFlagSet("builder service", stderr, serviceUsage)
 		fs.Usage()
 		if len(args) == 0 {
 			return 2
@@ -67,14 +66,14 @@ func serviceSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return serviceRestartSubcommand(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown service command: %s\n\n", args[0])
-		fs := newCommandFlagSet("builder service", stderr, writeServiceUsage)
-		writeServiceUsage(fs)
+		fs := newCommandFlagSet("builder service", stderr, serviceUsage)
+		serviceUsage.write(fs)
 		return 2
 	}
 }
 
 func serviceStatusSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder service status", stderr, writeServiceStatusUsage)
+	fs := newCommandFlagSet("builder service status", stderr, serviceStatusUsage)
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -87,7 +86,7 @@ func serviceStatusSubcommand(args []string, stdout io.Writer, stderr io.Writer) 
 }
 
 func serviceInstallSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder service install", stderr, writeServiceInstallUsage)
+	fs := newCommandFlagSet("builder service install", stderr, serviceInstallUsage)
 	force := fs.Bool("force", false, "rewrite existing service registration")
 	noStart := fs.Bool("no-start", false, "install service without starting it")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
@@ -101,7 +100,7 @@ func serviceInstallSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 }
 
 func serviceUninstallSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder service uninstall", stderr, writeServiceUninstallUsage)
+	fs := newCommandFlagSet("builder service uninstall", stderr, serviceUninstallUsage)
 	keepRunning := fs.Bool("keep-running", false, "remove service registration without stopping current server process")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -114,7 +113,10 @@ func serviceUninstallSubcommand(args []string, stdout io.Writer, stderr io.Write
 }
 
 func serviceLifecycleSubcommand(action serviceAction, args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder service "+string(action), stderr, func(fs *flag.FlagSet) { writeServiceLifecycleUsage(fs, action) })
+	fs := newCommandFlagSet("builder service "+string(action), stderr, commandUsage{
+		title: "Usage of builder service " + string(action) + ":",
+		lines: []string{"  builder service " + string(action)},
+	})
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
 	}
@@ -126,7 +128,7 @@ func serviceLifecycleSubcommand(action serviceAction, args []string, stdout io.W
 }
 
 func serviceRestartSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := newCommandFlagSet("builder service restart", stderr, writeServiceRestartUsage)
+	fs := newCommandFlagSet("builder service restart", stderr, serviceRestartUsage)
 	ifInstalled := fs.Bool("if-installed", false, "exit successfully without action when service is not installed")
 	if ok, exitCode := parseCommandFlags(fs, args); !ok {
 		return exitCode
@@ -167,7 +169,7 @@ func runServiceCommandAction(ctx context.Context, action serviceAction, opts ser
 		writeServiceStatus(stdout, status)
 		return 0
 	case serviceActionInstall:
-		if err := ensureNoUnmanagedServerConflict(ctx, backend, spec); err != nil {
+		if err := ensureNoUnmanagedServerConflictForAction(ctx, backend, spec, ""); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -188,7 +190,7 @@ func runServiceCommandAction(ctx context.Context, action serviceAction, opts ser
 		}
 		fmt.Fprintf(stdout, "Uninstalled %s.\n", serviceDisplayName)
 	case serviceActionStart:
-		if err := ensureNoUnmanagedServerConflict(ctx, backend, spec); err != nil {
+		if err := ensureNoUnmanagedServerConflictForAction(ctx, backend, spec, ""); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -245,10 +247,6 @@ func runServiceCommandAction(ctx context.Context, action serviceAction, opts ser
 		fmt.Fprintf(stdout, "Restarted %s.\n", serviceDisplayName)
 	}
 	return 0
-}
-
-func ensureNoUnmanagedServerConflict(ctx context.Context, backend serviceBackend, spec serviceSpec) error {
-	return ensureNoUnmanagedServerConflictForAction(ctx, backend, spec, "")
 }
 
 func ensureNoUnmanagedServerConflictForAction(ctx context.Context, backend serviceBackend, spec serviceSpec, action serviceAction) error {

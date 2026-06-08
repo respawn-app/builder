@@ -115,7 +115,7 @@ func TestMainUIProgramOptionsPreservesTerminalFileOutput(t *testing.T) {
 		t.Fatalf("main options length = %d, want filter, focus reporting, and output options", len(options))
 	}
 
-	output := mainUIProgramOutputWriter(state, file)
+	output := newUITerminalCursorWriter(file, state)
 	terminalFile, ok := output.(terminalCursorFile)
 	if !ok {
 		t.Fatalf("expected main options output to preserve terminal file interface, got %T", output)

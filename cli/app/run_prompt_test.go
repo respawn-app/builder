@@ -5,6 +5,8 @@ import (
 	"builder/cli/app/internal/remoteattach"
 	"builder/server/auth"
 	"builder/server/authflow"
+	"builder/server/launch"
+	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/serve"
 	"builder/server/session"
@@ -414,13 +416,7 @@ func (h memoryAuthHandler) LookupEnv(key string) string {
 	return ""
 }
 
-func (memoryAuthHandler) Interactive() bool {
-	return false
-}
-
-type autoOnboarding struct{}
-
-func (autoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
+var autoOnboarding = serverstartup.OnboardingHandler(func(_ context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
 	path, created, err := config.WriteDefaultSettingsFile()
 	if err != nil {
 		return config.App{}, err
@@ -433,7 +429,7 @@ func (autoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup
 	reloaded.Source.SettingsPath = path
 	reloaded.Source.SettingsFileExists = true
 	return reloaded, nil
-}
+})
 
 func waitForConfiguredRunPromptDaemon(t *testing.T, workspace string) {
 	t.Helper()
@@ -463,7 +459,7 @@ func TestEnsureSubagentSessionNameSetsDefault(t *testing.T) {
 		t.Fatalf("new lazy session: %v", err)
 	}
 
-	if err := ensureSubagentSessionName(store); err != nil {
+	if err := launch.EnsureSubagentSessionName(store); err != nil {
 		t.Fatalf("ensure subagent session name: %v", err)
 	}
 
@@ -484,7 +480,7 @@ func TestEnsureSubagentSessionNamePreservesExistingName(t *testing.T) {
 		t.Fatalf("set name: %v", err)
 	}
 
-	if err := ensureSubagentSessionName(store); err != nil {
+	if err := launch.EnsureSubagentSessionName(store); err != nil {
 		t.Fatalf("ensure subagent session name: %v", err)
 	}
 
@@ -496,9 +492,9 @@ func TestEnsureSubagentSessionNamePreservesExistingName(t *testing.T) {
 func TestWriteRunProgressEventOnlyWritesSelectedKinds(t *testing.T) {
 	var out bytes.Buffer
 
-	writeRunProgressEvent(&out, runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "s1", AssistantDelta: "hello"})
-	writeRunProgressEvent(&out, runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "s1"})
-	writeRunProgressEvent(&out, runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "s1", Reviewer: &runtime.ReviewerStatus{Outcome: "no_suggestions"}})
+	runprompt.PublishRunPromptProgress(runPromptIOProgressSink{writer: &out}, runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "s1", AssistantDelta: "hello"})
+	runprompt.PublishRunPromptProgress(runPromptIOProgressSink{writer: &out}, runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "s1"})
+	runprompt.PublishRunPromptProgress(runPromptIOProgressSink{writer: &out}, runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "s1", Reviewer: &runtime.ReviewerStatus{Outcome: "no_suggestions"}})
 
 	text := out.String()
 	if strings.Contains(text, "AssistantDelta") {
@@ -513,7 +509,7 @@ func TestWriteRunProgressEventOnlyWritesSelectedKinds(t *testing.T) {
 }
 
 func TestRunPromptAskHandlerReturnsError(t *testing.T) {
-	_, err := runPromptAskHandler(askquestion.Request{Question: "Need approval?"})
+	_, err := runprompt.RunPromptAskHandler(askquestion.Request{Question: "Need approval?"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -557,7 +553,7 @@ func TestRunPromptUsesConfiguredDaemonWithoutLocalAuth(t *testing.T) {
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -715,7 +711,7 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToConfiguredDaemon(t *test
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         defaultResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding{})
+	}, apiKeyMemoryAuthHandler("test-key"), autoOnboarding)
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -752,9 +748,9 @@ func TestTryDialMatchingConfiguredRemoteRejectsServerThatDoesNotMatchSpawnedPID(
 	_, workspace := newRegisteredAppWorkspace(t)
 	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true})
 	defer cleanup()
-	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, remoteattach.SupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
+	if remote, ok := tryDialMatchingConfiguredRemoteWithRequirement(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, remoteattach.SupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
 		return identity.PID == 111
-	}); ok || remote != nil {
+	}, true); ok || remote != nil {
 		t.Fatalf("expected mismatched pid server to be rejected, got remote=%v ok=%t", remote, ok)
 	}
 }
@@ -765,7 +761,7 @@ func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T)
 	configureAppTestServerPort(t)
 	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true})
 	defer cleanup()
-	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, remoteattach.SupportsRunPrompt, nil); ok || remote != nil {
+	if remote, ok := tryDialMatchingConfiguredRemoteWithRequirement(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, remoteattach.SupportsRunPrompt, nil, true); ok || remote != nil {
 		t.Fatalf("expected unregistered workspace to skip configured remote attach, got remote=%v ok=%t", remote, ok)
 	}
 }
@@ -922,9 +918,9 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 		return new(client.Remote), nil
 	}
 
-	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, nil)
 	if err != nil {
-		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+		t.Fatalf("tryDialMatchingConfiguredRunPromptRemote: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected configured remote attach to succeed")
@@ -1010,9 +1006,9 @@ func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutAuthBootstrapCapabili
 		return projectViews, nil
 	}
 
-	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, nil)
 	if err != nil {
-		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+		t.Fatalf("tryDialMatchingConfiguredRunPromptRemote: %v", err)
 	}
 	if ok || remote != nil {
 		t.Fatalf("expected configured remote without auth bootstrap to be skipped, got remote=%v ok=%t", remote, ok)
@@ -1036,9 +1032,9 @@ func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutProjectAttachCapabili
 		return projectViews, nil
 	}
 
-	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, nil)
 	if err != nil {
-		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+		t.Fatalf("tryDialMatchingConfiguredRunPromptRemote: %v", err)
 	}
 	if ok || remote != nil {
 		t.Fatalf("expected configured remote without project attach to be skipped, got remote=%v ok=%t", remote, ok)
