@@ -342,7 +342,11 @@ func (s *Store) SetCompactionSoonReminderIssued(issued bool) error {
 func (s *Store) SetWorktreeReminderState(state *WorktreeReminderState) error {
 	nextState := cloneWorktreeReminderState(state)
 	s.mu.Lock()
-	if worktreeReminderStatesEqual(s.meta.WorktreeReminder, nextState) && (!s.persisted || s.hasDurableMetadataLocked()) {
+	statesEqual := s.meta.WorktreeReminder == nil && nextState == nil
+	if s.meta.WorktreeReminder != nil && nextState != nil {
+		statesEqual = *s.meta.WorktreeReminder == *nextState
+	}
+	if statesEqual && (!s.persisted || s.hasDurableMetadataLocked()) {
 		s.mu.Unlock()
 		return nil
 	}
