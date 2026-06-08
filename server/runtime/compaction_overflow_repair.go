@@ -143,7 +143,7 @@ func isCompactionOverflowRepairShellOutputTool(toolID toolspec.ID) bool {
 }
 
 func collapsedCompactionOverflowShellOutput(output json.RawMessage) (json.RawMessage, int) {
-	before := estimateTextTokens(string(output))
+	before := (len(string(output)) + 3) / 4
 	if outputTokens, ok := estimateStructuredOutputTokens(output); ok {
 		before = outputTokens
 	}
@@ -151,7 +151,7 @@ func collapsedCompactionOverflowShellOutput(output json.RawMessage) (json.RawMes
 	if err != nil {
 		replacement = json.RawMessage(`"<collapsed>"`)
 	}
-	after := estimateTextTokens(string(replacement))
+	after := (len(string(replacement)) + 3) / 4
 	saved := before - after
 	if saved <= 0 {
 		return nil, 0
@@ -165,9 +165,9 @@ func isCollapsedCompactionOverflowShellOutput(output json.RawMessage) bool {
 }
 
 func collapsedCompactionOverflowPatchInput(input string) (string, int) {
-	before := estimateTextTokens(input)
+	before := (len(input) + 3) / 4
 	replacement := compactionOverflowCollapsedText
-	after := estimateTextTokens(replacement)
+	after := (len(replacement) + 3) / 4
 	saved := before - after
 	if saved <= 0 {
 		return "", 0
