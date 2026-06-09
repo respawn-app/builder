@@ -565,15 +565,15 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, errors.Join(err, statusErr)
 	}
-	if err := e.replaceHistory(stepID, result.engine, mode, result.items); err != nil {
+	// Reinject base meta as part of the single history_replaced commit so the
+	// rebuilt active list is born with it atomically: a restart can never observe
+	// a compacted session that has a summary but no base meta, and the summary
+	// precedes the reinjected meta in both provider and transcript order.
+	replacementItems := append(llm.CloneResponseItems(result.items), llm.ItemsFromMessages(postReplacementMeta)...)
+	if err := e.replaceHistory(stepID, result.engine, mode, replacementItems); err != nil {
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, errors.Join(err, statusErr)
 	}
-	if err := e.steer(stepID, steerRuntimeContextMessagesIntent(postReplacementMeta)); err != nil {
-		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, errors.Join(err, statusErr)
-	}
-	e.baseMetaInjected = true
 	if strings.TrimSpace(result.summary) != "" && result.engine != "local" {
 		summary := strings.TrimSpace(result.summary)
 		if err := e.steer(stepID, steerLocalEntryIntent(storedLocalEntry{Role: "compaction_summary", Text: summary})); err != nil {

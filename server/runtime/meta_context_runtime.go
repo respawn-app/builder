@@ -30,21 +30,14 @@ func (e *Engine) ensureMetaContextForCompaction(ctx context.Context, stepID stri
 }
 
 // steerBaseMetaContextIfNeeded injects base meta context (AGENTS.md, skills,
-// subagents, environment) exactly once per conversation. A resumed transcript
-// that already carries this context marks the guard during restore, so this is
-// a no-op on resume. Compaction reinjects base meta directly into the rebuilt
-// active list, so the guard stays set across compactions.
+// subagents, environment) exactly once, at the first request of a fresh
+// session. The guard is deterministic: it is seeded from restored-history
+// length at startup and from the replacement length after compaction (which
+// reinjects base meta into the history_replaced payload). It never scans the
+// conversation to decide whether context is "missing" — every session's active
+// list is born carrying base meta, so re-injection cannot occur.
 func (e *Engine) steerBaseMetaContextIfNeeded(stepID string) error {
 	if e.baseMetaInjected {
-		return nil
-	}
-	// The in-process guard is only a fast path; the active transcript is the
-	// source of truth. A resumed conversation (or any path that left the guard
-	// out of sync with persisted history) must never re-inject base meta on top
-	// of context the transcript already carries. Treat presence as already
-	// injected so duplication is structurally impossible across restarts.
-	if baseMetaContextPresent(e.snapshotMessages()) {
-		e.baseMetaInjected = true
 		return nil
 	}
 	builder := e.newActiveBaseMetaContextBuilder(e.cfg.Model, time.Now())

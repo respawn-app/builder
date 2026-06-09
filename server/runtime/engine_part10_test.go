@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserMessage(t *testing.T) {
+func TestInjectsGlobalAndWorkspaceAgentsBeforeFirstUserMessage(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -36,12 +36,6 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 
 	storeRoot := t.TempDir()
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
-	if _, _, err := store.AppendEvent("prior-step", "message", llm.Message{
-		Role:    llm.RoleDeveloper,
-		Content: "existing context",
-	}); err != nil {
-		t.Fatalf("append existing message: %v", err)
-	}
 
 	client := &fakeClient{responses: []llm.Response{
 		{
@@ -67,30 +61,27 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	}
 
 	firstReq := client.calls[0]
-	if len(requestMessages(firstReq)) < 5 {
-		t.Fatalf("expected at least 5 messages in first request, got %d", len(requestMessages(firstReq)))
+	if len(requestMessages(firstReq)) < 4 {
+		t.Fatalf("expected at least 4 messages in first request, got %d", len(requestMessages(firstReq)))
 	}
-	if requestMessages(firstReq)[0].Role != llm.RoleDeveloper || requestMessages(firstReq)[0].Content != "existing context" {
-		t.Fatalf("expected first message to be existing context, got %+v", requestMessages(firstReq)[0])
-	}
-	envMsg := requestMessages(firstReq)[1]
+	envMsg := requestMessages(firstReq)[0]
 	if envMsg.Role != llm.RoleDeveloper || !strings.Contains(envMsg.Content, environmentInjectedHeader) {
-		t.Fatalf("expected second message to be environment developer injection, got %+v", envMsg)
+		t.Fatalf("expected first message to be environment developer injection, got %+v", envMsg)
 	}
 	if envMsg.MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected environment message type, got %+v", envMsg)
 	}
-	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+globalPath) {
-		t.Fatalf("expected third message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
+	if requestMessages(firstReq)[1].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[1])
+	}
+	if requestMessages(firstReq)[1].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[1])
+	}
+	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
 	}
 	if requestMessages(firstReq)[2].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[2])
-	}
-	if requestMessages(firstReq)[3].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[3].Content, "source: "+workspacePath) {
-		t.Fatalf("expected fourth message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[3])
-	}
-	if requestMessages(firstReq)[3].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[3])
+		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[2])
 	}
 	for _, required := range []string{
 		"\nYour model: gpt-5\n",
@@ -105,8 +96,8 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 			t.Fatalf("expected environment message to contain %q, got %q", required, envMsg.Content)
 		}
 	}
-	if requestMessages(firstReq)[4].Role != llm.RoleUser || requestMessages(firstReq)[4].Content != "first" {
-		t.Fatalf("expected user message after injections, got %+v", requestMessages(firstReq)[4])
+	if requestMessages(firstReq)[3].Role != llm.RoleUser || requestMessages(firstReq)[3].Content != "first" {
+		t.Fatalf("expected user message after injections, got %+v", requestMessages(firstReq)[3])
 	}
 
 	secondReq := client.calls[1]

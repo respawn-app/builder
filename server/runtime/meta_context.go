@@ -710,29 +710,6 @@ func canonicalizeMetaContextMessage(message llm.Message, classification metaCont
 	return message
 }
 
-// baseMetaContextPresent reports whether the conversation already carries any
-// base meta context message (AGENTS.md, skills, subagents, environment). It is
-// the resume-time signal that gates the one-time base meta injection.
-func baseMetaContextPresent(messages []llm.Message) bool {
-	for _, message := range messages {
-		classification, ok := classifyMetaContextMessage(message)
-		if !ok || !isBaseMetaContextKind(classification.kind) || classification.key == "" {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-func isBaseMetaContextKind(kind metaContextKind) bool {
-	switch kind {
-	case metaContextKindAgents, metaContextKindSkills, metaContextKindSubagents, metaContextKindEnvironment:
-		return true
-	default:
-		return false
-	}
-}
-
 func agentSourceKey(path string) string {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {

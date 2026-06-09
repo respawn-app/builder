@@ -90,10 +90,12 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 	if err := e.store.SetCompactionSoonReminderIssued(reminderIssued); err != nil {
 		return err
 	}
-	// A resumed transcript that already carries base meta context must not have
-	// it injected again; the one-time boot injection only runs for fresh
-	// sessions whose active list lacks it.
-	e.baseMetaInjected = baseMetaContextPresent(e.snapshotMessages())
+	// Base meta context is injected once at the birth of a session's active list
+	// (fresh-session boot injects it first; compaction reinjects it into the
+	// history_replaced payload). Any restored history therefore already carries
+	// it, so a non-empty restore means injection has happened. This is a
+	// deterministic length check, never a scan of which messages are present.
+	e.baseMetaInjected = len(e.snapshotMessages()) > 0
 	if futureMessage := recoveredHandoff.PendingFutureMessage(); futureMessage != "" {
 		e.queuePendingHandoffFutureMessage(futureMessage)
 	}

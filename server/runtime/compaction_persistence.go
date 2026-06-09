@@ -31,10 +31,10 @@ func (p compactionPersistence) replaceHistory(stepID, engine string, mode compac
 	reminderIssued := false
 	projectedStart := e.CommittedTranscriptEntryCount()
 	projectedEntries := transcriptEntriesFromHistoryReplacement(payload.Items)
-	// The replacement active list drops base meta context until the caller
-	// reinjects it; clear the guard so a request before reinjection (or a
-	// restart from a bare replacement) repairs the missing context.
-	e.baseMetaInjected = false
+	// Compaction reinjects base meta into the same replacement payload, so a
+	// non-empty replacement active list is born already carrying it. Mirror the
+	// restore-time length signal here rather than scanning the items.
+	e.baseMetaInjected = len(preparedItems) > 0
 	_, committed, appendErr := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if appendErr != nil && !committed {
 		return appendErr

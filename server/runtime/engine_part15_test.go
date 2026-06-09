@@ -647,7 +647,7 @@ func TestRemoteCompactionReinjectsActiveWorkflowPrompt(t *testing.T) {
 	}
 }
 
-func TestCompactionReplacementPayloadIsSeedAndRuntimeContextIsSteeredAfterward(t *testing.T) {
+func TestCompactionReplacementPayloadEmbedsReinjectedBaseMetaAtomically(t *testing.T) {
 	store := mustCreateTestSession(t)
 	client := &fakeCompactionClient{compactionResponses: []llm.CompactionResponse{{
 		OutputItems: []llm.ResponseItem{
@@ -684,15 +684,23 @@ func TestCompactionReplacementPayloadIsSeedAndRuntimeContextIsSteeredAfterward(t
 	if historyIndex < 0 {
 		t.Fatalf("expected history_replaced event, got %+v", events)
 	}
-	if len(replacement.Items) != 2 {
-		t.Fatalf("replacement seed item count = %d, want compacted summary and checkpoint: %+v", len(replacement.Items), replacement.Items)
-	}
-	for _, item := range replacement.Items {
-		if item.MessageType == llm.MessageTypeEnvironment || item.MessageType == llm.MessageTypeAgentsMD || item.MessageType == llm.MessageTypeSkills || item.MessageType == llm.MessageTypeWorkflowMode {
-			t.Fatalf("runtime context should be steered after replacement, not embedded in replacement payload: %+v", replacement.Items)
+	// Base meta is reinjected into the same replacement payload (atomic), with the
+	// compaction summary preceding the reinjected meta.
+	summaryIndex, environmentIndex := -1, -1
+	for idx, item := range replacement.Items {
+		switch item.MessageType {
+		case llm.MessageTypeCompactionSummary:
+			summaryIndex = idx
+		case llm.MessageTypeEnvironment:
+			environmentIndex = idx
 		}
 	}
-	environmentSteeredAfterReplacement := false
+	if summaryIndex < 0 || environmentIndex < 0 {
+		t.Fatalf("replacement payload must embed summary and reinjected base meta: %+v", replacement.Items)
+	}
+	if summaryIndex >= environmentIndex {
+		t.Fatalf("compaction summary must precede reinjected meta in the replacement payload: %+v", replacement.Items)
+	}
 	for _, evt := range events[historyIndex+1:] {
 		if evt.Kind != "message" {
 			continue
@@ -702,39 +710,9 @@ func TestCompactionReplacementPayloadIsSeedAndRuntimeContextIsSteeredAfterward(t
 			t.Fatalf("decode message event: %v", err)
 		}
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeEnvironment {
-			environmentSteeredAfterReplacement = true
-			break
+			t.Fatalf("base meta must be embedded in the replacement payload, not steered separately afterward: events=%+v", events)
 		}
 	}
-	if !environmentSteeredAfterReplacement {
-		t.Fatalf("expected runtime context to be steered as message events after history replacement, events=%+v", events)
-	}
-}
-
-func TestRequestRepairsMissingBaseContextAfterReplacementRestart(t *testing.T) {
-	workspace := t.TempDir()
-	storeRoot := t.TempDir()
-	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
-	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after repair"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
-	eng.baseMetaInjected = true
-	if err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary seed"}})); err != nil {
-		t.Fatalf("replace history: %v", err)
-	}
-	if err := eng.Close(); err != nil {
-		t.Fatalf("close engine: %v", err)
-	}
-
-	reopenedStore := mustOpenTestSession(t, store.Dir())
-	reopenedClient := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	reopened := mustNewTestEngine(t, reopenedStore, reopenedClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
-	if _, err := reopened.SubmitUserMessage(context.Background(), "continue"); err != nil {
-		t.Fatalf("submit after reopen: %v", err)
-	}
-	if len(reopenedClient.calls) != 1 {
-		t.Fatalf("model call count = %d, want 1", len(reopenedClient.calls))
-	}
-	assertRequestHasEnvironmentBeforeUser(t, reopenedClient.calls[0], "continue")
 }
 
 type failOnHistoryReplacementAgentResetObservation struct {
@@ -749,7 +727,7 @@ func (o *failOnHistoryReplacementAgentResetObservation) ObservePersistedStore(_ 
 	return nil
 }
 
-func TestRequestRepairsMissingBaseContextAfterHistoryReplacementAppendObserverFailure(t *testing.T) {
+func TestHistoryReplacementDurableAfterAppendObserverFailure(t *testing.T) {
 	workspace := t.TempDir()
 	storeRoot := t.TempDir()
 	observer := &failOnHistoryReplacementAgentResetObservation{}
@@ -758,7 +736,6 @@ func TestRequestRepairsMissingBaseContextAfterHistoryReplacementAppendObserverFa
 	if err := eng.steer("step-1", steerMessageIntent(llm.Message{Role: llm.RoleUser, Content: "before replacement"})); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.baseMetaInjected = true
 
 	err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary seed"}}))
 	if err == nil {
@@ -781,20 +758,6 @@ func TestRequestRepairsMissingBaseContextAfterHistoryReplacementAppendObserverFa
 	if !sawHistoryReplacement {
 		t.Fatalf("expected durable history_replaced event after observer failure, got %+v", events)
 	}
-	if err := eng.Close(); err != nil {
-		t.Fatalf("close engine: %v", err)
-	}
-
-	reopenedStore := mustOpenTestSession(t, store.Dir())
-	reopenedClient := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	reopened := mustNewTestEngine(t, reopenedStore, reopenedClient, tools.NewRegistry(tools.HandlerRegistration{ID: toolspec.ToolExecCommand, Handler: fakeTool{name: toolspec.ToolExecCommand}}), Config{Model: "gpt-5"})
-	if _, err := reopened.SubmitUserMessage(context.Background(), "continue"); err != nil {
-		t.Fatalf("submit after reopen: %v", err)
-	}
-	if len(reopenedClient.calls) != 1 {
-		t.Fatalf("model call count = %d, want 1", len(reopenedClient.calls))
-	}
-	assertRequestHasEnvironmentBeforeUser(t, reopenedClient.calls[0], "continue")
 }
 
 func TestHistoryReplacementAppendObserverFailureUpdatesLiveActiveListForNextTurn(t *testing.T) {
@@ -807,7 +770,6 @@ func TestHistoryReplacementAppendObserverFailureUpdatesLiveActiveListForNextTurn
 	if err := eng.steer("step-1", steerMessageIntent(llm.Message{Role: llm.RoleUser, Content: "before replacement"})); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.baseMetaInjected = true
 
 	err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary seed"}}))
 	if err == nil {
@@ -824,7 +786,6 @@ func TestHistoryReplacementAppendObserverFailureUpdatesLiveActiveListForNextTurn
 	if len(client.calls) != 1 {
 		t.Fatalf("model call count = %d, want 1", len(client.calls))
 	}
-	assertRequestHasEnvironmentBeforeUser(t, client.calls[0], "continue live")
 	requestMessages := requestMessages(client.calls[0])
 	summarySeen := false
 	for _, msg := range requestMessages {
@@ -837,30 +798,6 @@ func TestHistoryReplacementAppendObserverFailureUpdatesLiveActiveListForNextTurn
 	}
 	if !summarySeen {
 		t.Fatalf("request missing compacted seed after committed replacement error: %+v", requestMessages)
-	}
-}
-
-func assertRequestHasEnvironmentBeforeUser(t *testing.T, request llm.Request, userText string) {
-	t.Helper()
-	messages := requestMessages(request)
-	environmentIndex := -1
-	userIndex := -1
-	for idx, msg := range messages {
-		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeEnvironment {
-			environmentIndex = idx
-		}
-		if msg.Role == llm.RoleUser && msg.Content == userText {
-			userIndex = idx
-		}
-	}
-	if environmentIndex < 0 {
-		t.Fatalf("missing repaired environment context in request messages: %+v", messages)
-	}
-	if userIndex < 0 {
-		t.Fatalf("missing user message in request messages: %+v", messages)
-	}
-	if environmentIndex > userIndex {
-		t.Fatalf("environment context index %d should precede user index %d: %+v", environmentIndex, userIndex, messages)
 	}
 }
 
