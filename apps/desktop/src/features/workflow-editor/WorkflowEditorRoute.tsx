@@ -125,7 +125,13 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
   const draftValidationQuery = useWorkflowDraftValidationQuery(workflowID, draftState, dirty.graphDirty);
   const cachedDraftValidation = draftValidationQuery.data?.draft ?? null;
   const cachedExecutionValidation = draftValidationQuery.data?.execution ?? data.validationQuery.data ?? null;
-  const cleanLayoutValidation = mergeWorkflowValidations(cachedDraftValidation, cachedExecutionValidation);
+  // Memoized so the merged object keeps a stable identity across renders: it
+  // feeds workflowLayoutSnapshotAfterRender, which compares validation by
+  // reference, and a fresh object every render would loop render-time setState.
+  const cleanLayoutValidation = useMemo(
+    () => mergeWorkflowValidations(cachedDraftValidation, cachedExecutionValidation),
+    [cachedDraftValidation, cachedExecutionValidation],
+  );
   const cleanGraphVersion = draftState?.graphVersion ?? 0;
   const topologyDirty =
     dirty.graphDirty && draftState !== null && draftState.graphVersion !== layoutSnapshot.graphVersion;
@@ -140,7 +146,7 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
     : cleanLayoutValidation;
   const graphValidation = dirty.graphDirty
     ? emptyWorkflowValidation
-    : mergeWorkflowValidations(draftValidation, executionValidation) ?? emptyWorkflowValidation;
+    : cleanLayoutValidation ?? emptyWorkflowValidation;
   const layoutQuery = useWorkflowGraphLayoutQuery(
     workflowID,
     draftDefinition,
@@ -360,7 +366,7 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
 
   const projectedGraph = useMemo(() => {
     const layout = layoutQuery.data ?? (dirty.graphDirty ? layoutSnapshot.layout : undefined);
-    return layout === undefined || draftDefinition === undefined || graphValidation === null
+    return layout === undefined || draftDefinition === undefined
       ? layout
       : workflowGraphLayoutWithDraftProjection(layout, draftDefinition, graphValidation);
   }, [dirty.graphDirty, draftDefinition, graphValidation, layoutQuery.data, layoutSnapshot.layout]);
@@ -1140,11 +1146,16 @@ function useWorkflowDraftValidationQuery(
   graphDirty: boolean,
 ) {
   const { api } = useAppServices();
+  // Metadata-only edits (display name/description) do not bump graphVersion, so
+  // the server's draft validation of the workflow name would keep reusing the
+  // stale staleTime:Infinity result. Vary the key by the draft metadata too.
+  const metadataSignature = draftState === null ? "" : JSON.stringify(workflowEditorDraftMetadata(draftState));
   return useQuery({
     queryKey: queryKeys.workflowDraftValidation(
       workflowID,
       draftState?.source.workflow.version ?? 0,
       draftState?.graphVersion ?? 0,
+      metadataSignature,
     ),
     queryFn: async () => {
       if (draftState === null) {

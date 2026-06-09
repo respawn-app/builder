@@ -180,54 +180,67 @@ export function workflowGraphLayoutWithDraftProjection(
     ]),
   );
   return {
-    nodes: layout.nodes.map((node) => {
+    // Entities deleted in the draft no longer resolve to a model; drop them
+    // during projection instead of carrying the stale layout node/edge forward
+    // (otherwise a deleted node/group/edge stays visible and selectable until
+    // the next ELK layout result, or indefinitely if layout fails).
+    nodes: layout.nodes.flatMap<WorkflowGraphNode>((node) => {
       if (node.data.entityKind === "node") {
         const model = nodesByID.get(node.data.entityID);
         if (model === undefined) {
-          return node;
+          return [];
         }
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            groupID: model.groupID,
-            hasError: errorMarkers.nodeIDs.has(model.id) || errorMarkers.relatedIDs.has(model.id),
-            key: model.key,
-            kind: model.kind,
-            label: model.name,
-            role: model.subagentRole,
+        return [
+          {
+            ...node,
+            data: {
+              ...node.data,
+              groupID: model.groupID,
+              hasError: errorMarkers.nodeIDs.has(model.id) || errorMarkers.relatedIDs.has(model.id),
+              key: model.key,
+              kind: model.kind,
+              label: model.name,
+              role: model.subagentRole,
+            },
           },
-        };
+        ];
       }
       const group = groupsByGraphID.get(node.id);
       if (group === undefined) {
-        return node;
+        return [];
       }
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          hasError: errorMarkers.relatedIDs.has(group.id),
-          label: group.name || group.key,
+      return [
+        {
+          ...node,
+          data: {
+            ...node.data,
+            hasError: errorMarkers.relatedIDs.has(group.id),
+            label: group.name || group.key,
+          },
         },
-      };
+      ];
     }),
-    edges: layout.edges.map((edge) => {
+    edges: layout.edges.flatMap<WorkflowGraphEdge>((edge) => {
       const model = edgeModelsByID.get(edge.id);
-      if (model === undefined || edge.data === undefined) {
-        return edge;
+      if (model === undefined) {
+        return [];
       }
-      return {
-        ...edge,
-        markerEnd: { color: workflowEdgeColor(model.contextMode, model.hasError), type: MarkerType.ArrowClosed },
-        data: {
-          ...edge.data,
-          contextMode: model.contextMode,
-          hasError: model.hasError,
-          label: model.label,
-          transitionGroupID: model.transitionGroupID,
+      if (edge.data === undefined) {
+        return [edge];
+      }
+      return [
+        {
+          ...edge,
+          markerEnd: { color: workflowEdgeColor(model.contextMode, model.hasError), type: MarkerType.ArrowClosed },
+          data: {
+            ...edge.data,
+            contextMode: model.contextMode,
+            hasError: model.hasError,
+            label: model.label,
+            transitionGroupID: model.transitionGroupID,
+          },
         },
-      };
+      ];
     }),
   };
 }
