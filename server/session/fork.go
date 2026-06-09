@@ -71,7 +71,11 @@ func newChildFromReplay(parent *Store, parentMeta Meta, replay []ReplayEvent, fo
 
 	child.mu.Lock()
 	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
-	child.meta.HeadlessActive = parentMeta.HeadlessActive
+	// Derive headless state from the replayed events rather than copying the
+	// parent's current flag: a fork at an earlier user message only replays
+	// events before the boundary, where the headless state may differ from the
+	// parent's latest.
+	child.meta.HeadlessActive = headlessActiveFromReplayEvents(replay)
 	child.meta.CompactionSoonReminderIssued = reminderIssuedFromReplayEvents(replay)
 	child.meta.WorktreeReminder = forkedWorktreeReminderState(parentMeta.WorktreeReminder)
 	child.meta.UsageState = nil
@@ -187,6 +191,29 @@ func forkedWorktreeReminderState(in *WorktreeReminderState) *WorktreeReminderSta
 	copyState.HasIssuedInGeneration = false
 	copyState.IssuedCompactionCount = 0
 	return copyState
+}
+
+func headlessActiveFromReplayEvents(events []ReplayEvent) bool {
+	active := false
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var msg reminderEventMessage
+		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+			continue
+		}
+		if strings.TrimSpace(msg.Role) != "developer" {
+			continue
+		}
+		switch strings.TrimSpace(msg.MessageType) {
+		case "headless_mode":
+			active = true
+		case "headless_mode_exit":
+			active = false
+		}
+	}
+	return active
 }
 
 func reminderIssuedFromReplayEvents(events []ReplayEvent) bool {

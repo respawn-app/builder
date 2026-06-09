@@ -814,3 +814,25 @@ func TestSessionMetadataDoesNotPersistModelVerbosityState(t *testing.T) {
 		t.Fatal("expected reopened session metadata to remain free of model_verbosity")
 	}
 }
+
+func TestHeadlessActiveFromReplayEvents(t *testing.T) {
+	msg := func(messageType string) ReplayEvent {
+		return ReplayEvent{Kind: "message", Payload: []byte(`{"role":"developer","message_type":"` + messageType + `","content":"x"}`)}
+	}
+	cases := []struct {
+		name   string
+		events []ReplayEvent
+		want   bool
+	}{
+		{"empty", nil, false},
+		{"enter", []ReplayEvent{msg("headless_mode")}, true},
+		{"enter then exit", []ReplayEvent{msg("headless_mode"), msg("headless_mode_exit")}, false},
+		{"exit then enter", []ReplayEvent{msg("headless_mode_exit"), msg("headless_mode")}, true},
+		{"non-developer ignored", []ReplayEvent{{Kind: "message", Payload: []byte(`{"role":"user","message_type":"headless_mode","content":"x"}`)}}, false},
+	}
+	for _, tc := range cases {
+		if got := headlessActiveFromReplayEvents(tc.events); got != tc.want {
+			t.Fatalf("%s: headlessActiveFromReplayEvents = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

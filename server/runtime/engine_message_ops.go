@@ -73,6 +73,27 @@ func (e *Engine) providerItemsForToolCompletion(r tools.Result) []llm.ResponseIt
 	}})
 }
 
+// headlessModeActive reports the headless state implied by the last headless
+// enter/exit marker in a message slice. It is used only to seed the persisted
+// Meta.HeadlessActive flag at the restore boundary (including migrating sessions
+// created before the flag existed); per-request transitions read the persisted
+// flag, never the transcript.
+func headlessModeActive(messages []llm.Message) bool {
+	active := false
+	for _, msg := range messages {
+		if msg.Role != llm.RoleDeveloper {
+			continue
+		}
+		switch msg.MessageType {
+		case llm.MessageTypeHeadlessMode:
+			active = true
+		case llm.MessageTypeHeadlessModeExit:
+			active = false
+		}
+	}
+	return active
+}
+
 func (e *Engine) steerPersistedDiagnosticEntry(stepID, diagnosticKey, role, text string) error {
 	diagnosticKey = strings.TrimSpace(diagnosticKey)
 	if diagnosticKey == "" {
@@ -233,7 +254,6 @@ func (e *Engine) flushPendingUserInjections(stepID string) (int, error) {
 	e.ensureOrchestrationCollaborators()
 	return e.messageFlow.FlushPendingUserInjections(stepID)
 }
-
 
 func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
 	home, err := os.UserHomeDir()
