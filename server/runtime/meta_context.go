@@ -182,11 +182,7 @@ func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuil
 	}
 
 	if opts.IncludeEnvironment {
-		timestamp := b.now
-		if timestamp.IsZero() {
-			timestamp = time.Now()
-		}
-		environmentMessage, err := environmentContextMessage(b.environmentCWD, b.model, timestamp)
+		environmentMessage, err := environmentContextMessage(b.environmentCWD, b.model, b.now)
 		if err != nil {
 			return metaContextBuildResult{}, err
 		}

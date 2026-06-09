@@ -40,13 +40,13 @@ func (e *Engine) steerBaseMetaContextIfNeeded(stepID string) error {
 		return err
 	}
 	missingMessages := missingBaseMetaContextMessages(metaResult.OrderedInjectionMessages(), e.snapshotMessages())
-	intents := make([]steeringIntent, 0, len(metaResult.SkillWarnings)+1)
+	intents := make([]steeringIntent, 0, 2)
 	if len(missingMessages) > 0 {
-		for _, warning := range metaResult.SkillWarnings {
+		if combined := strings.TrimSpace(strings.Join(metaResult.SkillWarnings, "\n")); combined != "" {
 			intents = append(intents, steerLocalEntryIntent(storedLocalEntry{
 				Visibility: transcript.EntryVisibilityAll,
 				Role:       "warning",
-				Text:       warning,
+				Text:       combined,
 			}))
 		}
 		intents = append(intents, steerRuntimeContextMessagesIntent(missingMessages))

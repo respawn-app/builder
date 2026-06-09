@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -323,7 +325,8 @@ func (e *Engine) requestInputTokensPreciselyTracked(ctx context.Context, req llm
 	}
 	cacheKey := ""
 	if payload, err := json.Marshal(req); err == nil {
-		cacheKey = string(payload)
+		sum := sha256.Sum256(payload)
+		cacheKey = hex.EncodeToString(sum[:])
 	}
 	if cacheKey != "" {
 		if cached, ok := e.lookupPreciseTokenCount(cacheKey, current); ok {
