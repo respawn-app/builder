@@ -100,7 +100,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			assistantMsg.ToolCalls = nil
 			localToolCalls = nil
 			hostedToolExecutions = nil
-			_ = e.steerCommittedTranscriptAdvanced(stepID)
+			_ = e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
 		}
 
 		if !noopFinalAnswer {
@@ -181,7 +181,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if len(localToolCalls) == 0 {
 			if phaseTurn.MissingAssistantPhase {
 				if len(hostedToolExecutions) > 0 {
-					_ = e.steerCommittedTranscriptAdvanced(stepID)
+					_ = e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
 				}
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
 					return stepLoopResult{}, err
@@ -220,7 +220,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				continue
 			}
 			if len(hostedToolExecutions) > 0 {
-				_ = e.steerCommittedTranscriptAdvanced(stepID)
+				_ = e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
 				continue
 			}
 

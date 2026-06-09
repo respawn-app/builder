@@ -422,7 +422,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingGoalFeedback(t *testing.T
 	if err := eng.steer("", steerMessageIntent(llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"})); err != nil {
 		t.Fatalf("append assistant final: %v", err)
 	}
-	if err := eng.appendGoalDeveloperMessage("", prompts.RenderGoalSetPrompt("ship goal mode"), "Goal set: \"ship goal mode\""); err != nil {
+	if err := eng.steer("", steerMessageIntent(eng.goalDeveloperMessage(prompts.RenderGoalSetPrompt("ship goal mode"), "Goal set: \"ship goal mode\""))); err != nil {
 		t.Fatalf("append goal feedback: %v", err)
 	}
 

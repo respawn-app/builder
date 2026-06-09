@@ -558,10 +558,6 @@ func (e *Engine) modelRequests() *modelRequestRuntimeState {
 	return e.modelRequestsState
 }
 
-func (e *Engine) emit(evt Event) {
-	_ = e.steerEvent(evt.StepID, evt)
-}
-
 func (e *Engine) emitRaw(evt Event) {
 	evt.TranscriptRevision = e.TranscriptRevision()
 	evt.CommittedEntryCount = e.CommittedTranscriptEntryCount()
@@ -594,18 +590,6 @@ func eventShouldCarryContextUsage(evt Event) bool {
 	default:
 		return false
 	}
-}
-
-func (e *Engine) emitConversationUpdated(stepID string) {
-	_ = e.steerConversationUpdated(stepID)
-}
-
-func (e *Engine) emitCommittedTranscriptAdvanced(stepID string) {
-	_ = e.steerCommittedTranscriptAdvanced(stepID)
-}
-
-func (e *Engine) emitCommittedMessageTranscriptAdvanced(stepID string, msg llm.Message) {
-	_ = e.steerCommittedMessageTranscriptAdvanced(stepID, msg)
 }
 
 func eventMayInferCommittedEntryStart(kind EventKind) bool {

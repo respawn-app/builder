@@ -43,7 +43,7 @@ func (e *Engine) SetGoal(objective string, actor session.GoalActor) (session.Goa
 	if err != nil {
 		return session.GoalState{}, err
 	}
-	e.steerPersistedGoalDeveloperMessage("", msg)
+	e.steer("", steerStoredMessageProjectionIntent(msg))
 	return goal, nil
 }
 
@@ -65,7 +65,7 @@ func (e *Engine) SetGoalStatus(status session.GoalStatus, actor session.GoalActo
 	if err != nil {
 		return session.GoalState{}, err
 	}
-	e.steerPersistedGoalDeveloperMessage("", msg)
+	e.steer("", steerStoredMessageProjectionIntent(msg))
 	return goal, nil
 }
 
@@ -78,7 +78,7 @@ func (e *Engine) ClearGoal(actor session.GoalActor) (session.GoalState, error) {
 	if err != nil {
 		return session.GoalState{}, err
 	}
-	e.steerPersistedGoalDeveloperMessage("", msg)
+	e.steer("", steerStoredMessageProjectionIntent(msg))
 	return goal, nil
 }
 
@@ -155,7 +155,7 @@ func (e *Engine) runGoalTurn(ctx context.Context, appendNudge bool) (assistant l
 			return errGoalLoopInactive
 		}
 		if appendNudge {
-			if err := e.appendGoalDeveloperMessage(stepID, prompts.RenderGoalNudgePrompt(goal.Objective, string(goal.Status)), goalNudgeCompactText(*goal)); err != nil {
+			if err := e.steer(stepID, steerMessageIntent(e.goalDeveloperMessage(prompts.RenderGoalNudgePrompt(goal.Objective, string(goal.Status)), goalNudgeCompactText(*goal)))); err != nil {
 				return err
 			}
 		}
@@ -190,8 +190,11 @@ func (e *Engine) recordGoalLoopError(err error) {
 		Role:       string(transcript.EntryRoleDeveloperErrorFeedback),
 		Text:       message,
 	})); appendErr != nil {
-		e.SetOngoingError(message + " (also failed to persist error: " + appendErr.Error() + ")")
-		return
+		_ = e.steer("", steerLocalEntryIntent(storedLocalEntry{
+			Visibility: transcript.EntryVisibilityAuto,
+			Role:       string(transcript.EntryRoleDeveloperErrorFeedback),
+			Text:       "Failed to persist goal loop error: " + appendErr.Error(),
+		}))
 	}
 	e.SetOngoingError(message)
 }
@@ -220,10 +223,6 @@ func (e *Engine) goalLoopState() *goalLoopState {
 	return e.goalLoop
 }
 
-func (e *Engine) appendGoalDeveloperMessage(stepID string, content string, compact string) error {
-	return e.steer(stepID, steerMessageIntent(e.goalDeveloperMessage(content, compact)))
-}
-
 func (e *Engine) goalDeveloperMessage(content string, compact string) llm.Message {
 	return normalizeMessageForTranscript(llm.Message{
 		Role:           llm.RoleDeveloper,
@@ -231,10 +230,6 @@ func (e *Engine) goalDeveloperMessage(content string, compact string) llm.Messag
 		Content:        content,
 		CompactContent: compact,
 	}, e.transcriptWorkingDir())
-}
-
-func (e *Engine) steerPersistedGoalDeveloperMessage(stepID string, msg llm.Message) {
-	_ = e.steer(stepID, steerStoredMessageProjectionIntent(msg))
 }
 
 func (e *Engine) requireAskQuestionForActiveGoal() error {

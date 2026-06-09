@@ -43,7 +43,7 @@ func (p compactionPersistence) replaceHistory(stepID, engine string, mode compac
 	e.transcriptPersistence().ReplaceHistory(payload.Items)
 	e.setCompactionSoonReminderIssued(false)
 	p.emitProjectedHistoryReplacementEntries(stepID, projectedStart, projectedEntries)
-	conversationErr := e.steerConversationUpdated(stepID)
+	conversationErr := e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID})
 	return errors.Join(
 		appendErr,
 		conversationErr,

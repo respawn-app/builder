@@ -59,7 +59,7 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 	assertEventFlags(t, events[start:], nil)
 
 	start = len(events)
-	if err := eng.appendGoalDeveloperMessage("goal-step", "Goal paused.", "Goal paused"); err != nil {
+	if err := eng.steer("goal-step", steerMessageIntent(eng.goalDeveloperMessage("Goal paused.", "Goal paused"))); err != nil {
 		t.Fatalf("append goal feedback: %v", err)
 	}
 	assertEventFlags(t, events[start:], []eventFlagExpectation{{kind: EventConversationUpdated, stepID: "goal-step", committedChanged: true}})

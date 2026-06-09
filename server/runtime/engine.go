@@ -438,9 +438,6 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 		if err := e.ensureMetaContextForRequest(stepCtx, stepID); err != nil {
 			return err
 		}
-		if err := e.steer(stepID, steerMessageIntent(llm.Message{Role: llm.RoleDeveloper, Content: fmt.Sprintf("User ran shell command directly:\n%s", command)})); err != nil {
-			return err
-		}
 
 		call := llm.ToolCall{
 			ID:   uuid.NewString(),

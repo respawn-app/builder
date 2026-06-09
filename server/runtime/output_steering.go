@@ -178,18 +178,6 @@ func (e *Engine) steerEvent(stepID string, evt Event) error {
 	return e.steer(stepID, steerEventIntent(evt))
 }
 
-func (e *Engine) steerConversationUpdated(stepID string) error {
-	return e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID})
-}
-
-func (e *Engine) steerCommittedTranscriptAdvanced(stepID string) error {
-	return e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
-}
-
-func (e *Engine) steerCommittedMessageTranscriptAdvanced(stepID string, msg llm.Message) error {
-	return e.steerEvent(stepID, Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true, Message: msg})
-}
-
 func (e *Engine) steer(stepID string, intents ...steeringIntent) error {
 	ordered := make([]steeringIntent, 0, len(intents))
 	for _, intent := range intents {
