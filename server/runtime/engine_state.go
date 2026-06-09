@@ -415,9 +415,14 @@ type storedLocalEntry struct {
 }
 
 type historyReplacementPayload struct {
-	Engine string             `json:"engine"`
-	Mode   string             `json:"mode"`
-	Items  []llm.ResponseItem `json:"items"`
+	Engine string `json:"engine"`
+	Mode   string `json:"mode"`
+	// WorkflowRunID records the workflow run whose runtime committed this history
+	// replacement, when the engine runs under a workflow run. It is the durable,
+	// single-write provenance of a compaction: resume reconstructs it from this
+	// event so a workflow run never recompacts a continuation it already committed.
+	WorkflowRunID string             `json:"workflow_run_id,omitempty"`
+	Items         []llm.ResponseItem `json:"items"`
 }
 
 func toToolNames(ids []toolspec.ID) []string {
@@ -633,6 +638,18 @@ func (e *Engine) pendingToolCallStartStore() *pendingToolCallStartStore {
 
 func (e *Engine) nextCompactionCount() int {
 	return e.compactionRuntimeState().IncrementCount()
+}
+
+// LastCompactionWorkflowRunID reports the workflow run that committed the most
+// recent history replacement in this session, reconstructed from the
+// history_replaced event on restore. Empty when no compaction has run under a
+// workflow run. Workflow continuation gating reads this to compact exactly once.
+func (e *Engine) LastCompactionWorkflowRunID() string {
+	return e.compactionRuntimeState().LastWorkflowRunID()
+}
+
+func (e *Engine) setLastCompactionWorkflowRunID(runID string) {
+	e.compactionRuntimeState().SetLastWorkflowRunID(runID)
 }
 
 func (e *Engine) compactionRuntimeState() *compactionRuntimeState {

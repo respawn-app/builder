@@ -394,6 +394,12 @@ func TestWorkflowRuntimeCompactAndContinueReusesSourceSessionWithRealCompaction(
 	if reqs := fixture.client.Requests(); len(reqs) < 3 {
 		t.Fatalf("model request count = %d, want >=3 (plan, compaction, node turn)", len(reqs))
 	}
+	// The history_replaced event durably records the run that committed the
+	// compaction, so resume reconstructs it and a resumed run (same ID) skips
+	// recompaction while a fresh in-place handoff recompacts.
+	if runID := fixture.historyReplacedWorkflowRunID(t, runs[1].SessionID); runID != string(runs[1].ID) {
+		t.Fatalf("history_replaced workflow_run_id = %q, want run %q", runID, runs[1].ID)
+	}
 }
 
 func TestWorkflowRuntimeCompactAndContinueRejectsCrossRole(t *testing.T) {
@@ -765,6 +771,31 @@ func (f starterFixture) sessionEventsText(t *testing.T, sessionID string) string
 		t.Fatalf("read events.jsonl: %v", err)
 	}
 	return string(data)
+}
+
+// historyReplacedWorkflowRunID decodes the latest history_replaced event in the
+// session and returns its recorded workflow run provenance.
+func (f starterFixture) historyReplacedWorkflowRunID(t *testing.T, sessionID string) string {
+	t.Helper()
+	runID := ""
+	for _, line := range strings.Split(strings.TrimSpace(f.sessionEventsText(t, sessionID)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event struct {
+			Kind    string `json:"kind"`
+			Payload struct {
+				WorkflowRunID string `json:"workflow_run_id"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode session event: %v", err)
+		}
+		if event.Kind == "history_replaced" {
+			runID = event.Payload.WorkflowRunID
+		}
+	}
+	return runID
 }
 
 type metadataTaskWorktrees struct {

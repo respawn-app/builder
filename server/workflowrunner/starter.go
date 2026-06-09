@@ -412,6 +412,7 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 		Sources:  plan.Source.Sources,
 		Client:   client,
 		WorkflowRun: &workflowruntime.Config{
+			RunID:                        req.RunID,
 			Contract:                     workflowCompletionContract(req, input),
 			CompletionMode:               s.cfg.Settings.Workflow.CompletionMode,
 			MaxFinalAnswerViolations:     s.cfg.Settings.Workflow.MaxFinalAnswerViolations,
@@ -459,11 +460,18 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 	}
 	registration := runtimewire.RegisterSessionRuntime(plan.Store.Meta().SessionID, wiring.Engine, runtimeRegistry, s.backgroundRouter)
 	defer registration.Close()
-	// Only compact on a run's first execution. A resumed run already has a
-	// session (input.Run.SessionID set) whose history was compacted before the
-	// interruption; compacting again would add a model call and progressively
-	// collapse the carried-over source context on every retry.
-	if input.ContextMode == workflow.ContextModeCompactAndContinueSession && strings.TrimSpace(input.Run.SessionID) == "" {
+	// Compact exactly once per compact_and_continue handoff. The compaction's
+	// provenance is recorded atomically in its history_replaced event and rebuilt
+	// on restore, so the engine reports which run last compacted this session.
+	// Gating on a populated input.Run.SessionID is wrong because AttachRunSession
+	// persists the reused source session before CompactContext commits, so a run
+	// interrupted mid compaction would skip it on resume and continue from
+	// un-compacted history. Keying on the recorded run ID instead: a resumed run
+	// (same ID) whose compaction committed skips; one interrupted before commit
+	// recompacts; a later in-place handoff (new run ID, same session) compacts
+	// again because its continuation compaction is always the run's first action.
+	if input.ContextMode == workflow.ContextModeCompactAndContinueSession &&
+		wiring.Engine.LastCompactionWorkflowRunID() != string(req.RunID) {
 		if err := wiring.Engine.CompactContext(ctx, ""); err != nil {
 			reason := ReasonRuntimeFailed
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {

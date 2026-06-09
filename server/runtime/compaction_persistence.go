@@ -23,10 +23,15 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 func (p compactionPersistence) replaceHistory(stepID, engine string, mode compactionMode, items []llm.ResponseItem) error {
 	e := p.engine
 	preparedItems := llm.PrepareOpenAIInputItems(items)
+	workflowRunID := ""
+	if e.cfg.WorkflowRun != nil {
+		workflowRunID = strings.TrimSpace(string(e.cfg.WorkflowRun.RunID))
+	}
 	payload := historyReplacementPayload{
-		Engine: normalizeHistoryReplacementEngine(engine),
-		Mode:   string(mode),
-		Items:  llm.CloneResponseItems(preparedItems),
+		Engine:        normalizeHistoryReplacementEngine(engine),
+		Mode:          string(mode),
+		WorkflowRunID: workflowRunID,
+		Items:         llm.CloneResponseItems(preparedItems),
 	}
 	reminderIssued := false
 	projectedStart := e.CommittedTranscriptEntryCount()
@@ -39,6 +44,10 @@ func (p compactionPersistence) replaceHistory(stepID, engine string, mode compac
 	if appendErr != nil && !committed {
 		return appendErr
 	}
+	// The committed event is the single durable record of this compaction's
+	// provenance; mirror it into runtime state so an in-process gate sees it
+	// without re-reading the transcript, matching what restore reconstructs.
+	e.setLastCompactionWorkflowRunID(workflowRunID)
 	e.resetCurrentPreciseInputTracking()
 	e.resetLocalDiagnostics()
 	e.transcriptPersistence().ReplaceHistory(payload.Items)

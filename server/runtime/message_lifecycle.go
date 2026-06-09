@@ -79,6 +79,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			e.resetLocalDiagnostics()
 			e.transcriptPersistence().ReplaceHistory(payload.Items)
 			e.nextCompactionCount()
+			e.setLastCompactionWorkflowRunID(payload.WorkflowRunID)
 			recoveredHandoff.ClearSatisfiedByCompaction()
 			reminderIssued = false
 		}
