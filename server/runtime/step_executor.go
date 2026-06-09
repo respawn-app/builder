@@ -8,6 +8,7 @@ import (
 	"builder/server/tools"
 	"builder/server/workflowruntime"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 type defaultStepExecutor struct {
@@ -47,7 +48,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				_ = e.steer(stepID, steerReasoningDeltaIntent(delta))
 			},
 			func() {
-				e.clearStreamingAssistantState(stepID)
+				_ = e.steer(stepID, steerClearStreamingStateIntent())
 			},
 		)
 		if err != nil {
@@ -70,7 +71,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		noopFinalAnswer := isNoopFinalAnswer(assistantMsg)
 		assistantCommittedStart := -1
 		if noopFinalAnswer {
-			e.clearStreamingAssistantState(stepID)
+			_ = e.steer(stepID, steerClearStreamingStateIntent())
 		}
 
 		if preflightErr := workflowPreflightError(e.workflowRunActive(), localToolCalls, hostedToolExecutions); preflightErr != nil {
@@ -138,8 +139,14 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					CommittedEntryStartSet:     assistantCommittedStart >= 0,
 				})
 			}
-			if err := e.steerReasoningEntries(stepID, resp.Reasoning); err != nil {
-				return stepLoopResult{}, err
+			for _, entry := range resp.Reasoning {
+				if err := e.steer(stepID, steerLocalEntryIntent(storedLocalEntry{
+					Visibility: transcript.EntryVisibilityAuto,
+					Role:       entry.Role,
+					Text:       entry.Text,
+				})); err != nil {
+					return stepLoopResult{}, err
+				}
 			}
 			if phaseTurn.MissingAssistantPhase {
 				if err := e.steer(stepID, steerMessageIntent(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: missingAssistantPhaseWarning})); err != nil {

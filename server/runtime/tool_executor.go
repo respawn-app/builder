@@ -45,7 +45,10 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 			started.CommittedEntryStart = start
 			started.CommittedEntryStartSet = true
 		}
-		_ = e.steerEvent(stepID, started)
+		if err := e.steerEvent(stepID, started); err != nil {
+			callErrs[i] = fmt.Errorf("persist tool started (call_id=%s tool=%s): %w", call.ID, executableCall.Name, err)
+			continue
+		}
 		idx := i
 		wg.Add(1)
 		go func(tc llm.ToolCall, toolID toolspec.ID, knownTool bool) {

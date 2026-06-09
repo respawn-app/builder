@@ -39,10 +39,6 @@ func (e *Engine) persistToolCompletionRaw(stepID string, r tools.Result) error {
 	return err
 }
 
-func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
-	return e.steer(stepID, steerToolCompletionIntent(r))
-}
-
 func (e *Engine) providerItemsForToolCompletion(r tools.Result) []llm.ResponseItem {
 	callID := strings.TrimSpace(r.CallID)
 	if callID == "" {
@@ -77,16 +73,6 @@ func (e *Engine) providerItemsForToolCompletion(r tools.Result) []llm.ResponseIt
 	}})
 }
 
-func (e *Engine) appendUserMessage(stepID, text string) error {
-	msg := llm.Message{Role: llm.RoleUser, Content: text}
-	return e.steer(stepID, steerUserMessageIntent(msg))
-}
-
-func (e *Engine) appendUserMessageWithoutConversationUpdate(stepID, text string) error {
-	msg := llm.Message{Role: llm.RoleUser, Content: text}
-	return e.steer(stepID, steerUserMessageWithoutDerivedEventIntent(msg))
-}
-
 func shouldInjectHeadlessModePromptForState(active bool) bool {
 	return !active
 }
@@ -106,36 +92,6 @@ func headlessModeActive(messages []llm.Message) bool {
 		}
 	}
 	return active
-}
-
-func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {
-	return e.steer(stepID, steerMessageWithoutDerivedEventIntent(msg))
-}
-
-func (e *Engine) steerReasoningEntries(stepID string, entries []llm.ReasoningEntry) error {
-	for _, entry := range entries {
-		if err := e.steer(stepID, steerLocalEntryIntent(storedLocalEntry{
-			Visibility: transcript.EntryVisibilityAuto,
-			Role:       entry.Role,
-			Text:       entry.Text,
-		})); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Engine) appendPersistedLocalEntry(stepID, role, text string) error {
-	return e.appendPersistedLocalEntryWithOngoingText(stepID, role, text, "")
-}
-
-func (e *Engine) appendPersistedLocalEntryWithOngoingText(stepID, role, text, ongoingText string) error {
-	return e.appendPersistedLocalEntryRecord(stepID, storedLocalEntry{
-		Visibility:  transcript.EntryVisibilityAuto,
-		Role:        role,
-		Text:        text,
-		OngoingText: strings.TrimSpace(ongoingText),
-	})
 }
 
 func (e *Engine) steerPersistedDiagnosticEntry(stepID, diagnosticKey, role, text string) error {
@@ -168,14 +124,6 @@ func (e *Engine) steerPersistedDiagnosticEntry(stepID, diagnosticKey, role, text
 		return err
 	}
 	return nil
-}
-
-func (e *Engine) appendPersistedDiagnosticEntry(stepID, diagnosticKey, role, text string) error {
-	return e.steerPersistedDiagnosticEntry(stepID, diagnosticKey, role, text)
-}
-
-func (e *Engine) appendPersistedLocalEntryRecord(stepID string, entry storedLocalEntry) error {
-	return e.steer(stepID, steerLocalEntryIntent(entry))
 }
 
 func (e *Engine) appendPersistedLocalEntryRecordRaw(stepID string, entry storedLocalEntry) error {
@@ -256,10 +204,6 @@ func (e *Engine) diagnosticDedupeStore() *diagnosticDedupeStore {
 	return e.diagnostics
 }
 
-func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
-	return e.steer(stepID, steerMessageIntent(msg))
-}
-
 func (e *Engine) appendMessageRaw(stepID string, msg llm.Message, eventPolicy steeringMessageEventPolicy, persist bool) error {
 	msg = normalizeMessageForTranscript(msg, e.transcriptWorkingDir())
 	previousCommittedCount := e.CommittedTranscriptEntryCount()
@@ -284,14 +228,6 @@ func (e *Engine) appendMessageRaw(stepID string, msg llm.Message, eventPolicy st
 		e.emitRaw(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true, Message: msg})
 	}
 	return nil
-}
-
-func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {
-	return e.steer(stepID, steerMessageWithoutDerivedEventIntent(msg))
-}
-
-func (e *Engine) clearStreamingAssistantState(stepID string) {
-	_ = e.steer(stepID, steerClearStreamingStateIntent())
 }
 
 func (e *Engine) clearStreamingAssistantStateRaw(stepID string) {
