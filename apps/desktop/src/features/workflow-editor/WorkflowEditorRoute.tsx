@@ -123,6 +123,7 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
     [data.workflowQuery.data, draftState],
   );
   const draftValidationQuery = useWorkflowDraftValidationQuery(workflowID, draftState, dirty.graphDirty);
+  const draftDerivedWiringQuery = useWorkflowDraftDerivedWiringQuery(workflowID, draftState, dirty.graphDirty);
   const cachedDraftValidation = draftValidationQuery.data?.draft ?? null;
   const cachedExecutionValidation = draftValidationQuery.data?.execution ?? data.validationQuery.data ?? null;
   // Memoized so the merged object keeps a stable identity across renders: it
@@ -136,8 +137,16 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
   const topologyDirty =
     dirty.graphDirty && draftState !== null && draftState.graphVersion !== layoutSnapshot.graphVersion;
   const draftValidation = dirty.graphDirty ? null : cachedDraftValidation;
+  // While the graph is dirty the full draft validation (which also carries
+  // derived wiring) is disabled, so a dedicated cheap derive-wiring query keeps
+  // inspector wiring suggestions current; when clean, the validation result's
+  // wiring is authoritative.
   const draftDerivedWiring =
-    draftValidationQuery.data?.derivedWiring ?? draftDefinition?.derivedWiring ?? emptyWorkflowDerivedWiring;
+    (dirty.graphDirty
+      ? draftDerivedWiringQuery.data ?? draftValidationQuery.data?.derivedWiring
+      : draftValidationQuery.data?.derivedWiring) ??
+    draftDefinition?.derivedWiring ??
+    emptyWorkflowDerivedWiring;
   const executionValidation = dirty.graphDirty ? emptyWorkflowValidation : cachedExecutionValidation;
   const layoutValidation = dirty.graphDirty
     ? topologyDirty
@@ -1169,6 +1178,35 @@ function useWorkflowDraftValidationQuery(
       });
     },
     enabled: draftState !== null && !graphDirty,
+    staleTime: Infinity,
+  });
+}
+
+function useWorkflowDraftDerivedWiringQuery(
+  workflowID: string,
+  draftState: WorkflowEditorDraftState | null,
+  graphDirty: boolean,
+) {
+  const { api } = useAppServices();
+  return useQuery({
+    queryKey: queryKeys.workflowDraftDerivedWiring(
+      workflowID,
+      draftState?.source.workflow.version ?? 0,
+      draftState?.graphVersion ?? 0,
+    ),
+    queryFn: async () => {
+      if (draftState === null) {
+        throw new Error("Workflow draft derived wiring requested before draft is initialized.");
+      }
+      return api.deriveWorkflowGraphWiring({
+        graph: workflowEditorDraftGraph(draftState),
+        workflowID,
+      });
+    },
+    // Enabled only while the full validation query is disabled (graph dirty);
+    // keyed on graphVersion, which only bumps on real graph changes, so wiring
+    // refreshes per structural edit without running expensive validation.
+    enabled: draftState !== null && graphDirty,
     staleTime: Infinity,
   });
 }

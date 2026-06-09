@@ -948,6 +948,27 @@ func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
 	}
 }
 
+func TestServiceDeriveWorkflowGraphWiring(t *testing.T) {
+	ctx, service, binding := newWorkflowServiceTestContext(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
+	source, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow source: %v", err)
+	}
+	graph := workflowGraphDraftFromDefinition(source.Definition)
+	derived, err := service.DeriveWorkflowGraphWiring(ctx, serverapi.WorkflowGraphDeriveWiringRequest{
+		WorkflowID: workflowID,
+		Graph:      graph,
+	})
+	if err != nil {
+		t.Fatalf("DeriveWorkflowGraphWiring: %v", err)
+	}
+	if len(derived.DerivedWiring.Edges) != len(graph.Edges) {
+		t.Fatalf("derived wiring edges = %+v, want one summary per draft edge", derived.DerivedWiring.Edges)
+	}
+}
+
 func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)

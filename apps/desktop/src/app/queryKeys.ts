@@ -26,6 +26,12 @@ export const queryKeys = {
     version: number,
     metadataSignature: string,
   ) => ["workflow-draft-validation", workflowID, sourceVersion, version, metadataSignature],
+  workflowDraftDerivedWiring: (workflowID: string, sourceVersion: number, version: number) => [
+    "workflow-draft-derived-wiring",
+    workflowID,
+    sourceVersion,
+    version,
+  ],
   workflowValidation: (workflowID: string, mode: string) => ["workflow-validation", workflowID, mode],
   workflowGraphLayout: (
     workflowID: string,
