@@ -125,7 +125,7 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
   const draftValidationQuery = useWorkflowDraftValidationQuery(workflowID, draftState, dirty.graphDirty);
   const cachedDraftValidation = draftValidationQuery.data?.draft ?? null;
   const cachedExecutionValidation = draftValidationQuery.data?.execution ?? data.validationQuery.data ?? null;
-  const cleanLayoutValidation = cachedDraftValidation ?? cachedExecutionValidation;
+  const cleanLayoutValidation = mergeWorkflowValidations(cachedDraftValidation, cachedExecutionValidation);
   const cleanGraphVersion = draftState?.graphVersion ?? 0;
   const topologyDirty =
     dirty.graphDirty && draftState !== null && draftState.graphVersion !== layoutSnapshot.graphVersion;
@@ -138,7 +138,9 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
       ? emptyWorkflowValidation
       : layoutSnapshot.validation ?? emptyWorkflowValidation
     : cleanLayoutValidation;
-  const graphValidation = dirty.graphDirty ? emptyWorkflowValidation : draftValidation ?? executionValidation;
+  const graphValidation = dirty.graphDirty
+    ? emptyWorkflowValidation
+    : mergeWorkflowValidations(draftValidation, executionValidation) ?? emptyWorkflowValidation;
   const layoutQuery = useWorkflowGraphLayoutQuery(
     workflowID,
     draftDefinition,
@@ -683,6 +685,22 @@ export function WorkflowEditorRoute({ projectID, surface = "route", workflowID }
       setSaving(false);
     }
   }
+}
+
+function mergeWorkflowValidations(
+  draft: WorkflowValidation | null,
+  execution: WorkflowValidation | null,
+): WorkflowValidation | null {
+  if (draft === null) {
+    return execution;
+  }
+  if (execution === null) {
+    return draft;
+  }
+  return {
+    valid: draft.valid && execution.valid,
+    errors: [...draft.errors, ...execution.errors],
+  };
 }
 
 function WorkflowEditorTopChromeBlur() {
