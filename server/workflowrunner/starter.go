@@ -291,6 +291,17 @@ func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartC
 			return s.metadata, nil
 		},
 	}
+	// A fan-out branch creates a brand-new disposable clone before the rest of
+	// planning runs. If any later planning step fails, StartWorkflowRun's cleanup
+	// hook never sees it, so remove the clone here on failure to avoid orphaning
+	// an unattached session directory.
+	disposableCloneID := ""
+	planSucceeded := false
+	defer func() {
+		if !planSucceeded && disposableCloneID != "" {
+			s.removeFanoutClone(ctx, containerDir, disposableCloneID)
+		}
+	}()
 	if strings.TrimSpace(input.Run.SessionID) != "" {
 		plan, err := planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.Run.SessionID})
 		if err != nil {
@@ -331,6 +342,7 @@ func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartC
 			if err != nil {
 				return launch.SessionPlan{}, nil, err
 			}
+			disposableCloneID = continuationSessionID
 		}
 		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: continuationSessionID})
 	default:
@@ -349,6 +361,7 @@ func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartC
 	if err := plan.Store.EnsureDurable(); err != nil {
 		return launch.SessionPlan{}, nil, err
 	}
+	planSucceeded = true
 	return plan, warnings, nil
 }
 
@@ -369,6 +382,22 @@ func (s *Starter) cloneSourceSessionForFanout(containerDir, sourceSessionID stri
 		return "", fmt.Errorf("clone source session: %w", err)
 	}
 	return cloned.Meta().SessionID, nil
+}
+
+// removeFanoutClone deletes a disposable fan-out clone that was created but never
+// attached to a started run because planning failed afterward. Best-effort: it
+// removes the on-disk session and any metadata record, leaving nothing orphaned.
+func (s *Starter) removeFanoutClone(ctx context.Context, containerDir, sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	cleanupCtx := context.WithoutCancel(ctx)
+	if dir, err := sessionpath.ResolveScopedSessionDir(containerDir, sessionID); err == nil {
+		if store, err := session.Open(dir, s.storeOptions...); err == nil {
+			_ = store.RemoveDurable()
+		}
+	}
+	_ = s.metadata.DeleteSessionRecordByID(cleanupCtx, sessionID)
 }
 
 func (s *Starter) validateRole(role string) error {

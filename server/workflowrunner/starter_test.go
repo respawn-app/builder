@@ -14,6 +14,7 @@ import (
 	"builder/server/llm"
 	"builder/server/metadata"
 	"builder/server/registry"
+	"builder/server/sessionpath"
 	askquestion "builder/server/tools/askquestion"
 	"builder/server/workflow"
 	"builder/server/workflowruntime/workflowtest"
@@ -513,6 +514,37 @@ func TestWorkflowRuntimeResumeInterruptedRunUsesSameSession(t *testing.T) {
 	}
 	if resumed.ID != runs[0].ID || resumePlan.Store.Meta().SessionID != originalSessionID {
 		t.Fatalf("resume plan session = %s for run %+v, want same session %s", resumePlan.Store.Meta().SessionID, resumed, originalSessionID)
+	}
+}
+
+func TestRemoveFanoutCloneDeletesOrphanedClone(t *testing.T) {
+	fixture := newStarterFixture(t, config.WorkflowCompletionModeStructuredOutput, workflowtest.FinalAnswer(`{"commentary":"done"}`))
+	task := fixture.createStartedTask(t)
+	if err := fixture.scheduler(t).Process(context.Background()); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	fixture.waitForCompletedRun(t, task.ID)
+	runs, err := fixture.store.ListRuns(context.Background(), task.ID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("ListRuns = %+v, err %v", runs, err)
+	}
+
+	containerDir := config.ProjectSessionsRoot(fixture.cfg, fixture.projectID)
+	cloneID, err := fixture.starter.cloneSourceSessionForFanout(containerDir, runs[0].SessionID)
+	if err != nil {
+		t.Fatalf("cloneSourceSessionForFanout: %v", err)
+	}
+	cloneDir, err := sessionpath.ResolveScopedSessionDir(containerDir, cloneID)
+	if err != nil {
+		t.Fatalf("ResolveScopedSessionDir: %v", err)
+	}
+	if _, err := os.Stat(cloneDir); err != nil {
+		t.Fatalf("clone dir should exist after clone: %v", err)
+	}
+
+	fixture.starter.removeFanoutClone(context.Background(), containerDir, cloneID)
+	if _, err := os.Stat(cloneDir); !os.IsNotExist(err) {
+		t.Fatalf("clone dir should be removed, stat err = %v", err)
 	}
 }
 
