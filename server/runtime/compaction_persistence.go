@@ -34,7 +34,7 @@ func (p compactionPersistence) replaceHistory(stepID, engine string, mode compac
 	if err := e.store.SetAgentsInjected(false); err != nil {
 		return err
 	}
-	_, committed, appendErr := e.store.AppendEventWithCommitStatus(stepID, "history_replaced", payload)
+	_, committed, appendErr := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if appendErr != nil && !committed {
 		return appendErr
 	}

@@ -54,7 +54,7 @@ func (e *Engine) steerBaseMetaContextIfNeeded(stepID string) error {
 	if err := e.steer(stepID, intents...); err != nil {
 		return err
 	}
-	return e.store.MarkAgentsInjected()
+	return e.store.SetAgentsInjected(true)
 }
 
 func (e *Engine) steerHeadlessModeTransitionIfNeeded(stepID string) error {

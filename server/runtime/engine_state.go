@@ -140,7 +140,7 @@ func (e *Engine) RecordPromptHistory(text string) error {
 	if text == "" {
 		return nil
 	}
-	_, err := e.store.AppendEvent("", "prompt_history", map[string]any{"text": text})
+	_, _, err := e.store.AppendEvent("", "prompt_history", map[string]any{"text": text})
 	return err
 }
 

@@ -574,7 +574,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, errors.Join(err, statusErr)
 	}
-	if err := e.store.MarkAgentsInjected(); err != nil {
+	if err := e.store.SetAgentsInjected(true); err != nil {
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, errors.Join(err, statusErr)
 	}

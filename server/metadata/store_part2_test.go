@@ -384,7 +384,7 @@ func TestSessionLaunchVisibilityTransitions(t *testing.T) {
 			wantVisible: true,
 			mutate: func(t *testing.T, sess *session.Store) {
 				t.Helper()
-				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "user", "content": "Investigate broken startup flow\nmore detail"}); err != nil {
+				if _, _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "user", "content": "Investigate broken startup flow\nmore detail"}); err != nil {
 					t.Fatalf("AppendEvent: %v", err)
 				}
 			},
@@ -394,7 +394,7 @@ func TestSessionLaunchVisibilityTransitions(t *testing.T) {
 			wantVisible: false,
 			mutate: func(t *testing.T, sess *session.Store) {
 				t.Helper()
-				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "assistant", "content": "warming up"}); err != nil {
+				if _, _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "assistant", "content": "warming up"}); err != nil {
 					t.Fatalf("AppendEvent: %v", err)
 				}
 			},

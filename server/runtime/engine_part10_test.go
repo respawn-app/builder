@@ -36,7 +36,7 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 
 	storeRoot := t.TempDir()
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
-	if _, err := store.AppendEvent("prior-step", "message", llm.Message{
+	if _, _, err := store.AppendEvent("prior-step", "message", llm.Message{
 		Role:    llm.RoleDeveloper,
 		Content: "existing context",
 	}); err != nil {
@@ -150,7 +150,7 @@ func TestFreshChildSessionReinjectsDeveloperContextEvenWhenParentAlreadyInjected
 
 	storeRoot := t.TempDir()
 	parent := mustCreateNamedTestSessionAt(t, storeRoot, "parent", workspace)
-	if err := parent.MarkAgentsInjected(); err != nil {
+	if err := parent.SetAgentsInjected(true); err != nil {
 		t.Fatalf("mark parent agents injected: %v", err)
 	}
 	child, err := session.NewLazy(storeRoot, "child", workspace)

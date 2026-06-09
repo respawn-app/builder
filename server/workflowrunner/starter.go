@@ -333,7 +333,7 @@ func appendWorkflowCompactContinuation(store *session.Store, input workflowstore
 			lines = append(lines, "- "+value.Name+": "+value.Value)
 		}
 	}
-	_, err := store.AppendEvent("workflow-compact-continuation", "message", llm.Message{
+	_, _, err := store.AppendEvent("workflow-compact-continuation", "message", llm.Message{
 		Role:        llm.RoleDeveloper,
 		MessageType: llm.MessageTypeCompactionSummary,
 		Content:     strings.Join(lines, "\n"),

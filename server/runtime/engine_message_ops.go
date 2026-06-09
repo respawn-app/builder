@@ -31,7 +31,7 @@ func (e *Engine) persistToolCompletionRaw(stepID string, r tools.Result) error {
 		Presentation:  r.Presentation,
 		ProviderItems: e.providerItemsForToolCompletion(r),
 	}
-	_, err := e.store.AppendEvent(stepID, "tool_completed", payload)
+	_, _, err := e.store.AppendEvent(stepID, "tool_completed", payload)
 	if err == nil {
 		e.markCurrentRequestShapeDirtyForSignificantMutation()
 		e.transcriptPersistence().RecordStoredToolCompletion(payload)
@@ -140,7 +140,7 @@ func (e *Engine) appendPersistedLocalEntryRecordRaw(stepID string, entry storedL
 			return err
 		}
 	}
-	_, err := e.store.AppendEvent(stepID, "local_entry", entry)
+	_, _, err := e.store.AppendEvent(stepID, "local_entry", entry)
 	if err == nil {
 		e.transcriptPersistence().AppendLocalEntryRecord(*localEntryChatEntry(entry))
 		e.emitRaw(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry), CommittedTranscriptChanged: true})
@@ -219,7 +219,7 @@ func (e *Engine) appendMessageRaw(stepID string, msg llm.Message, eventPolicy st
 	}
 	e.transcriptPersistence().AppendMessage(msg)
 	if persist {
-		if _, err := e.store.AppendEvent(stepID, "message", msg); err != nil {
+		if _, _, err := e.store.AppendEvent(stepID, "message", msg); err != nil {
 			return err
 		}
 	}

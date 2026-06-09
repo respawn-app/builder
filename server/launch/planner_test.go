@@ -617,7 +617,7 @@ func TestPlannerNewChildSessionPreservesParentWorktreeContext(t *testing.T) {
 	if err := parent.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://parent.local/v1"}); err != nil {
 		t.Fatalf("SetContinuationContext parent: %v", err)
 	}
-	if err := parent.MarkAgentsInjected(); err != nil {
+	if err := parent.SetAgentsInjected(true); err != nil {
 		t.Fatalf("MarkAgentsInjected parent: %v", err)
 	}
 	if err := parent.MarkModelDispatchLocked(session.LockedContract{

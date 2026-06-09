@@ -346,14 +346,14 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 
 func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	store := mustCreateTestSession(t)
-	if _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
+	if _, _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
 		Role:        "reviewer_suggestions",
 		Text:        "Supervisor suggested:\n1. Add final verification notes.",
 		OngoingText: "Supervisor made 1 suggestion.",
 	}); err != nil {
 		t.Fatalf("append legacy reviewer_suggestions: %v", err)
 	}
-	if _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
+	if _, _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
 		Role: "reviewer_status",
 		Text: "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.",
 	}); err != nil {
@@ -375,7 +375,7 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 
 func TestRestoreMessagesPreservesStoredLocalEntryNoticeID(t *testing.T) {
 	store := mustCreateTestSession(t)
-	if _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
+	if _, _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
 		Role:     "system",
 		Text:     "Mirrored notice",
 		NoticeID: "notice-1",
@@ -442,7 +442,7 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 		Command:        "pwd",
 		TimeoutLabel:   "",
 	})
-	if _, err := store.AppendEvent("legacy-step", "message", llm.Message{
+	if _, _, err := store.AppendEvent("legacy-step", "message", llm.Message{
 		Role:    llm.RoleAssistant,
 		Content: "working",
 		ToolCalls: []llm.ToolCall{{
@@ -494,7 +494,7 @@ func TestRestoreMessagesIgnoresLegacyReviewerRollbackHistoryReplacement(t *testi
 			Arguments:        json.RawMessage(`{"command":"pwd"}`),
 		},
 	}
-	if _, err := store.AppendEvent("legacy-step", "history_replaced", historyReplacementPayload{
+	if _, _, err := store.AppendEvent("legacy-step", "history_replaced", historyReplacementPayload{
 		Engine: "reviewer_rollback",
 		Mode:   "manual",
 		Items:  legacyItems,
