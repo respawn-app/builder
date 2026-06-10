@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"builder/server/auth"
+	"builder/server/authpolicy"
 	"builder/server/workflow"
 	"builder/shared/buildinfo"
 	"builder/shared/config"
@@ -23,8 +24,11 @@ func NewService(authManager *auth.Manager, cfg config.App) *Service {
 
 func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerReadinessRequest) (serverapi.ServerReadinessResponse, error) {
 	authReady := false
-	authRequired := true
 	settings := config.Settings{}
+	if s != nil {
+		settings = s.settings
+	}
+	authRequired := authpolicy.RequiresStartupAuth(settings)
 	if s != nil && s.authManager != nil {
 		state, err := s.authManager.Load(ctx)
 		if err != nil {
@@ -32,10 +36,7 @@ func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerRead
 		}
 		authReady = auth.EvaluateStartupGate(state).Ready
 	}
-	if s != nil {
-		settings = s.settings
-	}
-	ready := authReady
+	ready := authReady || !authRequired
 	response := serverapi.ServerReadinessResponse{
 		Ready:           ready,
 		ServerVersion:   buildinfo.Version,
