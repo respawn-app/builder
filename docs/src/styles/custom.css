@@ -39,100 +39,100 @@
 }
 
 :root[data-theme='dark'] {
-  --sl-color-white: #d7dae0;
-  --sl-color-gray-1: #c8ccd4;
-  --sl-color-gray-2: #abb2bf;
-  --sl-color-gray-3: #8b93a3;
-  --sl-color-gray-4: #5c6370;
-  --sl-color-gray-5: #3e4451;
-  --sl-color-gray-6: #2c313c;
-  --sl-color-black: #282c34;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #e0e0e0;
+  --sl-color-gray-2: #c8c8c8;
+  --sl-color-gray-3: #8f97a1;
+  --sl-color-gray-4: #5a5651;
+  --sl-color-gray-5: #34373c;
+  --sl-color-gray-6: #1c1a18;
+  --sl-color-black: #12100e;
 
-  --sl-color-accent-low: #23344a;
-  --sl-color-accent: #61afef;
-  --sl-color-accent-high: #8fc9ff;
+  --sl-color-accent-low: color-mix(in srgb, #3185fc 18%, transparent);
+  --sl-color-accent: #3185fc;
+  --sl-color-accent-high: color-mix(in srgb, #3185fc 85%, white);
 
-  --sl-color-blue-low: #2a3b26;
-  --sl-color-blue: #98c379;
-  --sl-color-blue-high: #b7d99e;
+  --sl-color-blue: #12ba85;
+  --sl-color-blue-low: color-mix(in srgb, #12ba85 18%, transparent);
+  --sl-color-blue-high: color-mix(in srgb, #12ba85 85%, white);
 
-  --sl-color-green-low: #273828;
-  --sl-color-green: #98c379;
-  --sl-color-green-high: #b7d99e;
+  --sl-color-green: #12ba85;
+  --sl-color-green-low: color-mix(in srgb, #12ba85 18%, transparent);
+  --sl-color-green-high: color-mix(in srgb, #12ba85 85%, white);
 
-  --sl-color-orange-low: #3b3020;
-  --sl-color-orange: #e5c07b;
-  --sl-color-orange-high: #edd2a0;
+  --sl-color-orange: #f96824;
+  --sl-color-orange-low: color-mix(in srgb, #f96824 18%, transparent);
+  --sl-color-orange-high: color-mix(in srgb, #f96824 85%, white);
 
-  --sl-color-purple-low: #332742;
-  --sl-color-purple: #c678dd;
-  --sl-color-purple-high: #d99bea;
+  --sl-color-purple: #ffe74c;
+  --sl-color-purple-low: color-mix(in srgb, #ffe74c 18%, transparent);
+  --sl-color-purple-high: color-mix(in srgb, #ffe74c 70%, black);
 
-  --sl-color-red-low: #41252b;
-  --sl-color-red: #e06c75;
-  --sl-color-red-high: #f19ca3;
+  --sl-color-red: #dc2e3c;
+  --sl-color-red-low: color-mix(in srgb, #dc2e3c 18%, transparent);
+  --sl-color-red-high: color-mix(in srgb, #dc2e3c 85%, white);
 
   --sl-color-text: var(--sl-color-gray-2);
   --sl-color-text-accent: var(--sl-color-accent-high);
-  --sl-color-text-invert: #1f2430;
+  --sl-color-text-invert: #12100e;
   --sl-color-bg: var(--sl-color-black);
-  --sl-color-bg-nav: #21252b;
-  --sl-color-bg-sidebar: #252932;
-  --sl-color-bg-inline-code: #313640;
+  --sl-color-bg-nav: var(--sl-color-gray-6);
+  --sl-color-bg-sidebar: var(--sl-color-gray-6);
+  --sl-color-bg-inline-code: var(--sl-color-gray-5);
   --sl-color-bg-accent: var(--sl-color-accent);
-  --sl-color-hairline-light: #343b46;
-  --sl-color-hairline: #252932;
-  --sl-color-hairline-shade: #1d2026;
-  --sl-color-backdrop-overlay: rgba(24, 27, 33, 0.72);
+  --sl-color-hairline-light: var(--sl-color-gray-5);
+  --sl-color-hairline: var(--sl-color-gray-6);
+  --sl-color-hairline-shade: var(--sl-color-black);
+  --sl-color-backdrop-overlay: rgba(18, 16, 14, 0.72);
 }
 
 :root[data-theme='light'] {
-  --sl-color-white: #383a42;
-  --sl-color-gray-1: #4f525d;
-  --sl-color-gray-2: #5c6370;
-  --sl-color-gray-3: #7f848e;
-  --sl-color-gray-4: #a0a5b1;
-  --sl-color-gray-5: #d7dae0;
-  --sl-color-gray-6: #eef0f3;
-  --sl-color-gray-7: #f7f7f8;
-  --sl-color-black: #fafafa;
+  --sl-color-white: #12100e;
+  --sl-color-gray-1: #2a2825;
+  --sl-color-gray-2: #5a5651;
+  --sl-color-gray-3: #8f97a1;
+  --sl-color-gray-4: #a39f99;
+  --sl-color-gray-5: #d0d0d0;
+  --sl-color-gray-6: #e8e6e4;
+  --sl-color-gray-7: #f4f3f2;
+  --sl-color-black: #faf9f7;
 
-  --sl-color-accent-low: #dce7ff;
-  --sl-color-accent: #4078f2;
-  --sl-color-accent-high: #2a63e0;
+  --sl-color-accent-low: color-mix(in srgb, #3185fc 14%, transparent);
+  --sl-color-accent: #3185fc;
+  --sl-color-accent-high: color-mix(in srgb, #3185fc 90%, black);
 
-  --sl-color-blue-low: #dcefdc;
-  --sl-color-blue: #22863a;
-  --sl-color-blue-high: #1a6b2d;
+  --sl-color-blue: #12ba85;
+  --sl-color-blue-low: color-mix(in srgb, #12ba85 14%, transparent);
+  --sl-color-blue-high: color-mix(in srgb, #12ba85 90%, black);
 
-  --sl-color-green-low: #dcefdc;
-  --sl-color-green: #50a14f;
-  --sl-color-green-high: #3f8240;
+  --sl-color-green: #12ba85;
+  --sl-color-green-low: color-mix(in srgb, #12ba85 14%, transparent);
+  --sl-color-green-high: color-mix(in srgb, #12ba85 90%, black);
 
-  --sl-color-orange-low: #f8ecd7;
-  --sl-color-orange: #c18401;
-  --sl-color-orange-high: #9b6900;
+  --sl-color-orange: #f96824;
+  --sl-color-orange-low: color-mix(in srgb, #f96824 14%, transparent);
+  --sl-color-orange-high: color-mix(in srgb, #f96824 90%, black);
 
-  --sl-color-purple-low: #efdaf2;
-  --sl-color-purple: #a626a4;
-  --sl-color-purple-high: #851f83;
+  --sl-color-purple: #ffe74c;
+  --sl-color-purple-low: color-mix(in srgb, #ffe74c 30%, transparent);
+  --sl-color-purple-high: color-mix(in srgb, #ffe74c 60%, black);
 
-  --sl-color-red-low: #f8dcda;
-  --sl-color-red: #d73a49;
-  --sl-color-red-high: #b92f3d;
+  --sl-color-red: #dc2e3c;
+  --sl-color-red-low: color-mix(in srgb, #dc2e3c 14%, transparent);
+  --sl-color-red-high: color-mix(in srgb, #dc2e3c 90%, black);
 
-  --sl-color-text: #4f525d;
-  --sl-color-text-accent: #2a63e0;
-  --sl-color-text-invert: #fafafa;
-  --sl-color-bg: #fafafa;
-  --sl-color-bg-nav: #f3f4f7;
-  --sl-color-bg-sidebar: #f6f7f9;
-  --sl-color-bg-inline-code: #eef0f3;
-  --sl-color-bg-accent: #2a63e0;
-  --sl-color-hairline-light: #e6e9ef;
-  --sl-color-hairline: #eef0f3;
-  --sl-color-hairline-shade: #dde1e8;
-  --sl-color-backdrop-overlay: rgba(127, 132, 142, 0.4);
+  --sl-color-text: #5a5651;
+  --sl-color-text-accent: var(--sl-color-accent-high);
+  --sl-color-text-invert: #faf9f7;
+  --sl-color-bg: var(--sl-color-black);
+  --sl-color-bg-nav: var(--sl-color-gray-7);
+  --sl-color-bg-sidebar: var(--sl-color-gray-6);
+  --sl-color-bg-inline-code: var(--sl-color-gray-5);
+  --sl-color-bg-accent: var(--sl-color-accent-high);
+  --sl-color-hairline-light: var(--sl-color-gray-5);
+  --sl-color-hairline: var(--sl-color-gray-6);
+  --sl-color-hairline-shade: var(--sl-color-gray-5);
+  --sl-color-backdrop-overlay: rgba(90, 86, 81, 0.4);
 }
 
 header.header {
