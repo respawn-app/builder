@@ -173,98 +173,98 @@ func (p Palette) Resolve(themeName string) ResolvedPalette {
 var defaultPalette = Palette{
 	App: AppPalette{
 		Primary: AdaptiveColor{
-			Light: Color{ANSI: "4", ANSI256: "26", TrueColor: "#005CC5"},
-			Dark:  Color{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"},
+			Light: Color{ANSI: "4", ANSI256: "33", TrueColor: "#3185FC"},
+			Dark:  Color{ANSI: "4", ANSI256: "33", TrueColor: "#3185FC"},
 		},
 		Secondary: AdaptiveColor{
-			Light: Color{ANSI: "2", ANSI256: "29", TrueColor: "#1B7F5A"},
-			Dark:  Color{ANSI: "6", ANSI256: "79", TrueColor: "#7FDBA6"},
+			Light: Color{ANSI: "11", ANSI256: "220", TrueColor: "#FFE74C"},
+			Dark:  Color{ANSI: "3", ANSI256: "216", TrueColor: "#FFE74C"},
 		},
 		Foreground: AdaptiveColor{
-			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#1F2328"},
-			Dark:  Color{ANSI: "7", ANSI256: "252", TrueColor: "#D7DAE0"},
+			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#12100E"},
+			Dark:  Color{ANSI: "7", ANSI256: "231", TrueColor: "#FFFFFF"},
 		},
 		Muted: AdaptiveColor{
-			Light: Color{ANSI: "8", ANSI256: "244", TrueColor: "#6A737D"},
-			Dark:  Color{ANSI: "8", ANSI256: "243", TrueColor: "#7D8590"},
+			Light: Color{ANSI: "8", ANSI256: "243", TrueColor: "#5A5651"},
+			Dark:  Color{ANSI: "8", ANSI256: "103", TrueColor: "#8F97A1"},
 		},
 		Border: AdaptiveColor{
-			Light: Color{ANSI: "7", ANSI256: "250", TrueColor: "#D0D7DE"},
-			Dark:  Color{ANSI: "8", ANSI256: "240", TrueColor: "#3D444D"},
+			Light: Color{ANSI: "7", ANSI256: "254", TrueColor: "#F0EFFD"},
+			Dark:  Color{ANSI: "8", ANSI256: "237", TrueColor: "#34373C"},
 		},
 		ModeBg: AdaptiveColor{
-			Light: Color{ANSI: "7", ANSI256: "254", TrueColor: "#EEF2F6"},
-			Dark:  Color{ANSI: "8", ANSI256: "238", TrueColor: "#2D333B"},
+			Light: Color{ANSI: "7", ANSI256: "254", TrueColor: "#F0EFFD"},
+			Dark:  Color{ANSI: "8", ANSI256: "237", TrueColor: "#34373C"},
 		},
 		ModeText: AdaptiveColor{
-			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#1F2328"},
-			Dark:  Color{ANSI: "7", ANSI256: "252", TrueColor: "#D7DAE0"},
+			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#12100E"},
+			Dark:  Color{ANSI: "7", ANSI256: "231", TrueColor: "#FFFFFF"},
 		},
 		ChatBg: AdaptiveColor{
-			Light: Color{ANSI: "7", ANSI256: "255", TrueColor: "#F6F8FA"},
-			Dark:  Color{ANSI: "0", ANSI256: "235", TrueColor: "#161B22"},
+			Light: Color{ANSI: "7", ANSI256: "255", TrueColor: "#FFFFFF"},
+			Dark:  Color{ANSI: "0", ANSI256: "233", TrueColor: "#12100E"},
 		},
 		InputBg: AdaptiveColor{
-			Light: Color{ANSI: "7", ANSI256: "254", TrueColor: "#FFFFFF"},
-			Dark:  Color{ANSI: "0", ANSI256: "236", TrueColor: "#22272E"},
+			Light: Color{ANSI: "7", ANSI256: "254", TrueColor: "#F0EFFD"},
+			Dark:  Color{ANSI: "8", ANSI256: "236", TrueColor: "#1C1A18"},
 		},
 	},
 	Transcript: TranscriptPalette{
 		Foreground: AdaptiveColor{
-			Light: Color{ANSI: "0", ANSI256: "237", TrueColor: "#383A42"},
-			Dark:  Color{ANSI: "7", ANSI256: "145", TrueColor: "#ABB2BF"},
+			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#12100E"},
+			Dark:  Color{ANSI: "7", ANSI256: "231", TrueColor: "#FFFFFF"},
 		},
 		Subdued: AdaptiveColor{
-			Light: Color{ANSI: "8", ANSI256: "242", TrueColor: "#5C6370"},
-			Dark:  Color{ANSI: "8", ANSI256: "244", TrueColor: "#7F848E"},
+			Light: Color{ANSI: "8", ANSI256: "243", TrueColor: "#5A5651"},
+			Dark:  Color{ANSI: "8", ANSI256: "103", TrueColor: "#8F97A1"},
 		},
 		SelectionBackground: AdaptiveColor{
-			Light: Color{ANSI: "7", ANSI256: "153", TrueColor: "#DDEBFF"},
-			Dark:  Color{ANSI: "8", ANSI256: "24", TrueColor: "#274A63"},
+			Light: Color{ANSI: "4", ANSI256: "111", TrueColor: "#D0E2FF"},
+			Dark:  Color{ANSI: "4", ANSI256: "25", TrueColor: "#1B3A5C"},
 		},
 		SelectionForeground: AdaptiveColor{
-			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#1F2328"},
-			Dark:  Color{ANSI: "7", ANSI256: "252", TrueColor: "#D7DAE0"},
+			Light: Color{ANSI: "0", ANSI256: "235", TrueColor: "#12100E"},
+			Dark:  Color{ANSI: "7", ANSI256: "231", TrueColor: "#FFFFFF"},
 		},
 		User: AdaptiveColor{
-			Light: Color{ANSI: "4", ANSI256: "26", TrueColor: "#005CC5"},
-			Dark:  Color{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"},
+			Light: Color{ANSI: "4", ANSI256: "33", TrueColor: "#3185FC"},
+			Dark:  Color{ANSI: "4", ANSI256: "33", TrueColor: "#3185FC"},
 		},
 		Assistant: AdaptiveColor{
-			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
-			Dark:  Color{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#12BA85"},
+			Dark:  Color{ANSI: "2", ANSI256: "85", TrueColor: "#12BA85"},
 		},
 		Tool: AdaptiveColor{
-			Light: Color{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"},
-			Dark:  Color{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"},
+			Light: Color{ANSI: "4", ANSI256: "33", TrueColor: "#3185FC"},
+			Dark:  Color{ANSI: "4", ANSI256: "33", TrueColor: "#3185FC"},
 		},
 		ToolSuccess: AdaptiveColor{
-			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
-			Dark:  Color{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#12BA85"},
+			Dark:  Color{ANSI: "2", ANSI256: "85", TrueColor: "#12BA85"},
 		},
 		ToolError: AdaptiveColor{
-			Light: Color{ANSI: "1", ANSI256: "160", TrueColor: "#D73A49"},
-			Dark:  Color{ANSI: "1", ANSI256: "204", TrueColor: "#E06C75"},
+			Light: Color{ANSI: "1", ANSI256: "161", TrueColor: "#DC2E3C"},
+			Dark:  Color{ANSI: "1", ANSI256: "197", TrueColor: "#DC2E3C"},
 		},
 		System: AdaptiveColor{
-			Light: Color{ANSI: "8", ANSI256: "244", TrueColor: "#6A737D"},
-			Dark:  Color{ANSI: "7", ANSI256: "145", TrueColor: "#ABB2BF"},
+			Light: Color{ANSI: "8", ANSI256: "243", TrueColor: "#5A5651"},
+			Dark:  Color{ANSI: "8", ANSI256: "103", TrueColor: "#8F97A1"},
 		},
 		Success: AdaptiveColor{
-			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
-			Dark:  Color{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#12BA85"},
+			Dark:  Color{ANSI: "2", ANSI256: "85", TrueColor: "#12BA85"},
 		},
 		Warning: AdaptiveColor{
-			Light: Color{ANSI: "3", ANSI256: "136", TrueColor: "#8A5A00"},
-			Dark:  Color{ANSI: "3", ANSI256: "180", TrueColor: "#E5C07B"},
+			Light: Color{ANSI: "3", ANSI256: "166", TrueColor: "#F96824"},
+			Dark:  Color{ANSI: "3", ANSI256: "209", TrueColor: "#F96824"},
 		},
 		Error: AdaptiveColor{
-			Light: Color{ANSI: "1", ANSI256: "160", TrueColor: "#D73A49"},
-			Dark:  Color{ANSI: "1", ANSI256: "204", TrueColor: "#E06C75"},
+			Light: Color{ANSI: "1", ANSI256: "161", TrueColor: "#DC2E3C"},
+			Dark:  Color{ANSI: "1", ANSI256: "197", TrueColor: "#DC2E3C"},
 		},
 		Compaction: AdaptiveColor{
-			Light: Color{ANSI: "3", ANSI256: "136", TrueColor: "#8A5A00"},
-			Dark:  Color{ANSI: "3", ANSI256: "180", TrueColor: "#E5C07B"},
+			Light: Color{ANSI: "11", ANSI256: "220", TrueColor: "#FFE74C"},
+			Dark:  Color{ANSI: "3", ANSI256: "216", TrueColor: "#FFE74C"},
 		},
 		DiffAddBackground: AdaptiveColor{
 			Light: Color{ANSI: "2", ANSI256: "194", TrueColor: "#E6FFED"},
@@ -277,20 +277,20 @@ var defaultPalette = Palette{
 	},
 	Status: StatusPalette{
 		Success: AdaptiveColor{
-			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
-			Dark:  Color{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+			Light: Color{ANSI: "2", ANSI256: "34", TrueColor: "#12BA85"},
+			Dark:  Color{ANSI: "2", ANSI256: "85", TrueColor: "#12BA85"},
 		},
 		Warning: AdaptiveColor{
-			Light: Color{ANSI: "3", ANSI256: "136", TrueColor: "#9A6700"},
-			Dark:  Color{ANSI: "3", ANSI256: "180", TrueColor: "#E5C07B"},
+			Light: Color{ANSI: "3", ANSI256: "166", TrueColor: "#F96824"},
+			Dark:  Color{ANSI: "3", ANSI256: "209", TrueColor: "#F96824"},
 		},
 		Error: AdaptiveColor{
-			Light: Color{ANSI: "1", ANSI256: "160", TrueColor: "#CB2431"},
-			Dark:  Color{ANSI: "1", ANSI256: "203", TrueColor: "#F97583"},
+			Light: Color{ANSI: "1", ANSI256: "161", TrueColor: "#DC2E3C"},
+			Dark:  Color{ANSI: "1", ANSI256: "197", TrueColor: "#DC2E3C"},
 		},
 		ContextEmpty: AdaptiveColor{
-			Light: Color{ANSI: "8", ANSI256: "247", TrueColor: "#A0A1A7"},
-			Dark:  Color{ANSI: "8", ANSI256: "59", TrueColor: "#5C6370"},
+			Light: Color{ANSI: "8", ANSI256: "245", TrueColor: "#A39F99"},
+			Dark:  Color{ANSI: "8", ANSI256: "103", TrueColor: "#8F97A1"},
 		},
 	},
 }
