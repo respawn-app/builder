@@ -46,3 +46,45 @@ func TestGetServerReadinessIncludesWorkflowAssigneeRoles(t *testing.T) {
 		}
 	}
 }
+
+func TestGetServerReadinessReadyWhenStartupAuthNotRequired(t *testing.T) {
+	service := NewService(nil, config.App{
+		Settings: config.Settings{ProviderOverride: "anthropic"},
+	})
+
+	readiness, err := service.GetServerReadiness(context.Background(), serverapi.ServerReadinessRequest{})
+	if err != nil {
+		t.Fatalf("GetServerReadiness: %v", err)
+	}
+
+	if readiness.AuthRequired {
+		t.Fatalf("AuthRequired = true, want false for non-OpenAI provider")
+	}
+	if !readiness.Ready {
+		t.Fatalf("Ready = false, want true when startup auth is not required")
+	}
+	if len(readiness.Causes) != 0 {
+		t.Fatalf("Causes = %+v, want none when ready", readiness.Causes)
+	}
+}
+
+func TestGetServerReadinessBlockedWhenStartupAuthRequiredButMissing(t *testing.T) {
+	service := NewService(nil, config.App{
+		Settings: config.Settings{ProviderOverride: "openai"},
+	})
+
+	readiness, err := service.GetServerReadiness(context.Background(), serverapi.ServerReadinessRequest{})
+	if err != nil {
+		t.Fatalf("GetServerReadiness: %v", err)
+	}
+
+	if !readiness.AuthRequired {
+		t.Fatalf("AuthRequired = false, want true for OpenAI provider")
+	}
+	if readiness.Ready {
+		t.Fatalf("Ready = true, want false when required auth is missing")
+	}
+	if len(readiness.Causes) == 0 {
+		t.Fatalf("Causes empty, want a startup blocker cause")
+	}
+}
