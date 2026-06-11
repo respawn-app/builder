@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AttentionItem, TaskTransition } from "../../api";
-import { Button, Island } from "../../ui";
+import { Button, Island, RadioGroup, RadioGroupItem } from "../../ui";
 import { fieldInputClassName } from "../../ui/Field";
 import { cx } from "../../ui/classes";
 import { usePendingAsks } from "./useTaskDetailData";
@@ -77,12 +77,12 @@ function QuestionForm({
   const selection = selectionForAsk(selectionState, attention.askID);
   const selectedOption = selection.userSelected ? selection.selectedOption : recommendedOption;
   const answer = selection.answer;
-  const groupName = useId();
   const answerID = useId();
   const neitherSelected = selectedOption === 0;
   const canSubmit = selectedOption === null ? false : selectedOption > 0 || answer.trim().length > 0;
   const interactionDisabled = disabled || answerQuestion.isPending || selection.submitted;
   const submitDisabled = interactionDisabled || !canSubmit;
+  const radioValue = selectedOption === null ? "" : selectedOption.toString();
 
   async function submit(): Promise<void> {
     const freeformAnswer = selectedOption === 0 ? answer : "";
@@ -110,43 +110,39 @@ function QuestionForm({
     >
       <h3 className="m-0">{t("task.question")}</h3>
       {question !== undefined && question.length > 0 ? <p className="m-0">{question}</p> : null}
-      <fieldset className="m-0 grid gap-[var(--space-2)] border-0 p-0">
+      <fieldset className="m-0 border-0 p-0">
         <legend className="sr-only">{t("task.optionNumber")}</legend>
-        {suggestions.map((suggestion, optionIndex) => (
-          <QuestionOption
-            checked={selectedOption === optionIndex + 1}
-            disabled={interactionDisabled}
-            key={`${optionIndex.toString()}:${suggestion}`}
-            name={groupName}
-            onChange={() => {
-              setSelectionState({
-                answer: "",
-                askID: attention.askID,
-                selectedOption: optionIndex + 1,
-                submitted: false,
-                userSelected: true,
-              });
-            }}
-            recommended={recommendedOption === optionIndex + 1}
-            text={suggestion}
-          />
-        ))}
-        <QuestionOption
-          checked={neitherSelected}
+        <RadioGroup
+          aria-label={t("task.optionNumber")}
           disabled={interactionDisabled}
-          name={groupName}
-          onChange={() => {
+          onValueChange={(value) => {
+            const nextOption = Number(value);
             setSelectionState({
-              answer,
+              answer: nextOption === 0 ? answer : "",
               askID: attention.askID,
-              selectedOption: 0,
+              selectedOption: nextOption,
               submitted: false,
               userSelected: true,
             });
           }}
-          recommended={false}
-          text={t("task.neitherOption")}
-        />
+          value={radioValue}
+        >
+          {suggestions.map((suggestion, optionIndex) => (
+            <QuestionOption
+              disabled={interactionDisabled}
+              key={`${optionIndex.toString()}:${suggestion}`}
+              recommended={recommendedOption === optionIndex + 1}
+              text={suggestion}
+              value={(optionIndex + 1).toString()}
+            />
+          ))}
+          <QuestionOption
+            disabled={interactionDisabled}
+            recommended={false}
+            text={t("task.neitherOption")}
+            value="0"
+          />
+        </RadioGroup>
       </fieldset>
       {neitherSelected ? (
         <textarea
@@ -175,35 +171,31 @@ function QuestionForm({
 }
 
 function QuestionOption({
-  checked,
   disabled,
-  name,
-  onChange,
   recommended,
   text,
+  value,
 }: Readonly<{
-  checked: boolean;
   disabled: boolean;
-  name: string;
-  onChange: () => void;
   recommended: boolean;
   text: string;
+  value: string;
 }>) {
   const { t } = useTranslation();
+  const id = useId();
   return (
-    <label
+    <div
       className={cx(
-        "flex items-start gap-[var(--space-2)] rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-2)] text-left text-[var(--color-on-island)]",
-        checked && "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)]",
+        "flex items-start gap-[var(--space-2)] text-left text-[var(--color-on-island)]",
         disabled && "opacity-60",
       )}
     >
-      <input checked={checked} className="mt-1" disabled={disabled} name={name} onChange={onChange} type="radio" />
-      <span className={cx("min-w-0", recommended && "font-bold text-[var(--color-primary)]")}>
+      <RadioGroupItem className="mt-1" disabled={disabled} id={id} value={value} />
+      <label className={cx("min-w-0", recommended && "font-bold text-[var(--color-primary)]")} htmlFor={id}>
         {text}
         {recommended ? <span className="ml-[var(--space-2)] text-xs font-bold">({t("task.recommended")})</span> : null}
-      </span>
-    </label>
+      </label>
+    </div>
   );
 }
 
