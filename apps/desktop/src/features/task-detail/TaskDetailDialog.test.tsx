@@ -179,6 +179,38 @@ describe("TaskDetailDialog", () => {
     });
   });
 
+  it("saves description-only task edits through the shared save action", async () => {
+    window.history.pushState(null, "", "/tasks/task-1");
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.task.get", result: taskDetailNoInboxResponse },
+      { method: "workflow.task.activity.list", result: activityResponse },
+      { method: "workflow.task.update", result: taskUpdateResponse },
+    ]);
+
+    render(<App services={services} />);
+
+    expect(await screen.findByRole("textbox", { name: "Title" })).toHaveValue("Resolve blocker");
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Updated description only" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "workflow.task.update",
+        params: {
+          task_id: "task-1",
+          title: "Resolve blocker",
+          body: "Updated description only",
+        },
+      });
+    });
+  });
+
   it("opens Home Inbox rows through native task detail window when available", async () => {
     window.history.pushState(null, "", "/");
     const opened: NativeTaskDetailTarget[] = [];
