@@ -546,14 +546,31 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .floating-notice-morph {
+    contain: layout paint;
     transform-origin: right bottom;
     transition:
       width var(--motion-morph),
       height var(--motion-morph),
+      min-height var(--motion-morph),
+      max-height var(--motion-morph),
+      grid-template-rows var(--motion-morph),
       padding var(--motion-morph),
       background-color var(--motion-morph),
       border-radius var(--motion-morph),
       bottom var(--motion-fast);
+  }
+
+  .floating-notice-content,
+  .floating-notice-collapsed-button {
+    transition: opacity var(--motion-fast);
+  }
+
+  .floating-notice-expanded .floating-notice-content {
+    transition-delay: 180ms;
+  }
+
+  .floating-notice-collapsed .floating-notice-content {
+    transition-delay: 0ms;
   }
 
   .route-transition-frame {

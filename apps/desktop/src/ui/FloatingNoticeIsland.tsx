@@ -41,44 +41,33 @@ export function FloatingNoticeIsland({
   const styles = noticeToneStyles[tone];
   const expandedClasses =
     expandedClassName ??
-    "floating-notice-expanded grid min-h-[123px] max-h-[min(400px,calc(100vh-32px))] w-[min(420px,calc(100vw-32px))] content-start gap-[var(--space-3)] overflow-y-auto overflow-x-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]";
+    "floating-notice-expanded min-h-[123px] max-h-[min(400px,calc(100vh-32px))] w-[min(420px,calc(100vw-32px))] rounded-[var(--radius-xl)] p-[var(--space-3)]";
+  const shellClassName = floatingNoticeShellClassName({
+    className,
+    collapsed,
+    expandedClasses,
+    level,
+    positionClassName,
+    positionStrategy,
+    styles,
+  });
 
   return (
     <aside
       aria-label={collapsed ? title : undefined}
       aria-labelledby={collapsed ? undefined : titleID}
-      className={cx(
-        "floating-notice-morph app-region-no-drag z-50",
-        positionStrategy,
-        islandSurfaceClassName(level),
-        collapsed
-          ? cx(
-            "floating-notice-collapsed grid h-12 w-12 place-items-center overflow-hidden rounded-[var(--radius-m)] p-0",
-            styles.collapsedTextClassName,
-          )
-          : expandedClasses,
-        positionClassName,
-        styles.borderClassName,
-        collapsed ? styles.collapsedClassName : undefined,
-        className,
-      )}
+      className={shellClassName}
     >
-      {collapsed ? (
-        <button
-          aria-label={expandLabel}
+      <div className="min-h-0 overflow-hidden">
+        <div
+          aria-hidden={collapsed}
           className={cx(
-            "grid h-full w-full place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent",
-            styles.collapsedTextClassName,
+            "floating-notice-content grid max-h-full min-h-0 min-w-0 content-start gap-[var(--space-3)] overflow-y-auto overflow-x-hidden",
+            collapsed ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100",
           )}
-          onClick={() => {
-            onCollapsedChange(false);
-          }}
-          type="button"
+          data-testid="floating-notice-content"
+          inert={collapsed}
         >
-          {icon ?? <Maximize2 aria-hidden="true" size={24} strokeWidth={1.7} />}
-        </button>
-      ) : (
-        <>
           <header
             className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[var(--space-2)] leading-none"
             data-testid="floating-notice-header"
@@ -98,9 +87,61 @@ export function FloatingNoticeIsland({
             </button>
           </header>
           {children}
-        </>
-      )}
+        </div>
+      </div>
+      <button
+        aria-label={expandLabel}
+        className={cx(
+          "floating-notice-collapsed-button absolute inset-0 grid place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent",
+          collapsed ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+          styles.collapsedTextClassName,
+        )}
+        data-testid="floating-notice-collapsed-button"
+        inert={!collapsed}
+        onClick={() => {
+          onCollapsedChange(false);
+        }}
+        type="button"
+      >
+        {icon ?? <Maximize2 aria-hidden="true" size={24} strokeWidth={1.7} />}
+      </button>
     </aside>
+  );
+}
+
+function floatingNoticeShellClassName({
+  className,
+  collapsed,
+  expandedClasses,
+  level,
+  positionClassName,
+  positionStrategy,
+  styles,
+}: Readonly<{
+  className: string | undefined;
+  collapsed: boolean;
+  expandedClasses: string;
+  level: IslandLevel;
+  positionClassName: string;
+  positionStrategy: "absolute" | "fixed";
+  styles: (typeof noticeToneStyles)[FloatingNoticeTone];
+}>): string {
+  const sizeClassName = collapsed
+    ? cx(
+        "floating-notice-collapsed grid-rows-[0fr] h-12 w-12 rounded-[var(--radius-m)] p-0",
+        styles.collapsedTextClassName,
+      )
+    : cx("grid-rows-[1fr]", expandedClasses);
+  return cx(
+    "floating-notice-morph app-region-no-drag z-50 grid overflow-hidden",
+    positionStrategy,
+    islandSurfaceClassName(level),
+    sizeClassName,
+    positionClassName,
+    styles.borderClassName,
+    collapsed ? styles.collapsedClassName : undefined,
+    "overflow-hidden",
+    className,
   );
 }
 
