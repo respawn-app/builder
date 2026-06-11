@@ -2,10 +2,20 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AttentionItem, TaskTransition } from "../../api";
-import { Button, TextArea } from "../../ui";
+import { Button, Island } from "../../ui";
+import { fieldInputClassName } from "../../ui/Field";
 import { cx } from "../../ui/classes";
 import { usePendingAsks } from "./useTaskDetailData";
 import type { useTaskMutations } from "./useTaskDetailData";
+
+type QuestionSelectionState = Readonly<{
+  answer: string;
+  askID: string;
+  selectedOption: number | null;
+  userSelected: boolean;
+}>;
+
+const emptySuggestions: readonly string[] = [];
 
 export function QuestionBox({
   attention,
@@ -22,84 +32,179 @@ export function QuestionBox({
   const asks = usePendingAsks(attention.sessionID);
   const pendingAsk = asks.data?.find((ask) => ask.askID === attention.askID);
   const question = attention.message.length > 0 ? attention.message : pendingAsk?.question;
-  const [answer, setAnswer] = useState("");
-  const [selectedOption, setSelectedOption] = useState(0);
+  const suggestions = pendingAsk?.suggestions ?? emptySuggestions;
+  const recommendedOption = recommendedOptionNumber(suggestions, pendingAsk?.recommendedOptionIndex ?? 0);
+
+  return (
+    <Island aria-label={t("task.question")}>
+      <QuestionForm
+        answerQuestion={mutations.answerQuestion}
+        attention={attention}
+        disabled={disabled}
+        question={question}
+        recommendedOption={recommendedOption}
+        suggestions={suggestions}
+        taskId={taskId}
+      />
+    </Island>
+  );
+}
+
+function QuestionForm({
+  answerQuestion,
+  attention,
+  disabled,
+  question,
+  recommendedOption,
+  suggestions,
+  taskId,
+}: Readonly<{
+  answerQuestion: ReturnType<typeof useTaskMutations>["answerQuestion"];
+  attention: AttentionItem;
+  disabled: boolean;
+  question: string | undefined;
+  recommendedOption: number | null;
+  suggestions: readonly string[];
+  taskId: string;
+}>) {
+  const { t } = useTranslation();
+  const [selectionState, setSelectionState] = useState<QuestionSelectionState>(() =>
+    emptyQuestionSelection(attention.askID),
+  );
+  const selection = selectionForAsk(selectionState, attention.askID);
+  const selectedOption = selection.userSelected ? selection.selectedOption : recommendedOption;
+  const answer = selection.answer;
   const groupName = useId();
+  const answerID = useId();
+  const neitherSelected = selectedOption === 0;
+  const canSubmit = selectedOption === null ? false : selectedOption > 0 || answer.trim().length > 0;
+  const submitDisabled = disabled || answerQuestion.isPending || !canSubmit;
 
   async function submit(): Promise<void> {
     const freeformAnswer = selectedOption === 0 ? answer : "";
-    await mutations.answerQuestion.mutateAsync({
+    const selectedOptionNumber = selectedOption ?? 0;
+    await answerQuestion.mutateAsync({
       clientRequestID: `gui-question-${attention.askID}-${Date.now().toString()}`,
       taskID: taskId,
       runID: attention.runID,
       askID: attention.askID,
-      selectedOptionNumber: selectedOption,
+      selectedOptionNumber,
       freeformAnswer,
     });
-    setAnswer("");
-    setSelectedOption(0);
+    setSelectionState({ answer: "", askID: attention.askID, selectedOption: null, userSelected: true });
   }
 
   return (
     <form
-      className="grid gap-[var(--space-3)] rounded-[var(--radius-l)] border border-[var(--color-warning)] bg-[color-mix(in_srgb,var(--color-warning)_12%,transparent)] p-[var(--space-3)]"
+      className="grid gap-[var(--space-3)]"
       onSubmit={(event) => {
         event.preventDefault();
-        void submit();
+        if (canSubmit) {
+          void submit();
+        }
       }}
     >
-      <h3>{t("task.question")}</h3>
-      {question !== undefined && question.length > 0 ? <p>{question}</p> : null}
+      <h3 className="m-0">{t("task.question")}</h3>
+      {question !== undefined && question.length > 0 ? <p className="m-0">{question}</p> : null}
       <fieldset className="m-0 grid gap-[var(--space-2)] border-0 p-0">
         <legend className="sr-only">{t("task.optionNumber")}</legend>
-        {(pendingAsk?.suggestions ?? []).map((suggestion, optionIndex) => (
-          <label
-            className={cx(
-              "rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-2)] text-left text-[var(--color-on-island)]",
-              selectedOption === optionIndex + 1 &&
-                "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_14%,transparent)]",
-            )}
-            key={suggestion}
-          >
-            <input
-              checked={selectedOption === optionIndex + 1}
-              className="mr-[var(--space-2)]"
-              name={groupName}
-              onChange={() => {
-                setSelectedOption(optionIndex + 1);
-                setAnswer("");
-              }}
-              type="radio"
-            />
-            {suggestion} {pendingAsk?.recommendedOptionIndex === optionIndex + 1 ? t("task.recommended") : ""}
-          </label>
+        {suggestions.map((suggestion, optionIndex) => (
+          <QuestionOption
+            checked={selectedOption === optionIndex + 1}
+            key={`${optionIndex.toString()}:${suggestion}`}
+            name={groupName}
+            onChange={() => {
+              setSelectionState({
+                answer: "",
+                askID: attention.askID,
+                selectedOption: optionIndex + 1,
+                userSelected: true,
+              });
+            }}
+            recommended={recommendedOption === optionIndex + 1}
+            text={suggestion}
+          />
         ))}
+        <QuestionOption
+          checked={neitherSelected}
+          name={groupName}
+          onChange={() => {
+            setSelectionState({
+              answer,
+              askID: attention.askID,
+              selectedOption: 0,
+              userSelected: true,
+            });
+          }}
+          recommended={false}
+          text={t("task.neitherOption")}
+        />
       </fieldset>
-      <TextArea
-        label={t("task.answer")}
-        onChange={(event) => {
-          setAnswer(event.target.value);
-          if (event.target.value.trim().length > 0) {
-            setSelectedOption(0);
-          }
-        }}
-        placeholder={t("task.answerPlaceholder")}
-        rows={3}
-        value={answer}
-      />
-      <Button
-        disabled={
-          disabled ||
-          mutations.answerQuestion.isPending ||
-          (answer.trim().length === 0 && selectedOption === 0)
-        }
-        type="submit"
-        variant="primary"
-      >
+      {neitherSelected ? (
+        <textarea
+          aria-label={t("task.commentary")}
+          className={cx(fieldInputClassName, "min-h-24")}
+          id={answerID}
+          onChange={(event) => {
+            setSelectionState({
+              answer: event.target.value,
+              askID: attention.askID,
+              selectedOption: 0,
+              userSelected: true,
+            });
+          }}
+          placeholder={t("task.answerPlaceholder")}
+          rows={3}
+          value={answer}
+        />
+      ) : null}
+      <Button disabled={submitDisabled} type="submit" variant="primary">
         {t("task.submitAnswer")}
       </Button>
     </form>
   );
+}
+
+function QuestionOption({
+  checked,
+  name,
+  onChange,
+  recommended,
+  text,
+}: Readonly<{
+  checked: boolean;
+  name: string;
+  onChange: () => void;
+  recommended: boolean;
+  text: string;
+}>) {
+  const { t } = useTranslation();
+  return (
+    <label
+      className={cx(
+        "flex items-start gap-[var(--space-2)] rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-2)] text-left text-[var(--color-on-island)]",
+        checked && "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)]",
+      )}
+    >
+      <input checked={checked} className="mt-1" name={name} onChange={onChange} type="radio" />
+      <span className={cx("min-w-0", recommended && "font-bold text-[var(--color-primary)]")}>
+        {text}
+        {recommended ? <span className="ml-[var(--space-2)] text-xs font-bold">({t("task.recommended")})</span> : null}
+      </span>
+    </label>
+  );
+}
+
+function recommendedOptionNumber(suggestions: readonly string[], recommendedOptionIndex: number): number | null {
+  return recommendedOptionIndex >= 1 && recommendedOptionIndex <= suggestions.length ? recommendedOptionIndex : null;
+}
+
+function emptyQuestionSelection(askID: string): QuestionSelectionState {
+  return { answer: "", askID, selectedOption: null, userSelected: false };
+}
+
+function selectionForAsk(selection: QuestionSelectionState, askID: string): QuestionSelectionState {
+  return selection.askID === askID ? selection : emptyQuestionSelection(askID);
 }
 
 export function ApprovalBox({
@@ -119,9 +224,9 @@ export function ApprovalBox({
   const transition = transitions.find((item) => item.id === attention.taskTransitionID);
   const stale = transition !== undefined && transition.version !== currentVersion;
   return (
-    <section className="grid gap-[var(--space-3)] rounded-[var(--radius-l)] border border-[var(--color-warning)] bg-[color-mix(in_srgb,var(--color-warning)_12%,transparent)] p-[var(--space-3)]">
-      <h3>{t("task.approval")}</h3>
-      <p>{attention.message}</p>
+    <Island aria-label={t("task.approval")} className="grid gap-[var(--space-3)]">
+      <h3 className="m-0">{t("task.approval")}</h3>
+      <p className="m-0">{attention.message}</p>
       {transition !== undefined ? (
         <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[var(--space-3)] gap-y-[var(--space-2)]">
           <dt>{t("task.approvalSnapshot")}</dt>
@@ -165,6 +270,6 @@ export function ApprovalBox({
       >
         {t("task.approve")}
       </Button>
-    </section>
+    </Island>
   );
 }

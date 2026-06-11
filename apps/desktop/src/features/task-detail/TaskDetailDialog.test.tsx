@@ -4,7 +4,7 @@ import {
   type NativeTaskDetailChanged,
   type NativeTaskDetailTarget,
 } from "@builder/desktop-native-bridge";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../../App";
 import type { JsonObject, JsonValue } from "../../api/json";
@@ -30,9 +30,13 @@ describe("TaskDetailDialog", () => {
 
     render(<App services={services} />);
 
-    const recommendedOption = await screen.findByRole("radio", { name: /Use option A/u });
-    expect(recommendedOption).toBeInTheDocument();
-    fireEvent.click(recommendedOption);
+    const question = await screen.findByRole("region", { name: "Question" });
+    expect(screen.queryByRole("region", { name: "Inbox" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Answer")).not.toBeInTheDocument();
+    const recommendedOption = await within(question).findByRole("radio", { name: /Use option A/u });
+    expect(recommendedOption).toBeChecked();
+    expect(within(question).getByRole("radio", { name: "Neither" })).toBeInTheDocument();
+    expect(within(question).getByRole("button", { name: "Submit answer" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
 
     await waitFor(() => {
@@ -82,6 +86,36 @@ describe("TaskDetailDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open in CLI" }));
     await waitFor(() => {
       expect(copied).toEqual(["builder --session=session-2"]);
+    });
+  });
+
+  it("requires commentary when answering a task question with Neither", async () => {
+    window.history.pushState(null, "", "/tasks/task-1");
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.task.get", result: taskDetailResponse },
+      { method: "workflow.task.activity.list", result: activityResponse },
+      { method: "ask.listPendingBySession", result: pendingAskResponse },
+      { method: "workflow.task.question.answer", result: {} },
+    ]);
+
+    render(<App services={services} />);
+
+    const question = await screen.findByRole("region", { name: "Question" });
+    expect(await within(question).findByRole("radio", { name: /Use option A/u })).toBeChecked();
+    fireEvent.click(within(question).getByRole("radio", { name: "Neither" }));
+    expect(within(question).getByRole("button", { name: "Submit answer" })).toBeDisabled();
+
+    fireEvent.change(within(question).getByRole("textbox", { name: "Commentary" }), {
+      target: { value: "Use a different path." },
+    });
+    fireEvent.click(within(question).getByRole("button", { name: "Submit answer" }));
+
+    await waitFor(() => {
+      const params = callParams(services.transport.calls, "workflow.task.question.answer");
+      expect(params.ask_id).toBe("ask-1");
+      expect(params.freeform_answer).toBe("Use a different path.");
+      expect(params.selected_option_number).toBeUndefined();
     });
   });
 

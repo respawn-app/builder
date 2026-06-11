@@ -234,6 +234,7 @@ export const englishResources = {
       submitAnswer: "Submit answer",
       optionNumber: "Option number",
       recommended: "Recommended",
+      neitherOption: "Neither",
       approval: "Approval",
       approve: "Approve",
       approvalSnapshot: "Approval snapshot",
