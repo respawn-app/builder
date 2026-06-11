@@ -4,13 +4,14 @@
   "minimumReleaseAgeExclude": ["@types/node", "vite", "@rolldown/*"],
   "directDependencyAllowlist": {
     "@builder/apps": {
-      "devDependencies": ["prettier"]
+      "devDependencies": ["postcss", "prettier"]
     },
     "@builder/desktop": {
       "dependencies": [
         "@builder/desktop-native-bridge",
         "@dnd-kit/core",
         "@dnd-kit/sortable",
+        "@fontsource-variable/montserrat",
         "@hookform/resolvers",
         "@radix-ui/react-checkbox",
         "@radix-ui/react-context-menu",
