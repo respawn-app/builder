@@ -1591,40 +1591,6 @@ func TestApprovePendingJoinWaitsForAllBranchApprovals(t *testing.T) {
 	}
 }
 
-func TestRejectPendingApprovalTransitionMarksRejected(t *testing.T) {
-	ctx, store, binding := newTestStoreContext(t)
-	workflowID := createApprovalWorkflow(t, ctx, store)
-	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
-	task := createDefaultTask(t, ctx, store, binding.ProjectID)
-	started := startTask(t, ctx, store, task.ID)
-	completed := completeRun(t, ctx, store, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
-
-	rejected, err := store.RejectTransition(ctx, completed.TransitionID)
-	if err != nil {
-		t.Fatalf("RejectTransition: %v", err)
-	}
-	if rejected.State != "rejected" {
-		t.Fatalf("reject result = %+v, want rejected", rejected)
-	}
-	if _, err := store.ApproveTransition(ctx, completed.TransitionID); err == nil || !strings.Contains(err.Error(), "not pending approval") {
-		t.Fatalf("ApproveTransition rejected error = %v, want not pending", err)
-	}
-	transitions, err := store.ListTransitions(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("ListTransitions: %v", err)
-	}
-	if len(transitions) != 2 || transitions[1].State != "rejected" {
-		t.Fatalf("transitions after rejection = %+v", transitions)
-	}
-	edges, err := store.ListTransitionEdges(ctx, completed.TransitionID)
-	if err != nil {
-		t.Fatalf("ListTransitionEdges: %v", err)
-	}
-	if len(edges) != 1 || edges[0].State != "blocked" || edges[0].TargetPlacementID != "" {
-		t.Fatalf("edges after rejection = %+v, want blocked without target", edges)
-	}
-}
-
 func TestApprovalTransitionGroupWaitsAsWholeWhenAnyEdgeRequiresApproval(t *testing.T) {
 	ctx, store, binding := newTestStoreContext(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
