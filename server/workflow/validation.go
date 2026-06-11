@@ -750,16 +750,22 @@ func (s *validationState) validatePriorParameterReference(edge Edge, param Promp
 		return
 	}
 	consumer := s.priorParameterConsumerName(edge)
+	matchedAny := false
 	guaranteed := []TransitionGroup{}
 	for _, group := range s.def.TransitionGroups {
 		if strings.TrimSpace(string(group.TransitionID)) != transitionKey {
 			continue
 		}
+		matchedAny = true
 		if s.transitionGroupDominates(group.ID, source.ID) {
 			guaranteed = append(guaranteed, group)
 		}
 	}
 	switch {
+	case !matchedAny:
+		s.addHard(CodeInvalidTemplatePlaceholder, fmt.Sprintf(
+			"prompt for %s references parameter %q from transition %q, but no %q transition exists in this workflow. Check the transition key for a typo, or define the transition that produces it.",
+			consumer, parameterKey, transitionKey, transitionKey), ref)
 	case len(guaranteed) == 0:
 		s.addHard(CodeInvalidTemplatePlaceholder, fmt.Sprintf(
 			"prompt for %s references parameter %q from transition %q, but %q is not guaranteed to run before %s: another branch can reach %s without it. Reference a parameter that every incoming branch provides, or remove the bypassing branch.",
