@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, vi } from "vitest";
 
 import { FloatingNoticeIsland } from "./FloatingNoticeIsland";
 
 describe("FloatingNoticeIsland", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps expanded content mounted while collapsed", () => {
     const onCollapsedChange = vi.fn();
 
@@ -47,7 +51,8 @@ describe("FloatingNoticeIsland", () => {
     expect(screen.getByTestId("floating-notice-content")).not.toHaveAttribute("aria-hidden", "true");
   });
 
-  it("keeps custom-sized expanded content mounted across collapse state changes", () => {
+  it("keeps custom-sized expanded content hidden until the shell finishes expanding", () => {
+    vi.useFakeTimers();
     const { rerender } = render(
       <FloatingNoticeIsland
         collapsed
@@ -80,6 +85,22 @@ describe("FloatingNoticeIsland", () => {
     );
 
     expect(screen.getByTestId("floating-notice-content")).toBe(collapsedContent);
+    expect(screen.getByTestId("floating-notice-shell")).toHaveAttribute("data-state", "expanding");
+    expect(collapsedContent).toHaveAttribute("aria-hidden", "true");
+    expect(collapsedContent).toHaveAttribute("inert");
+
+    act(() => {
+      vi.advanceTimersByTime(349);
+    });
+
+    expect(collapsedContent).toHaveAttribute("aria-hidden", "true");
+    expect(collapsedContent).toHaveAttribute("inert");
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(screen.getByTestId("floating-notice-shell")).toHaveAttribute("data-state", "expanded");
     expect(collapsedContent).not.toHaveAttribute("aria-hidden", "true");
     expect(collapsedContent).not.toHaveAttribute("inert");
     expect(screen.getByText("Custom notice body")).toBeInTheDocument();

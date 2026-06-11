@@ -565,14 +565,6 @@
     transition: opacity var(--motion-fast);
   }
 
-  .floating-notice-expanded .floating-notice-content {
-    transition-delay: 180ms;
-  }
-
-  .floating-notice-collapsed .floating-notice-content {
-    transition-delay: 0ms;
-  }
-
   .route-transition-frame {
     animation: route-fade-scale var(--motion-fast) both;
     transform-origin: center;

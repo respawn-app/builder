@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Maximize2, Minus } from "lucide-react";
 
 import { cx } from "./classes";
@@ -22,6 +22,11 @@ export type FloatingNoticeIslandProps = Readonly<{
   tone?: FloatingNoticeTone;
 }>;
 
+type FloatingNoticePhase = "collapsed" | "collapsing" | "expanding" | "expanded";
+
+const floatingNoticeMorphMs = 350;
+const floatingNoticeFadeMs = 140;
+
 export function FloatingNoticeIsland({
   children,
   className,
@@ -38,13 +43,32 @@ export function FloatingNoticeIsland({
   tone = "danger",
 }: FloatingNoticeIslandProps) {
   const titleID = useId();
+  const [phase, setPhase] = useState<FloatingNoticePhase>(() => (collapsed ? "collapsed" : "expanded"));
+  const previousCollapsed = useRef(collapsed);
+  useEffect(() => {
+    if (previousCollapsed.current === collapsed) {
+      return undefined;
+    }
+    previousCollapsed.current = collapsed;
+    const motionDelay = prefersReducedMotion() ? 0 : collapsed ? floatingNoticeFadeMs : floatingNoticeMorphMs;
+    setPhase(collapsed ? "collapsing" : "expanding");
+    const timer = window.setTimeout(() => {
+      setPhase(collapsed ? "collapsed" : "expanded");
+    }, motionDelay);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [collapsed]);
   const styles = noticeToneStyles[tone];
   const expandedClasses =
     expandedClassName ??
     "floating-notice-expanded min-h-[123px] max-h-[min(400px,calc(100vh-32px))] w-[min(420px,calc(100vw-32px))] rounded-[var(--radius-xl)] p-[var(--space-3)]";
+  const shellCollapsed = phase === "collapsed";
+  const contentVisible = phase === "expanded";
+  const collapsedButtonVisible = phase === "collapsed";
   const shellClassName = floatingNoticeShellClassName({
     className,
-    collapsed,
+    collapsed: shellCollapsed,
     expandedClasses,
     level,
     positionClassName,
@@ -54,19 +78,21 @@ export function FloatingNoticeIsland({
 
   return (
     <aside
-      aria-label={collapsed ? title : undefined}
-      aria-labelledby={collapsed ? undefined : titleID}
+      aria-label={shellCollapsed ? title : undefined}
+      aria-labelledby={shellCollapsed ? undefined : titleID}
       className={shellClassName}
+      data-state={phase}
+      data-testid="floating-notice-shell"
     >
       <div className="min-h-0 overflow-hidden">
         <div
-          aria-hidden={collapsed}
+          aria-hidden={!contentVisible}
           className={cx(
             "floating-notice-content grid max-h-full min-h-0 min-w-0 content-start gap-[var(--space-3)] overflow-y-auto overflow-x-hidden",
-            collapsed ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100",
+            contentVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
           )}
           data-testid="floating-notice-content"
-          inert={collapsed}
+          inert={!contentVisible}
         >
           <header
             className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[var(--space-2)] leading-none"
@@ -93,11 +119,11 @@ export function FloatingNoticeIsland({
         aria-label={expandLabel}
         className={cx(
           "floating-notice-collapsed-button absolute inset-0 grid place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent",
-          collapsed ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+          collapsedButtonVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
           styles.collapsedTextClassName,
         )}
         data-testid="floating-notice-collapsed-button"
-        inert={!collapsed}
+        inert={!collapsedButtonVisible}
         onClick={() => {
           onCollapsedChange(false);
         }}
@@ -106,6 +132,14 @@ export function FloatingNoticeIsland({
         {icon ?? <Maximize2 aria-hidden="true" size={24} strokeWidth={1.7} />}
       </button>
     </aside>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 }
 
