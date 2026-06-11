@@ -38,14 +38,11 @@ export function KanbanGroup({
 }>) {
   return (
     <section
-      className="inline-grid h-full min-h-0 w-max grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-3)] align-top"
+      className="inline-grid h-full min-h-0 w-max grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-2)] align-top"
       role="listitem"
     >
       <header>
-        <p className="m-0 text-[0.72rem] font-extrabold uppercase tracking-[0.16em] text-[var(--color-muted)]">
-          {group.key}
-        </p>
-        <h2 className="m-0 text-[1rem]">{group.name}</h2>
+        <h2 className="m-0 text-[1rem] font-bold">{group.name}</h2>
       </header>
       <div className="flex h-full min-h-0 gap-[var(--space-2)]">
         {children}
