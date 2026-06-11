@@ -4,6 +4,7 @@ import { Maximize2 } from "lucide-react";
 
 import { formatRelativeTime } from "../../app/formatters";
 import { Badge, Button, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Spinner } from "../../ui";
+import { cx } from "../../ui/classes";
 import {
   type BoardCardDragPayload,
   type BoardColumnDropState,
@@ -44,12 +45,15 @@ export function KanbanGroup({
 }>) {
   return (
     <section
-      className="inline-grid h-full min-h-0 w-max grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-2)] align-top"
+      className={cx(
+        "inline-grid h-full min-h-0 w-max align-top",
+        hideHeader ? "grid-rows-[0_minmax(0,1fr)] gap-0" : "grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-2)]",
+      )}
       role="listitem"
     >
       <header
         aria-hidden={hideHeader ? true : undefined}
-        className={hideHeader ? "invisible" : undefined}
+        className={hideHeader ? "invisible w-0 min-w-0 max-w-0 overflow-hidden" : undefined}
         data-testid={`kanban-group-header-${group.id}`}
       >
         <h2 className="m-0 text-[1rem] font-bold">{group.name}</h2>
@@ -181,7 +185,7 @@ function CollapsedColumnHeader({
 }>) {
   const { t } = useTranslation();
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] justify-items-center gap-[var(--space-2)]">
+    <div className="grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)] justify-items-center gap-[var(--space-2)]">
       <button
         aria-label={t("board.expandColumn", { name: column.name })}
         className="grid size-[28px] place-items-center rounded-full text-[var(--color-on-island)] opacity-60 outline-none transition-[background-color,box-shadow,opacity] duration-150 hover:bg-[var(--color-island-2)] hover:opacity-85 focus-visible:opacity-100 focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
@@ -191,8 +195,8 @@ function CollapsedColumnHeader({
         <Maximize2 aria-hidden="true" size={16} strokeWidth={1.7} />
       </button>
       <div className="relative min-h-0 w-full overflow-hidden">
-        <div className="board-column-collapsed-label flex items-center justify-center text-center">
-          <h2 className="m-0 max-w-[180px] truncate text-[1rem]">{column.name}</h2>
+        <div className="board-column-collapsed-label flex items-center justify-start text-left">
+          <h2 className="m-0 max-w-[180px] truncate text-[1rem] leading-none">{column.name}</h2>
         </div>
       </div>
     </div>

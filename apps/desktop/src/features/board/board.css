@@ -73,9 +73,9 @@
 .board-column-collapsed-label {
   position: absolute;
   top: 0;
-  left: calc(50% + 20px);
+  left: calc(50% + 0.5rem);
   width: min(280px, calc(100vh - 180px));
-  height: 40px;
+  height: 1rem;
   transform: rotate(90deg);
   transform-origin: left top;
 }
