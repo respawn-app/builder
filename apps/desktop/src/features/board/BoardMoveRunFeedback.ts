@@ -11,7 +11,7 @@ export type BoardMoveRunTracker = Readonly<{
 export function useBoardMoveRunFeedback(): BoardMoveRunTracker {
   const { t } = useTranslation();
   const { push } = useStatusController();
-  const [pendingMoveRunIDs, setPendingMoveRunIDs] = useState<ReadonlySet<string>>(() => new Set());
+  const [, setPendingMoveRunIDs] = useState<ReadonlySet<string>>(() => new Set());
 
   const trackMoveRunIDs = useCallback((result: Readonly<{ runIDs: readonly string[] }>): void => {
     const runIDs = result.runIDs.map((runID) => runID.trim()).filter((runID) => runID.length > 0);
@@ -29,18 +29,19 @@ export function useBoardMoveRunFeedback(): BoardMoveRunTracker {
       }
       // Gate the notification on the membership check inside the state updater so
       // concurrent observations of the same runID can never both pass a stale
-      // snapshot and queue duplicate notifications.
-      let removed = false;
+      // snapshot and queue duplicate notifications. Capturing the rebuilt set marks
+      // the single call that actually removed the run ID.
+      let removedRunIDs: ReadonlySet<string> | undefined;
       setPendingMoveRunIDs((current) => {
         if (!current.has(runID)) {
           return current;
         }
-        removed = true;
         const next = new Set(current);
         next.delete(runID);
+        removedRunIDs = next;
         return next;
       });
-      if (!removed) {
+      if (removedRunIDs === undefined) {
         return;
       }
       push({
