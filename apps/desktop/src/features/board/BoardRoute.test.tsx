@@ -108,10 +108,12 @@ describe("BoardRoute", () => {
   });
 
   it("deletes a task from the card context menu", async () => {
-    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1&taskId=task-1");
     const services = createTestServices([
       ...startupRoutes,
       ...boardRoutes(),
+      { method: "workflow.task.get", result: taskDetailResponseForCancel() },
+      { method: "workflow.task.activity.list", result: emptyActivityResponse },
       { method: "workflow.task.delete", result: {} },
     ]);
 
@@ -130,15 +132,15 @@ describe("BoardRoute", () => {
         params: { task_id: "task-1" },
       });
     });
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("taskId")).toBe("");
+    });
   });
 
   it("opens native confirmation before deleting a task when dialog windows are available", async () => {
     window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
     const opened: NativeDialogWindowOptions[] = [];
-    const services = createTestServices(
-      [...startupRoutes, ...boardRoutes()],
-      nativeDialogBridge(opened),
-    );
+    const services = createTestServices([...startupRoutes, ...boardRoutes()], nativeDialogBridge(opened));
 
     render(<App services={services} />);
 
@@ -406,9 +408,7 @@ describe("BoardRoute", () => {
           board: {
             ...boardResponse.board,
             columns: boardResponse.board.columns.map((column) =>
-              column.node.node_id === "node-1"
-                ? { ...column, task_count: 1 }
-                : { ...column, task_count: 0 },
+              column.node.node_id === "node-1" ? { ...column, task_count: 1 } : { ...column, task_count: 0 },
             ),
             cards: [],
           },
@@ -427,7 +427,9 @@ describe("BoardRoute", () => {
     act(() => {
       visibility.reveal("Implement");
     });
-    expect(await within(implementColumn).findByRole("article", { name: "Waiting on approval" })).toBeInTheDocument();
+    expect(
+      await within(implementColumn).findByRole("article", { name: "Waiting on approval" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Write focused tests" })).not.toBeInTheDocument();
   });
 
@@ -1011,9 +1013,11 @@ describe("BoardRoute", () => {
     fireEvent.mouseEnter(menu);
 
     expect(screen.getByRole("heading", { name: "Workflows" })).toBeInTheDocument();
-    expect(within(screen.getByTestId("board-hover-menu-header")).getByRole("button", {
-      name: "Link workflow",
-    })).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("board-hover-menu-header")).getByRole("button", {
+        name: "Link workflow",
+      }),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Delivery" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Edit workflow Delivery" })).toBeInTheDocument();
 
@@ -1449,7 +1453,9 @@ describe("BoardRoute", () => {
     render(<App services={services} />);
 
     await screen.findByRole("heading", { name: "Core" });
-    expect(within(await expandBoardHoverMenu()).getByRole("button", { name: "Link workflow" })).toBeDisabled();
+    expect(
+      within(await expandBoardHoverMenu()).getByRole("button", { name: "Link workflow" }),
+    ).toBeDisabled();
   });
 
   it("creates reusable workflows from the board link sidebar and opens the project-context editor", async () => {

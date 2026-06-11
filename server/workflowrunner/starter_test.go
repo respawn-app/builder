@@ -194,7 +194,9 @@ func TestWorkflowRuntimeStarterCancelTaskRunsStopsLiveRuntimeAfterTaskCancel(t *
 	if err := fixture.starter.CancelTaskRuns(context.Background(), task.ID); err != nil {
 		t.Fatalf("CancelTaskRuns: %v", err)
 	}
-	client.waitForReturn(t)
+	if !client.returned() {
+		t.Fatal("CancelTaskRuns returned before live runtime stopped")
+	}
 }
 
 func TestSchedulerRunsNextAgentWithBoundInputsAndTaskWorktreeContext(t *testing.T) {
@@ -1049,5 +1051,14 @@ func (c *blockingClient) waitForReturn(t *testing.T) {
 	case <-c.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for fake model return")
+	}
+}
+
+func (c *blockingClient) returned() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
 	}
 }

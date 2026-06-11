@@ -47,6 +47,7 @@ export type BoardRouteProps = Readonly<{
 export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId }: BoardRouteProps) {
   const { t } = useTranslation();
   const { push } = useStatusController();
+  const navigation = useAppNavigation();
   const reportBoardLoadError = useCallback(
     (error: unknown) => {
       push({
@@ -59,10 +60,29 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
     },
     [push, t],
   );
+  const reportBoardNavigationError = useCallback(
+    (error: unknown) => {
+      push({
+        id: "board-navigation-error",
+        tone: "danger",
+        title: t("board.navigationFailed"),
+        body: errorMessage(error),
+        dismissible: false,
+      });
+    },
+    [push, t],
+  );
   const boardQuery = useBoard(projectId, workflowId);
   const board = boardQuery.data;
+  const handleSelectedTaskDeleted = useCallback(() => {
+    void navigation
+      .closeProjectTask(projectId, board?.selectedWorkflow.id ?? workflowId)
+      .catch(reportBoardNavigationError);
+  }, [board?.selectedWorkflow.id, navigation, projectId, reportBoardNavigationError, workflowId]);
   useProjectBoardSubscription(projectId, workflowId, {
     onBackgroundError: reportBoardLoadError,
+    onSelectedTaskDeleted: handleSelectedTaskDeleted,
+    selectedTaskID: selectedTaskId,
     selectedWorkflowID: board?.selectedWorkflow.id ?? workflowId,
   });
 
@@ -178,7 +198,9 @@ function BoardContent({
       taskID: selectedTaskId,
     }).then((result) => {
       if (active && result.status === "canceled" && result.reason === "closed") {
-        void navigation.closeProjectTask(board.projectID, board.selectedWorkflow.id).catch(reportNavigationError);
+        void navigation
+          .closeProjectTask(board.projectID, board.selectedWorkflow.id)
+          .catch(reportNavigationError);
       }
     });
     return () => {
@@ -255,6 +277,11 @@ function BoardContent({
   async function confirmDeleteTask(target: TaskDeleteTarget, close: () => void): Promise<void> {
     try {
       await actions.delete.mutateAsync(target.taskID);
+      if (target.taskID === selectedTaskId) {
+        await navigation
+          .closeProjectTask(board.projectID, board.selectedWorkflow.id)
+          .catch(reportNavigationError);
+      }
       close();
     } catch (error) {
       reportDeleteError(error);
@@ -332,7 +359,9 @@ function BoardContent({
   }
 
   function openTask(taskID: string): void {
-    void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID).catch(reportNavigationError);
+    void navigation
+      .openProjectTask(board.projectID, board.selectedWorkflow.id, taskID)
+      .catch(reportNavigationError);
   }
 
   function selectWorkflow(workflowID: string): void {
@@ -340,7 +369,9 @@ function BoardContent({
   }
 
   function editWorkflow(workflowID: string): void {
-    void navigation.openWorkflowEditor({ projectID: board.projectID, workflowID }).catch(reportNavigationError);
+    void navigation
+      .openWorkflowEditor({ projectID: board.projectID, workflowID })
+      .catch(reportNavigationError);
   }
 
   function openNewTask(): void {
@@ -509,8 +540,7 @@ function BoardHorizontalScrollbar({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(syncMetrics);
     };
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleSync);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleSync);
     if (observer !== null) {
       observer.observe(scrollport);
       if (scrollport.firstElementChild instanceof Element) {

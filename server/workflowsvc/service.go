@@ -17,20 +17,25 @@ import (
 )
 
 type Service struct {
-	store         *workflowstore.Store
-	view          *workflowview.Service
-	roleResolver  workflow.RoleResolver
-	taskWorktrees taskWorktreeEnsurer
-	runtimeCancel taskRuntimeCanceler
-	schedulerWake schedulerNotifier
-	events        *workflowProjectEventBroker
-	prompts       pendingPromptResponder
-	approve       transitionApprover
-	questionMemo  *requestmemo.Memo[taskQuestionAnswerMemoRequest, struct{}]
+	store               *workflowstore.Store
+	view                *workflowview.Service
+	roleResolver        workflow.RoleResolver
+	taskWorktrees       taskWorktreeEnsurer
+	taskWorktreeCleanup taskWorktreeDeleter
+	runtimeCancel       taskRuntimeCanceler
+	schedulerWake       schedulerNotifier
+	events              *workflowProjectEventBroker
+	prompts             pendingPromptResponder
+	approve             transitionApprover
+	questionMemo        *requestmemo.Memo[taskQuestionAnswerMemoRequest, struct{}]
 }
 
 type taskWorktreeEnsurer interface {
 	EnsureTaskWorktree(ctx context.Context, taskID string) error
+}
+
+type taskWorktreeDeleter interface {
+	DeleteTaskWorktree(ctx context.Context, taskID string) error
 }
 
 type taskRuntimeCanceler interface {
@@ -66,6 +71,12 @@ type Option func(*Service)
 func WithTaskWorktreeEnsurer(ensurer taskWorktreeEnsurer) Option {
 	return func(s *Service) {
 		s.taskWorktrees = ensurer
+	}
+}
+
+func WithTaskWorktreeDeleter(deleter taskWorktreeDeleter) Option {
+	return func(s *Service) {
+		s.taskWorktreeCleanup = deleter
 	}
 }
 
@@ -661,6 +672,11 @@ func (s *Service) DeleteWorkflowTask(ctx context.Context, req serverapi.Workflow
 	}
 	if s.runtimeCancel != nil {
 		if err := s.runtimeCancel.CancelTaskRuns(ctx, workflow.TaskID(req.TaskID)); err != nil {
+			return err
+		}
+	}
+	if s.taskWorktreeCleanup != nil {
+		if err := s.taskWorktreeCleanup.DeleteTaskWorktree(ctx, req.TaskID); err != nil {
 			return err
 		}
 	}

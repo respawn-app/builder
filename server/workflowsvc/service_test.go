@@ -508,12 +508,17 @@ func TestServiceDeleteTaskCancelsRuntimeAndPublishesEvent(t *testing.T) {
 	defer func() { _ = sub.Close() }()
 	canceler := &recordingTaskRuntimeCanceler{}
 	service.runtimeCancel = canceler
+	worktreeCleanup := &recordingTaskWorktreeDeleter{}
+	service.taskWorktreeCleanup = worktreeCleanup
 
 	if err := service.DeleteWorkflowTask(ctx, serverapi.WorkflowTaskDeleteRequest{TaskID: task.Task.ID}); err != nil {
 		t.Fatalf("DeleteWorkflowTask: %v", err)
 	}
 	if len(canceler.taskIDs) != 1 || canceler.taskIDs[0] != workflow.TaskID(task.Task.ID) {
 		t.Fatalf("canceled tasks = %+v", canceler.taskIDs)
+	}
+	if len(worktreeCleanup.taskIDs) != 1 || worktreeCleanup.taskIDs[0] != task.Task.ID {
+		t.Fatalf("worktree cleanup tasks = %+v", worktreeCleanup.taskIDs)
 	}
 	event := nextWorkflowProjectEvent(t, sub)
 	if event.ProjectID != binding.ProjectID || event.WorkflowID != workflowID || event.Resource != "task" || event.Action != "deleted" || !sameStringSet(event.ChangedIDs, []string{task.Task.ID}) {
@@ -578,6 +583,15 @@ func (c *recordingTaskRuntimeCanceler) CancelRun(_ context.Context, runID workfl
 type recordingTaskWorktreeEnsurer struct {
 	taskID string
 	hook   func(string)
+}
+
+type recordingTaskWorktreeDeleter struct {
+	taskIDs []string
+}
+
+func (d *recordingTaskWorktreeDeleter) DeleteTaskWorktree(_ context.Context, taskID string) error {
+	d.taskIDs = append(d.taskIDs, taskID)
+	return nil
 }
 
 type recordingPromptResponder struct {

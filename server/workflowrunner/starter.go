@@ -74,6 +74,7 @@ type Starter struct {
 	mu     sync.Mutex
 	cancel map[workflow.RunID]context.CancelFunc
 	task   map[workflow.RunID]workflow.TaskID
+	done   map[workflow.RunID]chan struct{}
 	closed bool
 	wg     sync.WaitGroup
 }
@@ -106,6 +107,7 @@ func NewStarter(cfg config.App, metadataStore *metadata.Store, store RuntimeStor
 		worktrees:        opts.Worktrees,
 		cancel:           map[workflow.RunID]context.CancelFunc{},
 		task:             map[workflow.RunID]workflow.TaskID{},
+		done:             map[workflow.RunID]chan struct{}{},
 	}, nil
 }
 
@@ -202,15 +204,21 @@ func (s *Starter) registerRun(req workflowscheduler.StartRunRequest, cancel cont
 	}
 	s.cancel[req.RunID] = cancel
 	s.task[req.RunID] = req.TaskID
+	s.done[req.RunID] = make(chan struct{})
 	s.wg.Add(1)
 	return true
 }
 
 func (s *Starter) releaseRegisteredRun(runID workflow.RunID) {
 	s.mu.Lock()
+	done := s.done[runID]
 	delete(s.cancel, runID)
 	delete(s.task, runID)
+	delete(s.done, runID)
 	s.mu.Unlock()
+	if done != nil {
+		close(done)
+	}
 	s.wg.Done()
 }
 
@@ -244,14 +252,25 @@ func (s *Starter) Close() error {
 func (s *Starter) CancelTaskRuns(ctx context.Context, taskID workflow.TaskID) error {
 	s.mu.Lock()
 	cancels := []context.CancelFunc{}
+	done := []<-chan struct{}{}
 	for runID, cancel := range s.cancel {
 		if s.task[runID] == taskID && cancel != nil {
 			cancels = append(cancels, cancel)
+			if runDone := s.done[runID]; runDone != nil {
+				done = append(done, runDone)
+			}
 		}
 	}
 	s.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+	for _, runDone := range done {
+		select {
+		case <-runDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return nil
 }
@@ -531,10 +550,15 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 
 func (s *Starter) finish(runID workflow.RunID, generation int64) {
 	s.mu.Lock()
+	done := s.done[runID]
 	delete(s.cancel, runID)
 	delete(s.task, runID)
+	delete(s.done, runID)
 	finished := s.finished
 	s.mu.Unlock()
+	if done != nil {
+		close(done)
+	}
 	if finished != nil {
 		finished(runID, generation)
 	}
