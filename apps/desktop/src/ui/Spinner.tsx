@@ -20,15 +20,11 @@ export function Spinner({ className, size = "md", strokeWidth = 3, testID = "spi
       fill="none"
       viewBox="0 0 24 24"
     >
-      <circle
-        cx="12"
-        cy="12"
-        r="9"
+      <path
+        d="M 12 3 A 9 9 0 1 1 3 12"
         stroke="currentColor"
-        strokeDasharray="42 18"
         strokeLinecap="round"
         strokeWidth={strokeWidth}
-        vectorEffect="non-scaling-stroke"
       />
     </svg>
   );
