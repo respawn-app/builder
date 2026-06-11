@@ -45,23 +45,27 @@ export function boardCardMotionParticipants(
   newSnapshot: BoardCardColumnsSnapshot,
   visibleOldCardIDs: ReadonlySet<string>,
 ): BoardCardMotionParticipants {
-  const oldCounts = cardIDCounts(oldSnapshot);
-  const newCounts = cardIDCounts(newSnapshot);
+  const oldPositions = cardPositions(oldSnapshot);
+  const newPositions = cardPositions(newSnapshot);
   const namesByCardID = new Map<string, string>();
   const revealCardIDs = new Set<string>();
-  const cardIDs = new Set([...oldCounts.keys(), ...newCounts.keys()]);
+  const cardIDs = new Set([...oldPositions.keys(), ...newPositions.keys()]);
 
   for (const cardID of cardIDs) {
-    const oldCount = oldCounts.get(cardID) ?? 0;
-    const newCount = newCounts.get(cardID) ?? 0;
-    if (oldCount > 1 || newCount > 1) {
+    const oldPosition = uniqueCardPosition(oldPositions.get(cardID) ?? []);
+    const newPosition = uniqueCardPosition(newPositions.get(cardID) ?? []);
+    if (oldPosition.kind === "duplicate" || newPosition.kind === "duplicate") {
       continue;
     }
-    if (oldCount === 1 && visibleOldCardIDs.has(cardID) && (newCount === 1 || newCount === 0)) {
+    if (cardMoved(oldPosition, newPosition)) {
       namesByCardID.set(cardID, boardCardViewTransitionName(cardID));
       continue;
     }
-    if (oldCount === 0 && newCount === 1) {
+    if (cardExited(oldPosition, newPosition) && visibleOldCardIDs.has(cardID)) {
+      namesByCardID.set(cardID, boardCardViewTransitionName(cardID));
+      continue;
+    }
+    if (cardEntered(oldPosition, newPosition)) {
       revealCardIDs.add(cardID);
     }
   }
@@ -132,11 +136,7 @@ function cardListsEqual(left: readonly KanbanCardVM[], right: readonly KanbanCar
 }
 
 function cardsEqual(left: KanbanCardVM, right: KanbanCardVM | undefined): boolean {
-  return (
-    right?.id === left.id &&
-    cardContentEqual(left, right) &&
-    cardActionsEqual(left, right)
-  );
+  return right?.id === left.id && cardContentEqual(left, right) && cardActionsEqual(left, right);
 }
 
 function cardContentEqual(left: KanbanCardVM, right: KanbanCardVM): boolean {
@@ -167,12 +167,53 @@ function arrayEqual(left: readonly string[], right: readonly string[]): boolean 
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function cardIDCounts(snapshot: BoardCardColumnsSnapshot): ReadonlyMap<string, number> {
-  const counts = new Map<string, number>();
-  for (const cards of snapshot.values()) {
-    for (const card of cards) {
-      counts.set(card.id, (counts.get(card.id) ?? 0) + 1);
-    }
+type CardPosition = Readonly<{
+  columnID: string;
+  index: number;
+}>;
+
+type UniqueCardPosition =
+  | Readonly<{ kind: "absent" }>
+  | Readonly<{ kind: "duplicate" }>
+  | Readonly<{ kind: "present"; position: CardPosition }>;
+
+function cardPositions(snapshot: BoardCardColumnsSnapshot): ReadonlyMap<string, readonly CardPosition[]> {
+  const positions = new Map<string, CardPosition[]>();
+  for (const [columnID, cards] of snapshot) {
+    cards.forEach((card, index) => {
+      const existing = positions.get(card.id) ?? [];
+      positions.set(card.id, [...existing, { columnID, index }]);
+    });
   }
-  return counts;
+  return positions;
+}
+
+function cardPositionEqual(left: CardPosition, right: CardPosition): boolean {
+  return left.columnID === right.columnID && left.index === right.index;
+}
+
+function uniqueCardPosition(positions: readonly CardPosition[]): UniqueCardPosition {
+  if (positions.length === 0) {
+    return { kind: "absent" };
+  }
+  if (positions.length > 1) {
+    return { kind: "duplicate" };
+  }
+  return { kind: "present", position: positions[0] };
+}
+
+function cardMoved(oldPosition: UniqueCardPosition, newPosition: UniqueCardPosition): boolean {
+  return (
+    oldPosition.kind === "present" &&
+    newPosition.kind === "present" &&
+    !cardPositionEqual(oldPosition.position, newPosition.position)
+  );
+}
+
+function cardExited(oldPosition: UniqueCardPosition, newPosition: UniqueCardPosition): boolean {
+  return oldPosition.kind === "present" && newPosition.kind === "absent";
+}
+
+function cardEntered(oldPosition: UniqueCardPosition, newPosition: UniqueCardPosition): boolean {
+  return oldPosition.kind === "absent" && newPosition.kind === "present";
 }

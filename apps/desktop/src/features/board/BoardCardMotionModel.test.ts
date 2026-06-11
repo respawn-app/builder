@@ -39,6 +39,27 @@ describe("BoardCardMotionModel", () => {
     expect(participants.namesByCardID.has("task-duplicate")).toBe(false);
   });
 
+  it("names moved cards even when native drag temporarily reports them non-visible", () => {
+    const participants = boardCardMotionParticipants(
+      boardCardSnapshotFromEntries([["backlog", [card("task-1")]]]),
+      boardCardSnapshotFromEntries([["recon", [card("task-1")]]]),
+      new Set(),
+    );
+
+    expect(participants.namesByCardID.get("task-1")).toBe(boardCardViewTransitionName("task-1"));
+  });
+
+  it("does not name same-position cards when only card content changes", () => {
+    const participants = boardCardMotionParticipants(
+      boardCardSnapshotFromEntries([["backlog", [card("task-1")]]]),
+      boardCardSnapshotFromEntries([["backlog", [{ ...card("task-1"), title: "Renamed" }]]]),
+      new Set(["task-1"]),
+    );
+
+    expect(participants.namesByCardID.size).toBe(0);
+    expect(participants.revealCardIDs.size).toBe(0);
+  });
+
   it("reveals new-only cards without naming them as shared elements", () => {
     const participants = boardCardMotionParticipants(
       boardCardSnapshotFromEntries([["backlog", []]]),

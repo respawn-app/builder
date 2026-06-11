@@ -12,6 +12,7 @@ import { afterEach, vi } from "vitest";
 import type { JsonValue } from "../../api/json";
 import { App } from "../../App";
 import { createTestServices, startupRoutes } from "../../testSupport/appServices";
+import { boardCardViewTransitionName } from "./BoardCardMotionModel";
 
 async function expandBoardHoverMenu(): Promise<HTMLElement> {
   const menu = await screen.findByRole("navigation");
@@ -511,6 +512,9 @@ describe("BoardRoute", () => {
     const visibility = installIntersectionObserverMock();
     const originalStartViewTransitionDescriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
     const startViewTransition = vi.fn((update: () => void | Promise<void>) => {
+      expect(screen.getByRole("article", { name: "Write focused tests" })).toHaveStyle({
+        viewTransitionName: boardCardViewTransitionName("task-1"),
+      });
       const updateCallbackDone = Promise.resolve(update());
       return {
         finished: updateCallbackDone,
