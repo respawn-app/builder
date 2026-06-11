@@ -4,7 +4,7 @@ JOIN task_records t ON t.id = r.task_id
 JOIN task_node_placements p ON p.id = r.placement_id
 WHERE r.interrupted_at_unix_ms > 0
   AND r.completed_at_unix_ms = 0
-  AND p.state = 'active'
+  AND p.state IN ('active', 'waiting_approval')
   AND t.canceled_at_unix_ms = 0
   AND (? = '' OR t.project_id = ?)
   AND (? = '' OR t.id = ?)
