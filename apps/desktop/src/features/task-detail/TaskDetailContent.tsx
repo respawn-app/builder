@@ -38,12 +38,14 @@ type TaskDraftState = Readonly<{
 export function TaskDetailContent({
   activity,
   detail,
+  initialFocus,
   onMutated,
   openLink,
   resumeRunId,
 }: Readonly<{
   activity: ReturnType<typeof useTaskActivity>;
   detail: TaskDetail;
+  initialFocus?: "firstQuestion" | undefined;
   onMutated?: (() => void) | undefined;
   openLink: (url: string) => void;
   resumeRunId: string;
@@ -108,6 +110,7 @@ export function TaskDetailContent({
           currentVersion={detail.workflowVersion}
           detail={detail}
           disabled={disabled}
+          focusFirstQuestion={initialFocus === "firstQuestion"}
           mutations={mutations}
         />
       ) : null}

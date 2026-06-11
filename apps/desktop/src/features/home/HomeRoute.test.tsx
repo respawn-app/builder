@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { vi } from "vitest";
 
 import type { JsonValue } from "../../api/json";
 import { App } from "../../App";
@@ -175,6 +176,39 @@ describe("HomeRoute", () => {
     const sidebar = await screen.findByRole("complementary", { name: "Task" });
     expect(await within(sidebar).findByDisplayValue("Resolve blocker")).toBeInTheDocument();
     expect(services.transport.calls.some((call) => call.method === "workflow.board.get")).toBe(false);
+  });
+
+  it("scrolls the Home task sidebar to the first question for question Inbox cards", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const services = createTestServices([
+      ...startupRoutes,
+      {
+        method: "workflow.attention.list",
+        result: {
+          generated_at_unix_ms: 1,
+          items: [attentionItem({ kind: "question", message: "Pick answer" })],
+          next_page_token: "",
+        },
+      },
+      { method: "workflow.task.get", result: taskDetailResponseWithQuestion },
+      { method: "workflow.task.activity.list", result: emptyActivityResponse },
+      { method: "ask.listPendingBySession", result: { Asks: [] } },
+    ]);
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByTestId("attention-row"));
+
+    const sidebar = await screen.findByRole("complementary", { name: "Task" });
+    expect(await within(sidebar).findByRole("region", { name: "Question" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+    });
+    expect(window.location.pathname).toBe("/");
   });
 
   it("opens workflow-only Inbox cards in the workflow editor", async () => {
@@ -427,6 +461,13 @@ const taskDetailResponse = {
     runs: [],
     transitions: [],
     comments: [],
+  },
+};
+
+const taskDetailResponseWithQuestion = {
+  task: {
+    ...taskDetailResponse.task,
+    attention: [attentionItem({ kind: "question", message: "Pick answer" })],
   },
 };
 

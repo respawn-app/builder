@@ -238,6 +238,7 @@ function AttentionRow({
         if (item.taskID.length > 0) {
           void openSidebar({
             kind: "taskDetail",
+            initialFocus: item.kind === "question" ? "firstQuestion" : undefined,
             mode: "overlay",
             onMutated: undefined,
             resumeRunID: "",
