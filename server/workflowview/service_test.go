@@ -526,6 +526,65 @@ func TestBoardNodeCardsAllowRestartAfterDoneTaskResetToBacklog(t *testing.T) {
 	}
 }
 
+func TestBoardNodeCardsIgnoreInterruptedRunsFromCompletedPlacementsAfterResetToBacklog(t *testing.T) {
+	ctx, _, workflowStore, binding, view := newWorkflowViewTestContextService(t)
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Title: "Restart", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := workflowStore.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := workflowStore.InterruptRunGeneration(ctx, started.RunID, claimed.Generation, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration: %v", err)
+	}
+	def, _, err := workflowStore.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	start := workflowViewNodeByKind(t, def, workflow.NodeKindStart)
+	if _, err := workflowStore.ManualMoveTask(ctx, workflowstore.ManualMoveRequest{TaskID: task.ID, TargetNodeID: start.ID, AllowMissingEdge: true}); err != nil {
+		t.Fatalf("ManualMoveTask reset: %v", err)
+	}
+
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	backlogColumn := workflowViewColumnByKind(t, board, workflow.NodeKindStart)
+	if backlogColumn.TaskCount != 1 {
+		t.Fatalf("backlog count = %d, want reset task", backlogColumn.TaskCount)
+	}
+	page, err := view.ListBoardNodeCards(ctx, serverapi.WorkflowBoardNodeCardsListRequest{ProjectID: binding.ProjectID, WorkflowID: string(workflowID), NodeID: backlogColumn.Node.NodeID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListBoardNodeCards backlog: %v", err)
+	}
+	if len(page.Cards) != 1 || page.Cards[0].TaskID != string(task.ID) || page.Cards[0].Status.Kind != "backlog" {
+		t.Fatalf("backlog page = %+v, want reset backlog task", page)
+	}
+	if !page.Cards[0].Actions.CanStart || page.Cards[0].Actions.CanResume || page.Cards[0].Actions.ResumeRunID != "" {
+		t.Fatalf("reset backlog card actions = %+v, want start-only action state", page.Cards[0].Actions)
+	}
+	attention, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	for _, item := range attention.Items {
+		if item.Kind == attentionKindInterruptedRun && item.TaskID == string(task.ID) {
+			t.Fatalf("attention items = %+v, want no stale interrupted run attention after reset", attention.Items)
+		}
+	}
+}
+
 func TestBoardNodeCardsDoNotArchiveCanceledTaskInAlternateTerminalNode(t *testing.T) {
 	ctx, store, workflowStore, binding, view := newWorkflowViewTestContextService(t)
 	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)

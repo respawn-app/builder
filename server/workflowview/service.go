@@ -1649,6 +1649,7 @@ func (s *Service) taskCard(ctx context.Context, task sqlitegen.TaskRecord, place
 func taskStatusAndActions(task sqlitegen.TaskRecord, summary serverapi.WorkflowTaskSummary, placements []sqlitegen.TaskNodePlacementRecord, runs []sqlitegen.TaskRunRecord, def serverapi.WorkflowDefinition, nodeKinds map[string]workflow.NodeKind) (serverapi.WorkflowTaskStatus, serverapi.WorkflowTaskActions) {
 	status := serverapi.WorkflowTaskStatus{NodeIDs: summary.ActiveNodeIDs}
 	actions := serverapi.WorkflowTaskActions{CanCancel: task.CanceledAtUnixMs == 0 && !summary.Done}
+	currentPlacementIDs := currentTaskPlacementIDs(placements)
 	runningRunIDs := []string{}
 	interruptedRunIDs := []string{}
 	waitingAskRunIDs := []string{}
@@ -1663,6 +1664,9 @@ func taskStatusAndActions(task sqlitegen.TaskRecord, summary serverapi.WorkflowT
 		}
 	}
 	for _, run := range runs {
+		if !currentPlacementIDs[run.PlacementID] {
+			continue
+		}
 		if run.CompletedAtUnixMs != 0 {
 			continue
 		}
@@ -1733,6 +1737,17 @@ func taskStatusAndActions(task sqlitegen.TaskRecord, summary serverapi.WorkflowT
 		status.NativeState = "active"
 	}
 	return status, actions
+}
+
+func currentTaskPlacementIDs(placements []sqlitegen.TaskNodePlacementRecord) map[string]bool {
+	ids := make(map[string]bool, len(placements))
+	for _, placement := range placements {
+		if placement.State != "active" && placement.State != "waiting_approval" {
+			continue
+		}
+		ids[placement.ID] = true
+	}
+	return ids
 }
 
 func manualMoveTargetNodeIDs(def serverapi.WorkflowDefinition, placements []sqlitegen.TaskNodePlacementRecord, nodeKinds map[string]workflow.NodeKind) []string {
