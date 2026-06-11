@@ -378,6 +378,46 @@ describe("BoardRoute", () => {
     });
   });
 
+  it("collapses empty non-starting columns by default and skips card loading until expanded", async () => {
+    const visibility = installIntersectionObserverMock();
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const nodeCardCalls: string[] = [];
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.board.get", result: boardResponse },
+      {
+        method: "workflow.board.nodeCards.list",
+        handler: (params: JsonValue) => {
+          const nodeID = isObject(params) && typeof params.node_id === "string" ? params.node_id : "";
+          nodeCardCalls.push(nodeID);
+          return boardNodeCardsResponse(nodeID, [], "");
+        },
+      },
+    ]);
+
+    render(<App services={services} />);
+
+    const startingColumn = await screen.findByRole("listitem", { name: "Implement" });
+    const emptyDoneColumn = screen.getByRole("listitem", { name: "Done" });
+
+    expect(startingColumn).toHaveAttribute("data-collapsed", "false");
+    expect(within(startingColumn).getByTestId("kanban-column-task-count-node-1")).toBeInTheDocument();
+    expect(emptyDoneColumn).toHaveAttribute("data-collapsed", "true");
+    expect(within(emptyDoneColumn).queryByTestId("kanban-column-task-count-done")).not.toBeInTheDocument();
+
+    act(() => {
+      visibility.reveal("Done");
+    });
+    expect(nodeCardCalls).toEqual([]);
+
+    fireEvent.click(within(emptyDoneColumn).getByRole("button", { name: "Expand Done" }));
+    expect(emptyDoneColumn).toHaveAttribute("data-collapsed", "false");
+
+    await waitFor(() => {
+      expect(nodeCardCalls).toEqual(["done"]);
+    });
+  });
+
   it("renders pending-approval tasks in their source node column", async () => {
     const visibility = installIntersectionObserverMock();
     window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");

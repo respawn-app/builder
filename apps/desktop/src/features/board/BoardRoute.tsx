@@ -415,7 +415,7 @@ function BoardContent({
                     column={column}
                     dropState={columnDropState(column)}
                     isFirstActive={column.id === firstActive?.id}
-                    key={column.id}
+                    key={`${board.selectedWorkflow.id}:${column.id}`}
                     onCardClick={openTask}
                     onCardDragEnd={() => {
                       activeDragRef.current = null;
@@ -441,7 +441,7 @@ function BoardContent({
                 column={section.column}
                 dropState={columnDropState(section.column)}
                 isFirstActive={section.column.id === firstActive?.id}
-                key={section.id}
+                key={`${board.selectedWorkflow.id}:${section.id}`}
                 onCardClick={openTask}
                 onCardDragEnd={() => {
                   activeDragRef.current = null;

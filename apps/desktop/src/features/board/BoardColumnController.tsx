@@ -47,8 +47,11 @@ export function BoardColumnController({
   scrollportRef,
 }: BoardColumnControllerProps) {
   const [columnElement, setColumnElement] = useState<HTMLElement | null>(null);
+  const [expandedEmptyColumn, setExpandedEmptyColumn] = useState(false);
+  const canCollapseEmptyColumn = !column.isBacklog && !isFirstActive && column.taskCount === 0;
+  const isCollapsed = canCollapseEmptyColumn && !expandedEmptyColumn;
   const isVisible = useColumnVisibility(scrollportRef, columnElement);
-  const queryEnabled = isVisible;
+  const queryEnabled = isVisible && !isCollapsed;
   const cardsQuery = useBoardNodeCards(board.projectID, board.selectedWorkflow.id, column.id, queryEnabled);
   const cards = useMemo(
     () => cardsQuery.data?.pages.flatMap((page) => page.cards) ?? [],
@@ -71,6 +74,7 @@ export function BoardColumnController({
       columnRef={setColumnElement}
       dropState={dropState}
       hasMoreCards={cardsQuery.hasNextPage}
+      isCollapsed={isCollapsed}
       isFirstActive={isFirstActive}
       isLoadingMoreCards={(queryEnabled && cardsQuery.isPending) || cardsQuery.isFetchingNextPage}
       onCardClick={onCardClick}
@@ -79,6 +83,9 @@ export function BoardColumnController({
       onDeleteTask={onDeleteTask}
       onDropTask={(event) => {
         onDropTask(event, column);
+      }}
+      onExpandColumn={() => {
+        setExpandedEmptyColumn(true);
       }}
       onInterruptTask={onInterruptTask}
       onLoadMoreCards={() => {

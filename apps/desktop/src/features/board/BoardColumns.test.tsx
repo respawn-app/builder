@@ -38,6 +38,44 @@ describe("KanbanColumn", () => {
     expect(screen.getByRole("status")).toContainElement(screen.getByTestId("spinner"));
   });
 
+  it("renders an empty collapsed column as an expandable bar without task pagination surface", () => {
+    const onExpandColumn = vi.fn();
+
+    render(
+      <I18nextProvider i18n={appI18n}>
+        <KanbanColumn
+          actionsDisabled={false}
+          cards={[]}
+          column={{ ...column, assigneeRole: "reviewer", name: "Review", taskCount: 0 }}
+          dropState="idle"
+          hasMoreCards={false}
+          isCollapsed
+          isFirstActive={false}
+          isLoadingMoreCards={false}
+          onCardClick={() => undefined}
+          onCardDragEnd={() => undefined}
+          onCardDragStart={() => undefined}
+          onDeleteTask={() => undefined}
+          onDropTask={() => undefined}
+          onExpandColumn={onExpandColumn}
+          onInterruptTask={() => undefined}
+          onLoadMoreCards={() => undefined}
+          onResumeTask={() => undefined}
+        />
+      </I18nextProvider>,
+    );
+
+    const renderedColumn = screen.getByRole("listitem", { name: "Review" });
+
+    expect(renderedColumn).toHaveAttribute("data-collapsed", "true");
+    expect(screen.queryByTestId("kanban-column-task-count-backlog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("kanban-column-scroll-backlog")).not.toBeInTheDocument();
+
+    fireEvent.click(within(renderedColumn).getByRole("button", { name: "Expand Review" }));
+
+    expect(onExpandColumn).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps action buttons in the chip row, uses danger interrupt, and omits run count chip", () => {
     const onInterruptTask = vi.fn();
     const onCardClick = vi.fn();

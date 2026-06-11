@@ -1,5 +1,6 @@
 import type { DragEvent, KeyboardEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 
 import { formatRelativeTime } from "../../app/formatters";
 import { Badge, Button, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Spinner } from "../../ui";
@@ -17,6 +18,7 @@ export type KanbanColumnProps = Readonly<{
   hasMoreCards: boolean;
   isLoadingMoreCards: boolean;
   isFirstActive: boolean;
+  isCollapsed?: boolean;
   dropState: BoardColumnDropState;
   actionsDisabled: boolean;
   columnRef?: (element: HTMLElement | null) => void;
@@ -25,6 +27,7 @@ export type KanbanColumnProps = Readonly<{
   onCardDragStart: (payload: BoardCardDragPayload) => void;
   onDeleteTask: (taskID: string) => void;
   onDropTask: (event: DragEvent<HTMLElement>) => void;
+  onExpandColumn?: () => void;
   onInterruptTask: (taskID: string, runID: string) => void;
   onLoadMoreCards: () => void;
   onResumeTask: (taskID: string, runID: string) => void;
@@ -58,6 +61,7 @@ export function KanbanColumn({
   hasMoreCards,
   isLoadingMoreCards,
   isFirstActive,
+  isCollapsed = false,
   dropState,
   actionsDisabled,
   columnRef,
@@ -66,15 +70,20 @@ export function KanbanColumn({
   onCardDragStart,
   onDeleteTask,
   onDropTask,
+  onExpandColumn,
   onInterruptTask,
   onLoadMoreCards,
   onResumeTask,
 }: KanbanColumnProps) {
   const { t } = useTranslation();
+  const columnClassName = isCollapsed
+    ? `island-glass board-column-morph board-column-drop-${dropState} grid h-full min-h-0 w-[64px] shrink-0 grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-2)] align-top`
+    : `island-glass board-column-morph board-column-drop-${dropState} grid h-full min-h-0 w-[min(420px,80vw)] shrink-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-3)] align-top`;
   return (
     <section
       aria-label={column.name}
-      className={`island-glass board-column-drop-${dropState} grid h-full min-h-0 w-[min(420px,80vw)] shrink-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-3)] align-top`}
+      className={columnClassName}
+      data-collapsed={isCollapsed ? "true" : "false"}
       data-drop-state={dropState}
       ref={columnRef}
       onDragOver={(event) => {
@@ -89,63 +98,101 @@ export function KanbanColumn({
       }}
       role="listitem"
     >
-      <header className="flex items-center justify-between gap-[var(--space-2)]">
-        <div>
+      {isCollapsed ? (
+        <CollapsedColumnHeader column={column} onExpand={onExpandColumn} />
+      ) : (
+        <>
+          <header className="flex items-center justify-between gap-[var(--space-2)]">
+            <div>
+              <h2 className="m-0 text-[1rem]">{column.name}</h2>
+              {column.assigneeRole.length > 0 ? (
+                <p className="m-0 font-mono text-sm text-[var(--color-muted)]">{column.assigneeRole}</p>
+              ) : null}
+            </div>
+            <Badge title={t("board.taskCount", { count: column.taskCount })} tone={isFirstActive ? "info" : "neutral"}>
+              <span data-testid={`kanban-column-task-count-${column.id}`}>
+                {t("board.taskCount", { count: column.taskCount })}
+              </span>
+            </Badge>
+          </header>
+          {isFirstActive ? (
+            <p className="m-0 rounded-[var(--radius-m)] border border-dashed border-[var(--color-outline)] p-[var(--space-2)] text-sm text-[var(--color-muted)]">
+              {t("board.dropToStart")}
+            </p>
+          ) : null}
+          <div
+            className="min-h-0 overflow-y-auto pr-[var(--space-1)] hide-scrollbar"
+            data-testid={`kanban-column-scroll-${column.id}`}
+            onScroll={(event) => {
+              if (!hasMoreCards || isLoadingMoreCards || !isNearScrollEnd(event.currentTarget)) {
+                return;
+              }
+              onLoadMoreCards();
+            }}
+          >
+            {cards.map((card) => (
+              <TaskCard
+                card={card}
+                actionsDisabled={actionsDisabled}
+                key={card.id}
+                onClick={() => {
+                  onCardClick(card.id);
+                }}
+                onDragEnd={onCardDragEnd}
+                onDragStart={onCardDragStart}
+                onDelete={onDeleteTask}
+                onInterrupt={(runID) => {
+                  onInterruptTask(card.id, runID);
+                }}
+                onResume={(runID) => {
+                  onResumeTask(card.id, runID);
+                }}
+              />
+            ))}
+            {isLoadingMoreCards ? (
+              <div
+                aria-label={t("app.loadingMore")}
+                className="grid place-items-center py-[var(--space-3)]"
+                role="status"
+              >
+                <Spinner size="sm" />
+                <span className="sr-only">{t("app.loadingMore")}</span>
+              </div>
+            ) : null}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CollapsedColumnHeader({
+  column,
+  onExpand,
+}: Readonly<{
+  column: KanbanColumnVM;
+  onExpand: (() => void) | undefined;
+}>) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full min-h-0 flex-col items-center gap-[var(--space-3)]">
+      <button
+        aria-label={t("board.expandColumn", { name: column.name })}
+        className="grid size-[32px] place-items-center rounded-full text-[var(--color-secondary)] outline-none transition-[background-color,box-shadow] duration-150 hover:bg-[var(--color-island-2)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
+        onClick={onExpand}
+        type="button"
+      >
+        <ChevronRight aria-hidden="true" size={16} strokeWidth={1.8} />
+      </button>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+        <div className="grid origin-center rotate-90 grid-flow-col items-center gap-[var(--space-2)] whitespace-nowrap text-left">
           <h2 className="m-0 text-[1rem]">{column.name}</h2>
           {column.assigneeRole.length > 0 ? (
             <p className="m-0 font-mono text-sm text-[var(--color-muted)]">{column.assigneeRole}</p>
           ) : null}
         </div>
-        <Badge tone={isFirstActive ? "info" : "neutral"}>
-          {t("board.taskCount", { count: column.taskCount })}
-        </Badge>
-      </header>
-      {isFirstActive ? (
-        <p className="m-0 rounded-[var(--radius-m)] border border-dashed border-[var(--color-outline)] p-[var(--space-2)] text-sm text-[var(--color-muted)]">
-          {t("board.dropToStart")}
-        </p>
-      ) : null}
-      <div
-        className="min-h-0 overflow-y-auto pr-[var(--space-1)] hide-scrollbar"
-        data-testid={`kanban-column-scroll-${column.id}`}
-        onScroll={(event) => {
-          if (!hasMoreCards || isLoadingMoreCards || !isNearScrollEnd(event.currentTarget)) {
-            return;
-          }
-          onLoadMoreCards();
-        }}
-      >
-        {cards.map((card) => (
-          <TaskCard
-            card={card}
-            actionsDisabled={actionsDisabled}
-            key={card.id}
-            onClick={() => {
-              onCardClick(card.id);
-            }}
-            onDragEnd={onCardDragEnd}
-            onDragStart={onCardDragStart}
-            onDelete={onDeleteTask}
-            onInterrupt={(runID) => {
-              onInterruptTask(card.id, runID);
-            }}
-            onResume={(runID) => {
-              onResumeTask(card.id, runID);
-            }}
-          />
-        ))}
-        {isLoadingMoreCards ? (
-          <div
-            aria-label={t("app.loadingMore")}
-            className="grid place-items-center py-[var(--space-3)]"
-            role="status"
-          >
-            <Spinner size="sm" />
-            <span className="sr-only">{t("app.loadingMore")}</span>
-          </div>
-        ) : null}
       </div>
-    </section>
+    </div>
   );
 }
 

@@ -101,6 +101,14 @@
       opacity var(--motion-fast);
   }
 
+  .board-column-morph {
+    transition:
+      width var(--motion-morph),
+      padding var(--motion-morph),
+      grid-template-rows var(--motion-morph),
+      background-color var(--motion-morph);
+  }
+
   .board-hover-menu-morph {
     transform-origin: left bottom;
     transition:
