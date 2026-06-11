@@ -531,13 +531,18 @@ func TestWorkflowEdgeUpdateClearsParameters(t *testing.T) {
 	edgeOut, _ := runWorkflowRootCommandOK(t, "workflow", "edge", "add", workflowID, "--from", "backlog", "--transition", "start", "--edge-key", "start", "--to", "triaging", "--context", "new_session", "--prompt", "Triage.", "--param", "plan_file_path=Path to the plan doc")
 	edgeID := labeledOutputValue(t, edgeOut, "edge_id")
 
-	if _, stderr, code := runWorkflowRootCommand("workflow", "edge", "update", workflowID, edgeID, "--param", "x=y", "--clear-params"); code != 2 || !strings.Contains(stderr, "not both") {
-		t.Fatalf("combined --param/--clear-params exit=%d stderr=%q, want rejection", code, stderr)
+	if _, _, code := runWorkflowRootCommand("workflow", "edge", "update", workflowID, edgeID, "--param", "x=y", "--clear-params"); code != 2 {
+		t.Fatalf("combined --param/--clear-params exit=%d, want rejection exit 2", code)
+	}
+
+	ctx := context.Background()
+	rejectedEdge := workflowCommandStoredEdgeByID(t, ctx, remote.store, workflowID, edgeID)
+	if len(rejectedEdge.Parameters) != 1 {
+		t.Fatalf("edge parameters after rejected update = %+v, want unchanged", rejectedEdge.Parameters)
 	}
 
 	runWorkflowRootCommandOK(t, "workflow", "edge", "update", workflowID, edgeID, "--clear-params")
 
-	ctx := context.Background()
 	edge := workflowCommandStoredEdgeByID(t, ctx, remote.store, workflowID, edgeID)
 	if len(edge.Parameters) != 0 {
 		t.Fatalf("edge parameters = %+v, want cleared", edge.Parameters)
