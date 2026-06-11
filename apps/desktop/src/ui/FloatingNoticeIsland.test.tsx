@@ -46,4 +46,42 @@ describe("FloatingNoticeIsland", () => {
     expect(collapsedButton).toHaveAttribute("inert");
     expect(screen.getByTestId("floating-notice-content")).not.toHaveAttribute("aria-hidden", "true");
   });
+
+  it("keeps custom-sized expanded content mounted across collapse state changes", () => {
+    const { rerender } = render(
+      <FloatingNoticeIsland
+        collapsed
+        collapseLabel="Collapse"
+        expandedClassName="floating-notice-expanded grid h-[204px] w-[min(300px,calc(100vw-var(--space-2)*2))] gap-[6px] rounded-[var(--radius-xl)] p-[var(--space-2)]"
+        expandLabel="Expand"
+        onCollapsedChange={vi.fn()}
+        title="Legend"
+        tone="neutral"
+      >
+        <p>Custom notice body</p>
+      </FloatingNoticeIsland>,
+    );
+    const collapsedContent = screen.getByTestId("floating-notice-content");
+    expect(collapsedContent).toHaveAttribute("aria-hidden", "true");
+    expect(collapsedContent).toHaveAttribute("inert");
+
+    rerender(
+      <FloatingNoticeIsland
+        collapsed={false}
+        collapseLabel="Collapse"
+        expandedClassName="floating-notice-expanded grid h-[204px] w-[min(300px,calc(100vw-var(--space-2)*2))] gap-[6px] rounded-[var(--radius-xl)] p-[var(--space-2)]"
+        expandLabel="Expand"
+        onCollapsedChange={vi.fn()}
+        title="Legend"
+        tone="neutral"
+      >
+        <p>Custom notice body</p>
+      </FloatingNoticeIsland>,
+    );
+
+    expect(screen.getByTestId("floating-notice-content")).toBe(collapsedContent);
+    expect(collapsedContent).not.toHaveAttribute("aria-hidden", "true");
+    expect(collapsedContent).not.toHaveAttribute("inert");
+    expect(screen.getByText("Custom notice body")).toBeInTheDocument();
+  });
 });
