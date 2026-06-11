@@ -476,6 +476,39 @@ func TestTaskUpdateEditsTitleAndBodyAfterAutomationStarts(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskHardDeletesAssociatedRecords(t *testing.T) {
+	ctx, store, binding := newTestStoreContext(t)
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Delete me", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started := startTask(t, ctx, store, task.ID)
+	if _, err := store.AddComment(ctx, task.ID, "note", "user", "nek"); err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+
+	deleted, err := store.DeleteTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+	if deleted.ID != task.ID || deleted.ProjectID != binding.ProjectID {
+		t.Fatalf("deleted task identity = %+v, want task %q project %q", deleted, task.ID, binding.ProjectID)
+	}
+	if _, err := store.queries.GetTask(ctx, string(task.ID)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetTask after DeleteTask = %v, want sql.ErrNoRows", err)
+	}
+	assertZeroTaskRows(t, store, "task_node_placements", string(task.ID))
+	assertZeroTaskRows(t, store, "task_transitions", string(task.ID))
+	assertZeroTaskRows(t, store, "task_comments", string(task.ID))
+	if _, err := store.queries.GetTaskRun(ctx, string(started.RunID)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetTaskRun after DeleteTask = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := store.DeleteTask(ctx, task.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("DeleteTask missing = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestCompleteRunUsesRunStartSnapshotAfterGraphChanges(t *testing.T) {
 	ctx, store, binding := newTestStoreContext(t)
 	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
@@ -4948,6 +4981,17 @@ func insertCompletedRunForNodeInBatch(t *testing.T, ctx context.Context, store *
 		t.Fatalf("InsertTaskRun competing batch run: %v", err)
 	}
 	return workflow.RunID(runID)
+}
+
+func assertZeroTaskRows(t *testing.T, store *Store, table string, taskID string) {
+	t.Helper()
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE task_id = ?`, taskID).Scan(&count); err != nil {
+		t.Fatalf("count %s rows for task %s: %v", table, taskID, err)
+	}
+	if count != 0 {
+		t.Fatalf("%s rows for task %s = %d, want 0", table, taskID, count)
+	}
 }
 
 func taskTransitionIDOtherThan(t *testing.T, ctx context.Context, store *Store, taskID workflow.TaskID, excludedID string) workflow.TransitionID {

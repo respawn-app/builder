@@ -129,6 +129,10 @@ export function useBoardTaskActions(
         api.interruptTask(input.taskID, input.runID),
       onSuccess: refresh,
     }),
+    delete: useMutation({
+      mutationFn: async (taskID: string) => api.deleteTask(taskID),
+      onSuccess: refresh,
+    }),
     resume: useMutation({
       mutationFn: async (input: Readonly<{ taskID: string; runID: string }>) =>
         api.resumeTask(input.taskID, input.runID),

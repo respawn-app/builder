@@ -26,6 +26,7 @@ describe("KanbanColumn", () => {
           onCardClick={() => undefined}
           onCardDragEnd={() => undefined}
           onCardDragStart={() => undefined}
+          onDeleteTask={() => undefined}
           onDropTask={() => undefined}
           onInterruptTask={() => undefined}
           onLoadMoreCards={() => undefined}
@@ -63,6 +64,7 @@ describe("KanbanColumn", () => {
           onCardClick={onCardClick}
           onCardDragEnd={() => undefined}
           onCardDragStart={() => undefined}
+          onDeleteTask={() => undefined}
           onDropTask={() => undefined}
           onInterruptTask={onInterruptTask}
           onLoadMoreCards={() => undefined}
@@ -99,6 +101,7 @@ describe("KanbanColumn", () => {
           onCardClick={onCardClick}
           onCardDragEnd={() => undefined}
           onCardDragStart={() => undefined}
+          onDeleteTask={() => undefined}
           onDropTask={() => undefined}
           onInterruptTask={() => undefined}
           onLoadMoreCards={() => undefined}
@@ -117,6 +120,39 @@ describe("KanbanColumn", () => {
 
     expect(onCardClick).toHaveBeenCalledTimes(4);
     expect(onCardClick).toHaveBeenCalledWith("task-1");
+  });
+
+  it("deletes cards from the context menu without opening task detail", async () => {
+    const onCardClick = vi.fn();
+    const onDeleteTask = vi.fn();
+
+    render(
+      <I18nextProvider i18n={appI18n}>
+        <KanbanColumn
+          actionsDisabled={false}
+          cards={[card]}
+          column={column}
+          dropState="idle"
+          hasMoreCards={false}
+          isFirstActive={false}
+          isLoadingMoreCards={false}
+          onCardClick={onCardClick}
+          onCardDragEnd={() => undefined}
+          onCardDragStart={() => undefined}
+          onDeleteTask={onDeleteTask}
+          onDropTask={() => undefined}
+          onInterruptTask={() => undefined}
+          onLoadMoreCards={() => undefined}
+          onResumeTask={() => undefined}
+        />
+      </I18nextProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("article", { name: "Task" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    expect(onDeleteTask).toHaveBeenCalledWith("task-1");
+    expect(onCardClick).not.toHaveBeenCalled();
   });
 
   it("starts override drags for active cards without start or move targets", () => {
@@ -145,6 +181,7 @@ describe("KanbanColumn", () => {
           onCardClick={onCardClick}
           onCardDragEnd={() => undefined}
           onCardDragStart={onCardDragStart}
+          onDeleteTask={() => undefined}
           onDropTask={() => undefined}
           onInterruptTask={() => undefined}
           onLoadMoreCards={() => undefined}
@@ -186,6 +223,7 @@ describe("KanbanColumn", () => {
           onCardClick={() => undefined}
           onCardDragEnd={() => undefined}
           onCardDragStart={() => undefined}
+          onDeleteTask={() => undefined}
           onDropTask={() => undefined}
           onInterruptTask={() => undefined}
           onLoadMoreCards={() => undefined}

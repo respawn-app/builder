@@ -1,6 +1,8 @@
 import { createRoute, type AnyRootRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
+import { TaskDeleteWindowRoute } from "../features/board/TaskDeleteConfirmation";
+import { taskDeleteNativeDialogPath } from "../features/board/taskDeleteConfirmationModel";
 import { ProjectCreateWindowRoute } from "../features/home/ProjectCreateForm";
 import { ProjectDeleteWindowRoute } from "../features/project-edit/ProjectDeleteButton";
 import { WorkspaceUnlinkWindowRoute } from "../features/project-edit/ProjectEditParts";
@@ -11,6 +13,7 @@ import { useWindowChromeTitle } from "./windowChromeTitle";
 
 export const projectDeleteNativeDialogPath = "/native-dialog/project-delete";
 export const workspaceUnlinkNativeDialogPath = "/native-dialog/workspace-unlink";
+export { taskDeleteNativeDialogPath };
 
 const optionalSearchString = z.preprocess(
   (value: unknown) => (typeof value === "string" ? value : ""),
@@ -30,6 +33,10 @@ const projectDeleteSearchSchema = z.object({
 const taskDetailSearchSchema = z.object({
   resumeRunId: optionalSearchString,
   taskId: optionalSearchString,
+});
+
+const taskDeleteSearchSchema = z.object({
+  taskID: optionalSearchString,
 });
 
 const newTaskSearchSchema = z.object({
@@ -85,6 +92,23 @@ export function createNativeDialogRoutes(rootRoute: AnyRootRoute) {
     return <TaskDetailWindowRoute resumeRunId={search.resumeRunId} taskId={search.taskId} />;
   }
 
+  const taskDeleteWindowRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: taskDeleteNativeDialogPath,
+    validateSearch: (search: Record<string, unknown>) => taskDeleteSearchSchema.parse(search),
+    component: TaskDeleteNativeRoute,
+  });
+
+  function TaskDeleteNativeRoute() {
+    const search = taskDeleteSearchSchema.parse(taskDeleteWindowRoute.useSearch());
+    const taskID = search.taskID.trim();
+    useWindowChromeTitle(null);
+    if (taskID.length === 0) {
+      return <InvalidNativeDialogRoute />;
+    }
+    return <TaskDeleteWindowRoute taskID={taskID} />;
+  }
+
   const newTaskWindowRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/native-dialog/new-task",
@@ -119,6 +143,7 @@ export function createNativeDialogRoutes(rootRoute: AnyRootRoute) {
     projectCreateRoute,
     projectDeleteRoute,
     taskDetailWindowRoute,
+    taskDeleteWindowRoute,
     newTaskWindowRoute,
     workspaceUnlinkWindowRoute,
   ] as const;

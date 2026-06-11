@@ -2,7 +2,7 @@ import type { DragEvent, KeyboardEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { formatRelativeTime } from "../../app/formatters";
-import { Badge, Button, Spinner } from "../../ui";
+import { Badge, Button, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Spinner } from "../../ui";
 import {
   type BoardCardDragPayload,
   type BoardColumnDropState,
@@ -23,6 +23,7 @@ export type KanbanColumnProps = Readonly<{
   onCardClick: (taskID: string) => void;
   onCardDragEnd: () => void;
   onCardDragStart: (payload: BoardCardDragPayload) => void;
+  onDeleteTask: (taskID: string) => void;
   onDropTask: (event: DragEvent<HTMLElement>) => void;
   onInterruptTask: (taskID: string, runID: string) => void;
   onLoadMoreCards: () => void;
@@ -63,6 +64,7 @@ export function KanbanColumn({
   onCardClick,
   onCardDragEnd,
   onCardDragStart,
+  onDeleteTask,
   onDropTask,
   onInterruptTask,
   onLoadMoreCards,
@@ -123,6 +125,7 @@ export function KanbanColumn({
             }}
             onDragEnd={onCardDragEnd}
             onDragStart={onCardDragStart}
+            onDelete={onDeleteTask}
             onInterrupt={(runID) => {
               onInterruptTask(card.id, runID);
             }}
@@ -157,6 +160,7 @@ function TaskCard({
   onClick,
   onDragEnd,
   onDragStart,
+  onDelete,
   onInterrupt,
   onResume,
 }: Readonly<{
@@ -165,6 +169,7 @@ function TaskCard({
   onClick: () => void;
   onDragEnd: () => void;
   onDragStart: (payload: BoardCardDragPayload) => void;
+  onDelete: (taskID: string) => void;
   onInterrupt: (runID: string) => void;
   onResume: (runID: string) => void;
 }>) {
@@ -178,58 +183,73 @@ function TaskCard({
     manualMoveTargetNodeIDs: card.actions.manualMoveTargetNodeIDs,
   };
   return (
-    <article
-      aria-label={card.title}
-      className="mb-[var(--space-3)] grid cursor-pointer gap-[var(--space-2)] rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)] outline-none focus-visible:border-[var(--color-primary)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
-      data-testid="task-card"
-      draggable={canDrag}
-      onClick={onClick}
-      onDragEnd={onDragEnd}
-      onDragStart={(event) => {
-        if (!canDrag) {
-          event.preventDefault();
-          return;
-        }
-        event.dataTransfer.setData("text/task-id", card.id);
-        event.dataTransfer.setData("text/plain", card.id);
-        event.dataTransfer.setData(boardCardDragPayloadType, encodeBoardCardDragPayload(dragPayload));
-        event.dataTransfer.effectAllowed = "move";
-        onDragStart(dragPayload);
-      }}
-      onKeyDown={(event) => {
-        activateCardFromKeyboard(event, onClick);
-      }}
-      tabIndex={0}
-    >
-      <div className="grid gap-[var(--space-1)] text-left text-[var(--color-on-island)]">
-        <span className="flex min-w-0 items-center justify-between gap-[var(--space-2)]">
-          <span className="shrink-0 font-mono text-[0.78rem] text-[var(--color-muted)]">{card.shortID}</span>
-          <span className="min-w-0 truncate text-right text-sm text-[var(--color-muted)]">
-            {formatRelativeTime(card.updatedAt)}
-          </span>
-        </span>
-        <strong data-testid="task-card-title">{card.title}</strong>
-        <span className="line-clamp-3 text-sm text-[var(--color-muted)]" data-testid="task-card-body">
-          {card.bodyPreview}
-        </span>
-      </div>
-      <div className="flex items-start justify-between gap-[var(--space-2)]" data-testid="task-card-footer">
-        <div
-          className="task-card-chip-row flex min-w-0 flex-1 flex-wrap items-center gap-[var(--space-2)] text-sm text-[var(--color-muted)]"
-          data-testid="task-card-chips"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <article
+          aria-label={card.title}
+          className="mb-[var(--space-3)] grid cursor-pointer gap-[var(--space-2)] rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)] outline-none focus-visible:border-[var(--color-primary)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
+          data-testid="task-card"
+          draggable={canDrag}
+          onClick={onClick}
+          onDragEnd={onDragEnd}
+          onDragStart={(event) => {
+            if (!canDrag) {
+              event.preventDefault();
+              return;
+            }
+            event.dataTransfer.setData("text/task-id", card.id);
+            event.dataTransfer.setData("text/plain", card.id);
+            event.dataTransfer.setData(boardCardDragPayloadType, encodeBoardCardDragPayload(dragPayload));
+            event.dataTransfer.effectAllowed = "move";
+            onDragStart(dragPayload);
+          }}
+          onKeyDown={(event) => {
+            activateCardFromKeyboard(event, onClick);
+          }}
+          tabIndex={0}
         >
-          <span className="task-card-chip-slot inline-flex items-center" data-testid="task-card-chip-slot">
-            <Badge tone="neutral">{card.sourceWorkspaceName || t("board.workspace")}</Badge>
-          </span>
-        </div>
-        <TaskCardActions
-          actionsDisabled={actionsDisabled}
-          card={card}
-          onInterrupt={onInterrupt}
-          onResume={onResume}
-        />
-      </div>
-    </article>
+          <div className="grid gap-[var(--space-1)] text-left text-[var(--color-on-island)]">
+            <span className="flex min-w-0 items-center justify-between gap-[var(--space-2)]">
+              <span className="shrink-0 font-mono text-[0.78rem] text-[var(--color-muted)]">{card.shortID}</span>
+              <span className="min-w-0 truncate text-right text-sm text-[var(--color-muted)]">
+                {formatRelativeTime(card.updatedAt)}
+              </span>
+            </span>
+            <strong data-testid="task-card-title">{card.title}</strong>
+            <span className="line-clamp-3 text-sm text-[var(--color-muted)]" data-testid="task-card-body">
+              {card.bodyPreview}
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-[var(--space-2)]" data-testid="task-card-footer">
+            <div
+              className="task-card-chip-row flex min-w-0 flex-1 flex-wrap items-center gap-[var(--space-2)] text-sm text-[var(--color-muted)]"
+              data-testid="task-card-chips"
+            >
+              <span className="task-card-chip-slot inline-flex items-center" data-testid="task-card-chip-slot">
+                <Badge tone="neutral">{card.sourceWorkspaceName || t("board.workspace")}</Badge>
+              </span>
+            </div>
+            <TaskCardActions
+              actionsDisabled={actionsDisabled}
+              card={card}
+              onInterrupt={onInterrupt}
+              onResume={onResume}
+            />
+          </div>
+        </article>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          className="text-[var(--color-error)]"
+          disabled={actionsDisabled}
+          onSelect={() => {
+            onDelete(card.id);
+          }}
+        >
+          {t("board.deleteTask")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

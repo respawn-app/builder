@@ -504,6 +504,10 @@ export class BuilderApiClient {
     await this.transport.call("workflow.task.cancel", { task_id: taskID });
   }
 
+  async deleteTask(taskID: string): Promise<void> {
+    await this.transport.call("workflow.task.delete", { task_id: taskID });
+  }
+
   async getTask(taskID: string): Promise<TaskDetail> {
     return parse(
       "workflow.task.get",

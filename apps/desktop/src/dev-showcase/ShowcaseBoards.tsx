@@ -199,6 +199,7 @@ export function KanbanBoard() {
                   onCardClick={() => undefined}
                   onCardDragEnd={() => undefined}
                   onCardDragStart={() => undefined}
+                  onDeleteTask={() => undefined}
                   onDropTask={() => undefined}
                   onInterruptTask={() => undefined}
                   onLoadMoreCards={() => undefined}

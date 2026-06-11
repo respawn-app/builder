@@ -7,6 +7,8 @@ import { errorMessage } from "../../api/errors";
 import { useAppNavigation } from "../../app/navigation";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
 import { useSidebar } from "../../app/sidebarContext";
+import { useAppServices } from "../../app/useAppServices";
+import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useStatusController } from "../../app/useStatusController";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { Button, EmptyState, ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
@@ -16,6 +18,8 @@ import { BoardColumnController } from "./BoardColumnController";
 import { BoardHoverMenu } from "./BoardHoverMenu";
 import { KanbanGroup } from "./BoardColumns";
 import { toKanbanGroupVM } from "./BoardColumnViewModel";
+import { TaskDeleteConfirmationFallbackDialog } from "./TaskDeleteConfirmation";
+import { taskDeleteWindowOptions, type TaskDeleteTarget } from "./taskDeleteConfirmationModel";
 import {
   type BoardCardDragPayload,
   type BoardColumnDropState,
@@ -109,12 +113,30 @@ function BoardContent({
   const [missingInputDrop, setMissingInputDrop] = useState<PendingMissingInputDrop | null>(null);
   const activeDragRef = useRef<BoardCardDragPayload | null>(null);
   const { push } = useStatusController();
+  const { nativeBridge } = useAppServices();
   const navigation = useAppNavigation();
   const scrollportRef = useRef<HTMLDivElement | null>(null);
   const { openSidebar } = useSidebar();
   const connection = useConnectionSnapshot();
   const actions = useBoardTaskActions(board.projectID, boardQueryWorkflowID, board.selectedWorkflow.id);
   const actionsDisabled = connection.phase !== "connected";
+  const taskDeleteDialog = useNativeDialogFallback<TaskDeleteTarget>({
+    errorNoticeID: "task-delete-window-error",
+    errorTitle: t("board.deleteTaskWindowError"),
+    nativeAvailable: nativeBridge.capabilities.dialogWindows,
+    openNative: async (target) => {
+      await nativeBridge.dialogs.openWindow(taskDeleteWindowOptions(target, t("board.deleteTaskTitle")));
+    },
+    renderFallback: (target, close) => (
+      <TaskDeleteConfirmationFallbackDialog
+        disabled={actions.delete.isPending}
+        onClose={close}
+        onConfirm={() => {
+          void confirmDeleteTask(target, close);
+        }}
+      />
+    ),
+  });
 
   const activeColumns = useMemo(
     () => board.columns.filter((column) => !column.isBacklog && !column.isDone),
@@ -226,6 +248,19 @@ function BoardContent({
     void actions.resume.mutateAsync({ taskID, runID }).catch(reportResumeError);
   }
 
+  function deleteTask(taskID: string): void {
+    void taskDeleteDialog.open({ taskID });
+  }
+
+  async function confirmDeleteTask(target: TaskDeleteTarget, close: () => void): Promise<void> {
+    try {
+      await actions.delete.mutateAsync(target.taskID);
+      close();
+    } catch (error) {
+      reportDeleteError(error);
+    }
+  }
+
   function reportStartError(error: unknown): void {
     reportActionError("board-start-error", t("board.startFailed"), error);
   }
@@ -240,6 +275,10 @@ function BoardContent({
 
   function reportResumeError(error: unknown): void {
     reportActionError("board-resume-error", t("board.resumeFailed"), error);
+  }
+
+  function reportDeleteError(error: unknown): void {
+    reportActionError("board-delete-error", t("board.deleteFailed"), error);
   }
 
   function reportRejectedDrop(): void {
@@ -356,6 +395,7 @@ function BoardContent({
                       setActiveDrag(payload);
                     }}
                     onCardsLoadError={reportCardsLoadError}
+                    onDeleteTask={deleteTask}
                     onDropTask={dropTask}
                     onInterruptTask={interruptTask}
                     onResumeTask={resumeTask}
@@ -381,6 +421,7 @@ function BoardContent({
                   setActiveDrag(payload);
                 }}
                 onCardsLoadError={reportCardsLoadError}
+                onDeleteTask={deleteTask}
                 onDropTask={dropTask}
                 onInterruptTask={interruptTask}
                 onResumeTask={resumeTask}
@@ -410,6 +451,7 @@ function BoardContent({
           );
         }}
       />
+      {taskDeleteDialog.fallback}
       {!board.selectedWorkflow.validForTaskCreation ? (
         <FloatingNoticeIsland
           collapsed={workflowIssuesCollapsed}

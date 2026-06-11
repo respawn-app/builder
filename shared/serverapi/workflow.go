@@ -702,6 +702,10 @@ type WorkflowTaskCancelRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+type WorkflowTaskDeleteRequest struct {
+	TaskID string `json:"task_id"`
+}
+
 type WorkflowTaskInterruptRequest struct {
 	TaskID string `json:"task_id"`
 	RunID  string `json:"run_id,omitempty"`
@@ -1515,6 +1519,10 @@ func (r WorkflowTaskMoveRequest) Validate() error {
 }
 
 func (r WorkflowTaskCancelRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskDeleteRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
 }
 

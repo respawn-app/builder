@@ -655,6 +655,23 @@ func (s *Service) CancelWorkflowTask(ctx context.Context, req serverapi.Workflow
 	return nil
 }
 
+func (s *Service) DeleteWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskDeleteRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	if s.runtimeCancel != nil {
+		if err := s.runtimeCancel.CancelTaskRuns(ctx, workflow.TaskID(req.TaskID)); err != nil {
+			return err
+		}
+	}
+	task, err := s.store.DeleteTask(ctx, workflow.TaskID(req.TaskID))
+	if err != nil {
+		return err
+	}
+	s.publishWorkflowEvent(ctx, task.ProjectID, string(task.WorkflowID), "task", "deleted", req.TaskID)
+	return nil
+}
+
 func (s *Service) ListWorkflowAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowAttentionListResponse{}, err

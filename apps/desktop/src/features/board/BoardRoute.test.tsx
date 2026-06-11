@@ -107,6 +107,56 @@ describe("BoardRoute", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("deletes a task from the card context menu", async () => {
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes(),
+      { method: "workflow.task.delete", result: {} },
+    ]);
+
+    render(<App services={services} />);
+
+    fireEvent.contextMenu(await screen.findByRole("article", { name: "Write focused tests" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(services.transport.calls.some((call) => call.method === "workflow.task.delete")).toBe(false);
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete task?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "workflow.task.delete",
+        params: { task_id: "task-1" },
+      });
+    });
+  });
+
+  it("opens native confirmation before deleting a task when dialog windows are available", async () => {
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const opened: NativeDialogWindowOptions[] = [];
+    const services = createTestServices(
+      [...startupRoutes, ...boardRoutes()],
+      nativeDialogBridge(opened),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.contextMenu(await screen.findByRole("article", { name: "Write focused tests" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(opened).toContainEqual(
+        expect.objectContaining({
+          params: { taskID: "task-1" },
+          route: "/native-dialog/task-delete",
+          title: "Delete task?",
+        }),
+      );
+    });
+    expect(services.transport.calls.some((call) => call.method === "workflow.task.delete")).toBe(false);
+  });
+
   it("renders Main SWE groups after the Implementation column", async () => {
     window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
     const mainSWEWorkflow = { ...workflow, display_name: "Main SWE" };

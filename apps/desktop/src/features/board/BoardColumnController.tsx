@@ -23,6 +23,7 @@ export type BoardColumnControllerProps = Readonly<{
   onCardDragEnd: () => void;
   onCardDragStart: (payload: BoardCardDragPayload) => void;
   onCardsLoadError: (error: unknown) => void;
+  onDeleteTask: (taskID: string) => void;
   onDropTask: (event: DragEvent<HTMLElement>, column: BoardColumn) => void;
   onInterruptTask: (taskID: string, runID: string) => void;
   onResumeTask: (taskID: string, runID: string) => void;
@@ -39,6 +40,7 @@ export function BoardColumnController({
   onCardDragEnd,
   onCardDragStart,
   onCardsLoadError,
+  onDeleteTask,
   onDropTask,
   onInterruptTask,
   onResumeTask,
@@ -74,6 +76,7 @@ export function BoardColumnController({
       onCardClick={onCardClick}
       onCardDragEnd={onCardDragEnd}
       onCardDragStart={onCardDragStart}
+      onDeleteTask={onDeleteTask}
       onDropTask={(event) => {
         onDropTask(event, column);
       }}

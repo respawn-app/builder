@@ -493,6 +493,37 @@ func TestServiceCancelTaskCancelsActiveRuntime(t *testing.T) {
 	}
 }
 
+func TestServiceDeleteTaskCancelsRuntimeAndPublishesEvent(t *testing.T) {
+	ctx, service, binding := newWorkflowServiceTestContext(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
+	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
+	if _, err := service.StartTaskAutomation(ctx, task.Task.ID); err != nil {
+		t.Fatalf("StartTaskAutomation: %v", err)
+	}
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+	canceler := &recordingTaskRuntimeCanceler{}
+	service.runtimeCancel = canceler
+
+	if err := service.DeleteWorkflowTask(ctx, serverapi.WorkflowTaskDeleteRequest{TaskID: task.Task.ID}); err != nil {
+		t.Fatalf("DeleteWorkflowTask: %v", err)
+	}
+	if len(canceler.taskIDs) != 1 || canceler.taskIDs[0] != workflow.TaskID(task.Task.ID) {
+		t.Fatalf("canceled tasks = %+v", canceler.taskIDs)
+	}
+	event := nextWorkflowProjectEvent(t, sub)
+	if event.ProjectID != binding.ProjectID || event.WorkflowID != workflowID || event.Resource != "task" || event.Action != "deleted" || !sameStringSet(event.ChangedIDs, []string{task.Task.ID}) {
+		t.Fatalf("delete event = %+v, want task deleted event", event)
+	}
+	if _, err := service.GetWorkflowTask(ctx, serverapi.WorkflowTaskGetRequest{TaskID: task.Task.ID}); err == nil {
+		t.Fatalf("deleted workflow task should not remain readable")
+	}
+}
+
 func TestServiceResumeTaskRequeuesRunAndNotifiesScheduler(t *testing.T) {
 	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
