@@ -2,9 +2,11 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AttentionItem, TaskTransition } from "../../api";
-import { Button, Island, RadioGroup, RadioGroupItem } from "../../ui";
+import { useAppServices } from "../../app/useAppServices";
+import { Button, Island, RadioGroup, RadioGroupItem, showStatusToast } from "../../ui";
 import { fieldInputClassName } from "../../ui/Field";
 import { cx } from "../../ui/classes";
+import { WorkflowEdgeRouteGraphic } from "../workflow-editor/WorkflowEdgeRouteGraphic";
 import { usePendingAsks } from "./useTaskDetailData";
 import type { useTaskMutations } from "./useTaskDetailData";
 
@@ -224,45 +226,39 @@ export function ApprovalBox({
   transitions: readonly TaskTransition[];
 }>) {
   const { t } = useTranslation();
+  const { nativeBridge } = useAppServices();
   const transition = transitions.find((item) => item.id === attention.taskTransitionID);
   const stale = transition !== undefined && transition.version !== currentVersion;
   return (
     <Island aria-label={t("task.approval")} className="grid gap-[var(--space-3)]">
-      <h3 className="m-0">{t("task.approval")}</h3>
-      <p className="m-0">{attention.message}</p>
       {transition !== undefined ? (
-        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[var(--space-3)] gap-y-[var(--space-2)]">
-          <dt>{t("task.approvalSnapshot")}</dt>
-          <dd>
-            {transition.sourceNodeName} · {transition.transitionName || transition.transitionID}
-          </dd>
-          {transition.edges.length > 0 ? (
-            <>
-              <dt>{t("task.targetNodes")}</dt>
-              <dd>{transition.edges.map((edge) => edge.targetNodeName).join(", ")}</dd>
-            </>
-          ) : null}
+        <div className="grid gap-[var(--space-3)]">
+          <WorkflowEdgeRouteGraphic
+            contextMode=""
+            neutralArrow
+            sourceLabel={transition.sourceNodeName}
+            targetLabel={transitionTargetLabel(transition, t)}
+          />
           {transition.commentary.length > 0 ? (
-            <>
-              <dt>{t("task.commentary")}</dt>
-              <dd>{transition.commentary}</dd>
-            </>
+            <p className="m-0 whitespace-pre-wrap text-sm text-[var(--color-muted)]">{transition.commentary}</p>
           ) : null}
-          <dt>{t("task.outputValues")}</dt>
-          <dd>
-            {Object.entries(transition.outputValues)
-              .map(([key, value]) => `${key}: ${value}`)
-              .join("\n") || t("app.none")}
-          </dd>
-          <dt>{t("app.version")}</dt>
-          <dd>{transition.version}</dd>
+          <ApprovalOutputValues
+            nativeBridge={nativeBridge}
+            outputValues={transition.outputValues}
+            onCopied={(name) => {
+              showStatusToast({
+                id: `task-approval-output-copied-${name}`,
+                title: t("task.outputValueCopied", { name }),
+                tone: "success",
+              });
+            }}
+          />
           {stale ? (
-            <>
-              <dt>{t("task.staleApproval")}</dt>
-              <dd>{t("task.staleApprovalBody")}</dd>
-            </>
+            <p className="m-0 text-sm text-[var(--color-warning)]">
+              <strong>{t("task.staleApproval")}</strong> {t("task.staleApprovalBody")}
+            </p>
           ) : null}
-        </dl>
+        </div>
       ) : (
         <p>{t("task.unavailableSnapshot")}</p>
       )}
@@ -275,4 +271,63 @@ export function ApprovalBox({
       </Button>
     </Island>
   );
+}
+
+function ApprovalOutputValues({
+  nativeBridge,
+  onCopied,
+  outputValues,
+}: Readonly<{
+  nativeBridge: ReturnType<typeof useAppServices>["nativeBridge"];
+  onCopied: (name: string) => void;
+  outputValues: Readonly<Record<string, string>>;
+}>) {
+  const { t } = useTranslation();
+  const entries = Object.entries(outputValues);
+  if (entries.length === 0) {
+    return <p className="m-0 text-sm text-[var(--color-muted)]">{t("app.none")}</p>;
+  }
+  return (
+    <div className="grid gap-[var(--space-2)]">
+      {entries.map(([name, value], index) => (
+        <div className="grid gap-[var(--space-2)]" key={name}>
+          <div className="grid gap-[var(--space-1)]">
+            <strong className="text-sm">{name}</strong>
+            <button
+              className="min-w-0 whitespace-pre-wrap rounded-[var(--radius-m)] text-left text-sm text-[var(--color-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]"
+              onClick={() => {
+                void copyText(value, nativeBridge).then(() => {
+                  onCopied(name);
+                });
+              }}
+              type="button"
+            >
+              {value}
+            </button>
+          </div>
+          {index < entries.length - 1 ? (
+            <div className="px-[var(--space-2)]">
+              <div className="h-px w-full bg-[var(--color-outline)]" />
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function transitionTargetLabel(transition: TaskTransition, fallback: ReturnType<typeof useTranslation>["t"]): string {
+  const labels = transition.edges.map((edge) => edge.targetNodeName.trim()).filter((label) => label.length > 0);
+  return labels.join(", ") || transition.transitionName || transition.transitionID || fallback("app.none");
+}
+
+async function copyText(
+  value: string,
+  nativeBridge: ReturnType<typeof useAppServices>["nativeBridge"],
+): Promise<void> {
+  if (nativeBridge.capabilities.clipboard.writeText) {
+    await nativeBridge.clipboard.writeText(value);
+    return;
+  }
+  await navigator.clipboard.writeText(value);
 }

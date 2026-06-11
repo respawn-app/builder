@@ -6,6 +6,7 @@ import { workflowEdgeColor } from "./workflowGraphColors";
 export type WorkflowEdgeRouteGraphicProps = Readonly<{
   contextMode: string;
   hasError?: boolean | undefined;
+  neutralArrow?: boolean | undefined;
   sourceLabel: string;
   targetLabel: string;
 }>;
@@ -13,6 +14,7 @@ export type WorkflowEdgeRouteGraphicProps = Readonly<{
 export function WorkflowEdgeRouteGraphic({
   contextMode,
   hasError = false,
+  neutralArrow = false,
   sourceLabel,
   targetLabel,
 }: WorkflowEdgeRouteGraphicProps) {
@@ -31,7 +33,7 @@ export function WorkflowEdgeRouteGraphic({
         data-testid="workflow-edge-route-arrow"
         size={20}
         strokeWidth={1.8}
-        style={{ color: workflowEdgeColor(contextMode, hasError) }}
+        style={{ color: neutralArrow ? "var(--color-muted)" : workflowEdgeColor(contextMode, hasError) }}
       />
       <WorkflowEdgeRouteGraphicNode label={targetLabel} testID="workflow-edge-route-target" />
     </div>

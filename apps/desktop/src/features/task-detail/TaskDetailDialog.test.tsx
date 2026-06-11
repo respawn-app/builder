@@ -181,6 +181,37 @@ describe("TaskDetailDialog", () => {
     expect(within(question).getByRole("radio", { name: /Pistachios/u })).toBeInTheDocument();
   });
 
+  it("renders approval snapshots as route, commentary, and copyable output values", async () => {
+    window.history.pushState(null, "", "/tasks/task-1");
+    const copied: string[] = [];
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "workflow.task.get", result: taskDetailResponse },
+        { method: "workflow.task.activity.list", result: activityResponse },
+        { method: "ask.listPendingBySession", result: pendingAskResponse },
+      ],
+      nativeBridgeWithClipboard(copied),
+    );
+
+    render(<App services={services} />);
+
+    const approval = await screen.findByRole("region", { name: "Approval" });
+    expect(within(approval).queryByRole("heading", { name: "Approval" })).not.toBeInTheDocument();
+    expect(within(approval).queryByText("Approval snapshot")).not.toBeInTheDocument();
+    expect(within(approval).queryByText("Version")).not.toBeInTheDocument();
+    expect(within(approval).queryByText("Approve transition")).not.toBeInTheDocument();
+    expect(within(approval).getByTestId("workflow-edge-route-source")).toHaveTextContent("Implement");
+    expect(within(approval).getByTestId("workflow-edge-route-target")).toHaveTextContent("Ship");
+    expect(within(approval).getByText("Looks good")).toBeInTheDocument();
+
+    fireEvent.click(within(approval).getByRole("button", { name: "ok" }));
+
+    await waitFor(() => {
+      expect(copied).toEqual(["ok"]);
+    });
+  });
+
   it("confirms task cancellation in a popover without inline helper copy", async () => {
     window.history.pushState(null, "", "/tasks/task-1");
     const services = createTestServices([
