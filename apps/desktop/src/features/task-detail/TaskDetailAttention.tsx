@@ -191,7 +191,10 @@ function QuestionOption({
       )}
     >
       <RadioGroupItem className="mt-1" disabled={disabled} id={id} value={value} />
-      <label className={cx("min-w-0", recommended && "font-bold text-[var(--color-primary)]")} htmlFor={id}>
+      <label
+        className={cx("min-w-0 flex-1 cursor-pointer", recommended && "font-bold text-[var(--color-primary)]")}
+        htmlFor={id}
+      >
         {text}
         {recommended ? <span className="ml-[var(--space-2)] text-xs font-bold">({t("task.recommended")})</span> : null}
       </label>
