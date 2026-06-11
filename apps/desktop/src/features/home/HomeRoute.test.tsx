@@ -180,35 +180,44 @@ describe("HomeRoute", () => {
 
   it("scrolls the Home task sidebar to the first question for question Inbox cards", async () => {
     const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: scrollIntoView,
     });
-    const services = createTestServices([
-      ...startupRoutes,
-      {
-        method: "workflow.attention.list",
-        result: {
-          generated_at_unix_ms: 1,
-          items: [attentionItem({ kind: "question", message: "Pick answer" })],
-          next_page_token: "",
+    try {
+      const services = createTestServices([
+        ...startupRoutes,
+        {
+          method: "workflow.attention.list",
+          result: {
+            generated_at_unix_ms: 1,
+            items: [attentionItem({ kind: "question", message: "Pick answer" })],
+            next_page_token: "",
+          },
         },
-      },
-      { method: "workflow.task.get", result: taskDetailResponseWithQuestion },
-      { method: "workflow.task.activity.list", result: emptyActivityResponse },
-      { method: "ask.listPendingBySession", result: { Asks: [] } },
-    ]);
+        { method: "workflow.task.get", result: taskDetailResponseWithQuestion },
+        { method: "workflow.task.activity.list", result: emptyActivityResponse },
+        { method: "ask.listPendingBySession", result: { Asks: [] } },
+      ]);
 
-    render(<App services={services} />);
+      render(<App services={services} />);
 
-    fireEvent.click(await screen.findByTestId("attention-row"));
+      fireEvent.click(await screen.findByTestId("attention-row"));
 
-    const sidebar = await screen.findByRole("complementary", { name: "Task" });
-    expect(await within(sidebar).findByRole("region", { name: "Question" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
-    });
-    expect(window.location.pathname).toBe("/");
+      const sidebar = await screen.findByRole("complementary", { name: "Task" });
+      expect(await within(sidebar).findByRole("region", { name: "Question" })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+      });
+      expect(window.location.pathname).toBe("/");
+    } finally {
+      if (originalScrollIntoView !== undefined) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", originalScrollIntoView);
+      } else {
+        Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+      }
+    }
   });
 
   it("opens workflow-only Inbox cards in the workflow editor", async () => {
