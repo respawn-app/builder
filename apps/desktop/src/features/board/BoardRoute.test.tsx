@@ -4,7 +4,6 @@ import {
   createTauriNativeBridge,
   type NativeBridge,
   type NativeDialogWindowOptions,
-  type NativeTaskDetailTarget,
 } from "@builder/desktop-native-bridge";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
@@ -1129,19 +1128,15 @@ describe("BoardRoute", () => {
     });
   });
 
-  it("opens board task detail in the global sidebar instead of a native task detail window", async () => {
+  it("opens board task detail in the global sidebar", async () => {
     const restoreWindowWidth = mockWindowWidth(1600);
     window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
-    const opened: NativeTaskDetailTarget[] = [];
-    const services = createTestServices(
-      [
-        ...startupRoutes,
-        ...boardRoutes(),
-        { method: "workflow.task.get", result: taskDetailResponseForCancel() },
-        { method: "workflow.task.activity.list", result: emptyActivityResponse },
-      ],
-      taskDetailWindowBridge(opened),
-    );
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes(),
+      { method: "workflow.task.get", result: taskDetailResponseForCancel() },
+      { method: "workflow.task.activity.list", result: emptyActivityResponse },
+    ]);
 
     const { unmount } = render(<App services={services} />);
 
@@ -1155,7 +1150,6 @@ describe("BoardRoute", () => {
       expect(await within(sidebar).findByDisplayValue("Task detail title")).toBeInTheDocument();
       expect(methodCallCount(services.transport.calls, "workflow.task.get")).toBe(1);
       expect(methodCallCount(services.transport.calls, "workflow.task.activity.list")).toBe(1);
-      expect(opened).toEqual([]);
       expect(new URLSearchParams(window.location.search).get("taskId")).toBe("task-1");
 
       fireEvent.click(within(sidebar).getByRole("button", { name: "Close" }));
@@ -2642,22 +2636,5 @@ function mockWindowWidth(width: number): () => void {
       return;
     }
     Object.defineProperty(window, "innerWidth", descriptor);
-  };
-}
-
-function taskDetailWindowBridge(opened: NativeTaskDetailTarget[]): NativeBridge {
-  const base = createBrowserNativeBridge();
-  return {
-    ...base,
-    capabilities: {
-      ...base.capabilities,
-      taskDetailWindow: true,
-    },
-    taskDetail: {
-      ...base.taskDetail,
-      async openWindow(target): Promise<void> {
-        opened.push(target);
-      },
-    },
   };
 }

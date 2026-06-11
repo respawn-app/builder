@@ -6,7 +6,6 @@ import { taskDeleteNativeDialogPath } from "../features/board/taskDeleteConfirma
 import { ProjectCreateWindowRoute } from "../features/home/ProjectCreateForm";
 import { ProjectDeleteWindowRoute } from "../features/project-edit/ProjectDeleteButton";
 import { WorkspaceUnlinkWindowRoute } from "../features/project-edit/ProjectEditParts";
-import { TaskDetailWindowRoute } from "../features/task-detail/StandaloneTaskRoute";
 import { NewTaskWindowRoute } from "../features/tasks/NewTaskDialog";
 import { InvalidNativeDialogRoute } from "./InvalidNativeDialogRoute";
 import { useWindowChromeTitle } from "./windowChromeTitle";
@@ -28,11 +27,6 @@ const projectCreateSearchSchema = z.object({
 
 const projectDeleteSearchSchema = z.object({
   projectID: optionalSearchString,
-});
-
-const taskDetailSearchSchema = z.object({
-  resumeRunId: optionalSearchString,
-  taskId: optionalSearchString,
 });
 
 const taskDeleteSearchSchema = z.object({
@@ -78,18 +72,6 @@ export function createNativeDialogRoutes(rootRoute: AnyRootRoute) {
       return <InvalidNativeDialogRoute />;
     }
     return <ProjectDeleteWindowRoute projectID={projectID} />;
-  }
-
-  const taskDetailWindowRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/native-dialog/task-detail",
-    validateSearch: (search: Record<string, unknown>) => taskDetailSearchSchema.parse(search),
-    component: TaskDetailNativeRoute,
-  });
-
-  function TaskDetailNativeRoute() {
-    const search = taskDetailSearchSchema.parse(taskDetailWindowRoute.useSearch());
-    return <TaskDetailWindowRoute resumeRunId={search.resumeRunId} taskId={search.taskId} />;
   }
 
   const taskDeleteWindowRoute = createRoute({
@@ -142,7 +124,6 @@ export function createNativeDialogRoutes(rootRoute: AnyRootRoute) {
   return [
     projectCreateRoute,
     projectDeleteRoute,
-    taskDetailWindowRoute,
     taskDeleteWindowRoute,
     newTaskWindowRoute,
     workspaceUnlinkWindowRoute,

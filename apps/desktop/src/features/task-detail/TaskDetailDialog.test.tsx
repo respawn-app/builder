@@ -1,10 +1,5 @@
-import {
-  createBrowserNativeBridge,
-  type NativeBridge,
-  type NativeTaskDetailChanged,
-  type NativeTaskDetailTarget,
-} from "@builder/desktop-native-bridge";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createBrowserNativeBridge, type NativeBridge } from "@builder/desktop-native-bridge";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../../App";
 import type { JsonObject, JsonValue } from "../../api/json";
@@ -312,75 +307,6 @@ describe("TaskDetailDialog", () => {
     });
   });
 
-  it("opens Home Inbox rows through native task detail window when available", async () => {
-    window.history.pushState(null, "", "/");
-    const opened: NativeTaskDetailTarget[] = [];
-    const services = createTestServices(
-      [
-        ...startupRoutes,
-        {
-          method: "workflow.attention.list",
-          result: {
-            items: [
-              {
-                ...attentionBase,
-                id: "attention-question",
-                kind: "question",
-                run_id: "run-1",
-                session_id: "session-1",
-                ask_id: "ask-1",
-                task_transition_id: "",
-                message: "Pick answer",
-              },
-            ],
-            next_page_token: "",
-            generated_at_unix_ms: 1,
-          },
-        },
-      ],
-      nativeBridgeWithTaskDetailWindow(opened),
-    );
-
-    render(<App services={services} />);
-
-    fireEvent.click(await screen.findByTestId("attention-row"));
-    await waitFor(() => {
-      expect(opened).toEqual([{ resumeRunId: "", taskId: "task-1" }]);
-    });
-  });
-
-  it("refreshes visible Home Inbox queries after native task detail mutations", async () => {
-    window.history.pushState(null, "", "/");
-    let onChanged: ((event: NativeTaskDetailChanged) => void) | null = null;
-    const services = createTestServices(
-      [
-        ...startupRoutes,
-        {
-          method: "workflow.attention.list",
-          handler: (_params, callIndex) => ({
-            items: callIndex === 0 ? [attentionResponseItem] : [],
-            next_page_token: "",
-            generated_at_unix_ms: callIndex + 1,
-          }),
-        },
-      ],
-      nativeBridgeWithTaskDetailChangeHandler((handler) => {
-        onChanged = handler;
-      }),
-    );
-
-    render(<App services={services} />);
-    expect(await screen.findByTestId("attention-row")).toBeInTheDocument();
-
-    act(() => {
-      onChanged?.({ taskId: "task-1" });
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("attention-row")).not.toBeInTheDocument();
-    });
-  });
-
 });
 
 function nativeBridgeWithClipboard(copied: string[]): NativeBridge {
@@ -395,39 +321,6 @@ function nativeBridgeWithClipboard(copied: string[]): NativeBridge {
       ...base.clipboard,
       async writeText(value): Promise<void> {
         copied.push(value);
-      },
-    },
-  };
-}
-
-function nativeBridgeWithTaskDetailWindow(opened: NativeTaskDetailTarget[]): NativeBridge {
-  const base = createBrowserNativeBridge();
-  return {
-    ...base,
-    capabilities: {
-      ...base.capabilities,
-      taskDetailWindow: true,
-    },
-    taskDetail: {
-      ...base.taskDetail,
-      async openWindow(target): Promise<void> {
-        opened.push(target);
-      },
-    },
-  };
-}
-
-function nativeBridgeWithTaskDetailChangeHandler(
-  onRegistered: (handler: (event: NativeTaskDetailChanged) => void) => void,
-): NativeBridge {
-  const base = createBrowserNativeBridge();
-  return {
-    ...base,
-    taskDetail: {
-      ...base.taskDetail,
-      async onChanged(handler): Promise<() => void> {
-        onRegistered(handler);
-        return () => undefined;
       },
     },
   };
@@ -470,17 +363,6 @@ const attentionBase = {
   task_short_id: "T-1",
   task_title: "Resolve blocker",
   occurred_at_unix_ms: 1,
-};
-
-const attentionResponseItem = {
-  ...attentionBase,
-  id: "attention-question",
-  kind: "question",
-  run_id: "run-1",
-  session_id: "session-1",
-  ask_id: "ask-1",
-  task_transition_id: "",
-  message: "Pick answer",
 };
 
 const taskDetailResponse = {

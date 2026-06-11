@@ -13,7 +13,6 @@ import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useStatusController } from "../../app/useStatusController";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
 import { ErrorState, LoadingState, VirtualizedInfiniteList } from "../../ui";
-import { useOpenTaskDetail } from "../task-detail/useOpenTaskDetail";
 import { HomePrimaryPane, type HomePrimaryTab } from "./HomePrimaryPane";
 import { ProjectCreateDialog, type ProjectDraft } from "./ProjectCreateForm";
 import {
@@ -191,7 +190,7 @@ type AttentionListProps = Readonly<{
 
 function AttentionList({ items, query }: AttentionListProps) {
   const { t } = useTranslation();
-  const openTaskDetail = useOpenTaskDetail();
+  const navigation = useAppNavigation();
   if (query.isPending) {
     return <LoadingState appearanceDelayMs={0} fullPage={false} reveal={false} title={t("states.loading")} />;
   }
@@ -216,17 +215,17 @@ function AttentionList({ items, query }: AttentionListProps) {
       onLoadMore={() => void query.fetchNextPage()}
       paddingEnd={16}
       paddingStart={16}
-      renderItem={(item) => <AttentionRow item={item} openTaskDetail={openTaskDetail} />}
+      renderItem={(item) => <AttentionRow item={item} navigation={navigation} />}
     />
   );
 }
 
 function AttentionRow({
   item,
-  openTaskDetail,
+  navigation,
 }: Readonly<{
   item: AttentionItem;
-  openTaskDetail: ReturnType<typeof useOpenTaskDetail>;
+  navigation: ReturnType<typeof useAppNavigation>;
 }>) {
   return (
     <button
@@ -234,7 +233,14 @@ function AttentionRow({
       data-testid="attention-row"
       onClick={() => {
         if (item.taskID.length > 0) {
-          openTaskDetail(item.taskID);
+          openAttentionTask(item, navigation);
+          return;
+        }
+        if (item.workflowID.length > 0) {
+          void navigation.openWorkflowEditor({
+            projectID: item.projectID.length > 0 ? item.projectID : undefined,
+            workflowID: item.workflowID,
+          });
         }
       }}
       type="button"
@@ -254,6 +260,14 @@ function AttentionRow({
       <span className="text-sm text-[var(--color-muted)]">{formatRelativeTime(item.occurredAt)}</span>
     </button>
   );
+}
+
+function openAttentionTask(item: AttentionItem, navigation: ReturnType<typeof useAppNavigation>): void {
+  if (item.projectID.length > 0 && item.workflowID.length > 0) {
+    void navigation.openProjectTask(item.projectID, item.workflowID, item.taskID);
+    return;
+  }
+  void navigation.openTask(item.taskID);
 }
 
 function HomeInlineEmptyState({ body }: Readonly<{ body: string }>) {
