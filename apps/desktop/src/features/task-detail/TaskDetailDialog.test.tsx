@@ -144,13 +144,11 @@ describe("TaskDetailDialog", () => {
 
     expect(await screen.findByRole("textbox", { name: "Title" })).toHaveValue("Resolve blocker");
     expect(screen.queryByRole("region", { name: "Inbox" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("task-description-save")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Renamed task" } });
-    expect(screen.getByRole("button", { name: "Save title" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+    expect(screen.queryByRole("button", { name: "Save title" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(services.transport.calls).toContainEqual({
@@ -166,7 +164,7 @@ describe("TaskDetailDialog", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
       target: { value: "Updated details" },
     });
-    expect(screen.getByTestId("task-description-save")).toBeEnabled();
+    expect(screen.queryByTestId("task-description-save")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
