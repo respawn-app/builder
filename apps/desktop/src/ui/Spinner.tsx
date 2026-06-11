@@ -28,6 +28,7 @@ export function Spinner({ className, size = "md", strokeWidth = 3, testID = "spi
         strokeDasharray="42 18"
         strokeLinecap="round"
         strokeWidth={strokeWidth}
+        vectorEffect="non-scaling-stroke"
       />
     </svg>
   );
