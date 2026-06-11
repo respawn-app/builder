@@ -1,4 +1,4 @@
-import type { DragEvent, KeyboardEvent, ReactNode } from "react";
+import { useCallback, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Maximize2 } from "lucide-react";
 
@@ -12,6 +12,7 @@ import {
   encodeBoardCardDragPayload,
 } from "./BoardDragTypes";
 import type { KanbanCardVM, KanbanColumnVM, KanbanGroupVM } from "./BoardColumnViewModel";
+import { useBoardCardMotion } from "./BoardCardMotionContext";
 
 export type KanbanColumnProps = Readonly<{
   cards: readonly KanbanCardVM[];
@@ -228,6 +229,13 @@ function TaskCard({
   onResume: (runID: string) => void;
 }>) {
   const { t } = useTranslation();
+  const { cardClassName, cardStyle, registerCard: registerMotionCard } = useBoardCardMotion();
+  const registerCard = useCallback(
+    (element: HTMLElement | null) => {
+      registerMotionCard(card.id, element);
+    },
+    [card.id, registerMotionCard],
+  );
   const canDrag = !actionsDisabled && card.statusKind !== "canceled";
   const dragPayload = {
     taskID: card.id,
@@ -241,7 +249,10 @@ function TaskCard({
       <ContextMenuTrigger asChild>
         <article
           aria-label={card.title}
-          className="mb-[var(--space-3)] grid cursor-pointer gap-[var(--space-2)] rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)] outline-none focus-visible:border-[var(--color-primary)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
+          className={cx(
+            "mb-[var(--space-3)] grid cursor-pointer gap-[var(--space-2)] rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)] outline-none focus-visible:border-[var(--color-primary)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]",
+            cardClassName(card.id),
+          )}
           data-testid="task-card"
           draggable={canDrag}
           onClick={onClick}
@@ -260,6 +271,8 @@ function TaskCard({
           onKeyDown={(event) => {
             activateCardFromKeyboard(event, onClick);
           }}
+          ref={registerCard}
+          style={cardStyle(card.id)}
           tabIndex={0}
         >
           <div className="grid gap-[var(--space-1)] text-left text-[var(--color-on-island)]">

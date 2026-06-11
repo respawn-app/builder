@@ -102,7 +102,37 @@
   list-style: none;
 }
 
+@keyframes board-card-enter-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  .view-transition-board-card::view-transition-old(root),
+  .view-transition-board-card::view-transition-new(root) {
+    animation: none;
+  }
+
+  .view-transition-board-card::view-transition-group(*) {
+    animation-duration: var(--motion-normal);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .view-transition-board-card::view-transition-old(*) {
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .board-card-enter-reveal {
+    animation: board-card-enter-reveal var(--motion-normal) cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   .board-column-drop-idle,
   .board-column-drop-allowed,
   .board-column-drop-blocked {

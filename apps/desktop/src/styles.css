@@ -570,11 +570,11 @@
     transform-origin: center;
   }
 
-  ::view-transition-old(root) {
+  .view-transition-route::view-transition-old(root) {
     animation: route-fade-out var(--motion-fast) both;
   }
 
-  ::view-transition-new(root) {
+  .view-transition-route::view-transition-new(root) {
     animation: route-fade-scale var(--motion-fast) both;
   }
 }

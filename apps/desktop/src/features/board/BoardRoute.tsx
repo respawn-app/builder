@@ -12,12 +12,9 @@ import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useStatusController } from "../../app/useStatusController";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { Button, EmptyState, ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
-import { chromeContentPaddingClassName } from "../../ui/chromePadding";
 import { WorkflowValidationIssues } from "../workflow/WorkflowValidationIssues";
-import { BoardColumnController } from "./BoardColumnController";
 import { BoardHoverMenu } from "./BoardHoverMenu";
-import { KanbanGroup } from "./BoardColumns";
-import { toKanbanGroupVM } from "./BoardColumnViewModel";
+import { BoardRailMotionController } from "./BoardRailMotionController";
 import { TaskDeleteConfirmationFallbackDialog } from "./TaskDeleteConfirmation";
 import { taskDeleteWindowOptions, type TaskDeleteTarget } from "./taskDeleteConfirmationModel";
 import {
@@ -33,7 +30,6 @@ import {
   type PendingMissingInputDrop,
 } from "./BoardDropActions";
 import { MissingInputsDialog, RollbackStartDialog } from "./BoardDropDialogs";
-import { boardSections } from "./BoardModel";
 import "./board.css";
 import { useBoard, useBoardTaskActions, useProjectBoardSubscription } from "./useBoardData";
 
@@ -167,7 +163,6 @@ function BoardContent({
     () => board.columns.filter((column) => !column.isBacklog && !column.isDone),
     [board.columns],
   );
-  const sections = useMemo(() => boardSections(board), [board]);
   const firstActive = activeColumns[0];
   const columnExpansionScope = `${board.projectID}:${board.selectedWorkflow.id}`;
   const expandedEmptyColumnIDs =
@@ -426,74 +421,29 @@ function BoardContent({
         ref={scrollportRef}
         role="list"
       >
-        <div
-          className={`flex h-full min-h-0 w-max min-w-full gap-[var(--space-2)] ${chromeContentPaddingClassName}`}
-          data-testid="board-column-rail"
-        >
-          {sections.map((section) =>
-            section.kind === "group" ? (
-              <KanbanGroup
-                group={toKanbanGroupVM(section.group)}
-                hideHeader={section.columns.every(columnIsCollapsed)}
-                key={section.id}
-              >
-                {section.columns.map((column) => (
-                  <BoardColumnController
-                    actionsDisabled={actionsDisabled}
-                    board={board}
-                    column={column}
-                    dropState={columnDropState(column)}
-                    isCollapsed={columnIsCollapsed(column)}
-                    isFirstActive={column.id === firstActive?.id}
-                    key={`${board.projectID}:${board.selectedWorkflow.id}:${column.id}`}
-                    onCardClick={openTask}
-                    onCardDragEnd={() => {
-                      activeDragRef.current = null;
-                      setActiveDrag(null);
-                    }}
-                    onCardDragStart={(payload) => {
-                      activeDragRef.current = payload;
-                      setActiveDrag(payload);
-                    }}
-                    onCardsLoadError={reportCardsLoadError}
-                    onDeleteTask={deleteTask}
-                    onDropTask={dropTask}
-                    onExpandColumn={expandColumn}
-                    onInterruptTask={interruptTask}
-                    onResumeTask={resumeTask}
-                    scrollportRef={scrollportRef}
-                  />
-                ))}
-              </KanbanGroup>
-            ) : (
-              <BoardColumnController
-                actionsDisabled={actionsDisabled}
-                board={board}
-                column={section.column}
-                dropState={columnDropState(section.column)}
-                isCollapsed={columnIsCollapsed(section.column)}
-                isFirstActive={section.column.id === firstActive?.id}
-                key={`${board.projectID}:${board.selectedWorkflow.id}:${section.id}`}
-                onCardClick={openTask}
-                onCardDragEnd={() => {
-                  activeDragRef.current = null;
-                  setActiveDrag(null);
-                }}
-                onCardDragStart={(payload) => {
-                  activeDragRef.current = payload;
-                  setActiveDrag(payload);
-                }}
-                onCardsLoadError={reportCardsLoadError}
-                onDeleteTask={deleteTask}
-                onDropTask={dropTask}
-                onExpandColumn={expandColumn}
-                onInterruptTask={interruptTask}
-                onResumeTask={resumeTask}
-                scrollportRef={scrollportRef}
-              />
-            ),
-          )}
-        </div>
+        <BoardRailMotionController
+          actionsDisabled={actionsDisabled}
+          board={board}
+          columnDropState={columnDropState}
+          columnIsCollapsed={columnIsCollapsed}
+          firstActiveID={firstActive?.id}
+          onCardClick={openTask}
+          onCardDragEnd={() => {
+            activeDragRef.current = null;
+            setActiveDrag(null);
+          }}
+          onCardDragStart={(payload) => {
+            activeDragRef.current = payload;
+            setActiveDrag(payload);
+          }}
+          onCardsLoadError={reportCardsLoadError}
+          onDeleteTask={deleteTask}
+          onDropTask={dropTask}
+          onExpandColumn={expandColumn}
+          onInterruptTask={interruptTask}
+          onResumeTask={resumeTask}
+          scrollportRef={scrollportRef}
+        />
       </div>
       <BoardHorizontalScrollbar scrollportRef={scrollportRef} />
       <RollbackStartDialog

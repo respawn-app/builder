@@ -3,6 +3,7 @@ import { I18nextProvider } from "react-i18next";
 import { beforeAll, vi } from "vitest";
 
 import { appI18n, initializeI18n } from "../../i18n/setup";
+import { BoardCardMotionContext } from "./BoardCardMotionContext";
 import { KanbanColumn } from "./BoardColumns";
 import type { KanbanCardVM, KanbanColumnVM } from "./BoardColumnViewModel";
 import { boardCardDragPayloadType, decodeBoardCardDragPayload } from "./BoardDragTypes";
@@ -159,6 +160,43 @@ describe("KanbanColumn", () => {
 
     expect(onCardClick).toHaveBeenCalledTimes(4);
     expect(onCardClick).toHaveBeenCalledWith("task-1");
+  });
+
+  it("applies card motion class and view-transition name from context", () => {
+    render(
+      <I18nextProvider i18n={appI18n}>
+        <BoardCardMotionContext.Provider
+          value={{
+            cardClassName: () => "board-card-enter-reveal",
+            cardStyle: () => ({ viewTransitionName: "board-card-task-1" }),
+            registerCard: () => undefined,
+          }}
+        >
+          <KanbanColumn
+            actionsDisabled={false}
+            cards={[card]}
+            column={column}
+            dropState="idle"
+            hasMoreCards={false}
+            isFirstActive={false}
+            isLoadingMoreCards={false}
+            onCardClick={() => undefined}
+            onCardDragEnd={() => undefined}
+            onCardDragStart={() => undefined}
+            onDeleteTask={() => undefined}
+            onDropTask={() => undefined}
+            onInterruptTask={() => undefined}
+            onLoadMoreCards={() => undefined}
+            onResumeTask={() => undefined}
+          />
+        </BoardCardMotionContext.Provider>
+      </I18nextProvider>,
+    );
+
+    const renderedCard = screen.getByRole("article", { name: "Task" });
+
+    expect(renderedCard).toHaveClass("board-card-enter-reveal");
+    expect(renderedCard).toHaveStyle({ viewTransitionName: "board-card-task-1" });
   });
 
   it("deletes cards from the context menu without opening task detail", async () => {

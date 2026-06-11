@@ -1,0 +1,82 @@
+import { describe, expect, it } from "vitest";
+
+import type { KanbanCardVM } from "./BoardColumnViewModel";
+import {
+  boardCardMotionParticipants,
+  boardCardSnapshotFromEntries,
+  boardCardSnapshotsEqual,
+  boardCardViewTransitionName,
+} from "./BoardCardMotionModel";
+
+describe("BoardCardMotionModel", () => {
+  it("uses CSS-safe deterministic view transition names", () => {
+    expect(boardCardViewTransitionName("Task 1/α")).toMatch(/^board-card-[0-9a-f-]+$/u);
+    expect(boardCardViewTransitionName("Task 1/α")).toBe(boardCardViewTransitionName("Task 1/α"));
+  });
+
+  it("names shared and exiting visible cards while excluding duplicate rendered task IDs", () => {
+    const oldSnapshot = boardCardSnapshotFromEntries([
+      ["backlog", [card("task-1"), card("task-duplicate")]],
+      ["review", [card("task-duplicate")]],
+      ["done", [card("task-exit")]],
+    ]);
+    const newSnapshot = boardCardSnapshotFromEntries([
+      ["backlog", []],
+      ["review", [card("task-1"), card("task-duplicate")]],
+      ["done", []],
+    ]);
+
+    const participants = boardCardMotionParticipants(
+      oldSnapshot,
+      newSnapshot,
+      new Set(["task-1", "task-duplicate", "task-exit"]),
+    );
+
+    expect(participants.namesByCardID.get("task-1")).toBe(boardCardViewTransitionName("task-1"));
+    expect(participants.namesByCardID.get("task-exit")).toBe(boardCardViewTransitionName("task-exit"));
+    expect(participants.namesByCardID.has("task-duplicate")).toBe(false);
+  });
+
+  it("reveals new-only cards without naming them as shared elements", () => {
+    const participants = boardCardMotionParticipants(
+      boardCardSnapshotFromEntries([["backlog", []]]),
+      boardCardSnapshotFromEntries([["backlog", [card("task-new")]]]),
+      new Set(),
+    );
+
+    expect(participants.namesByCardID.size).toBe(0);
+    expect(participants.revealCardIDs.has("task-new")).toBe(true);
+  });
+
+  it("compares card snapshots by card content and order", () => {
+    const snapshot = boardCardSnapshotFromEntries([["backlog", [card("task-1")]]]);
+
+    expect(boardCardSnapshotsEqual(snapshot, boardCardSnapshotFromEntries([["backlog", [card("task-1")]]]))).toBe(
+      true,
+    );
+    expect(
+      boardCardSnapshotsEqual(snapshot, boardCardSnapshotFromEntries([["backlog", [{ ...card("task-1"), title: "Changed" }]]])),
+    ).toBe(false);
+  });
+});
+
+function card(id: string): KanbanCardVM {
+  return {
+    activeNodeIDs: id === "task-1" ? ["backlog"] : [],
+    actions: {
+      canInterrupt: false,
+      canResume: false,
+      canStart: true,
+      interruptRunID: "",
+      manualMoveTargetNodeIDs: [],
+      resumeRunID: "",
+    },
+    bodyPreview: "Body",
+    id,
+    shortID: id,
+    sourceWorkspaceName: "Main",
+    statusKind: "backlog",
+    title: "Task",
+    updatedAt: 1,
+  };
+}
