@@ -70,6 +70,16 @@
   opacity: 0.72;
 }
 
+.board-column-collapsed-label {
+  position: absolute;
+  top: 0;
+  left: calc(50% + 20px);
+  width: min(280px, calc(100vh - 180px));
+  height: 40px;
+  transform: rotate(90deg);
+  transform-origin: left top;
+}
+
 .board-hover-menu-morph {
   --board-menu-padding: var(--space-1);
   --board-menu-icon-row-size: 40px;

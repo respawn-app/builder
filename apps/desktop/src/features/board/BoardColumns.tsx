@@ -35,9 +35,11 @@ export type KanbanColumnProps = Readonly<{
 
 export function KanbanGroup({
   group,
+  hideHeader = false,
   children,
 }: Readonly<{
   group: KanbanGroupVM;
+  hideHeader?: boolean;
   children: ReactNode;
 }>) {
   return (
@@ -45,7 +47,11 @@ export function KanbanGroup({
       className="inline-grid h-full min-h-0 w-max grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-2)] align-top"
       role="listitem"
     >
-      <header>
+      <header
+        aria-hidden={hideHeader ? true : undefined}
+        className={hideHeader ? "invisible" : undefined}
+        data-testid={`kanban-group-header-${group.id}`}
+      >
         <h2 className="m-0 text-[1rem] font-bold">{group.name}</h2>
       </header>
       <div className="flex h-full min-h-0 gap-[var(--space-2)]">
@@ -77,7 +83,7 @@ export function KanbanColumn({
 }: KanbanColumnProps) {
   const { t } = useTranslation();
   const columnClassName = isCollapsed
-    ? `island-glass board-column-morph board-column-drop-${dropState} grid h-full min-h-0 w-[64px] shrink-0 grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-2)] align-top`
+    ? `island-glass board-column-morph board-column-collapsed board-column-drop-${dropState} flex h-full min-h-0 w-[64px] shrink-0 rounded-[var(--radius-xl)] p-[var(--space-2)] align-top`
     : `island-glass board-column-morph board-column-drop-${dropState} grid h-full min-h-0 w-[min(420px,80vw)] shrink-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-3)] align-top`;
   return (
     <section
@@ -175,20 +181,20 @@ function CollapsedColumnHeader({
 }>) {
   const { t } = useTranslation();
   return (
-    <div className="flex h-full min-h-0 flex-col items-center gap-[var(--space-3)]">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] justify-items-center gap-[var(--space-2)]">
       <button
         aria-label={t("board.expandColumn", { name: column.name })}
-        className="grid size-[32px] place-items-center rounded-full text-[var(--color-secondary)] outline-none transition-[background-color,box-shadow] duration-150 hover:bg-[var(--color-island-2)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
+        className="grid size-[28px] place-items-center rounded-full text-[var(--color-secondary)] outline-none transition-[background-color,box-shadow] duration-150 hover:bg-[var(--color-island-2)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)]"
         onClick={onExpand}
         type="button"
       >
         <ChevronRight aria-hidden="true" size={16} strokeWidth={1.8} />
       </button>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
-        <div className="grid origin-center rotate-90 grid-flow-col items-center gap-[var(--space-2)] whitespace-nowrap text-left">
-          <h2 className="m-0 text-[1rem]">{column.name}</h2>
+      <div className="relative min-h-0 w-full overflow-hidden">
+        <div className="board-column-collapsed-label flex items-center gap-[var(--space-2)] text-left">
+          <h2 className="m-0 max-w-[92px] truncate text-[1rem]">{column.name}</h2>
           {column.assigneeRole.length > 0 ? (
-            <p className="m-0 font-mono text-sm text-[var(--color-muted)]">{column.assigneeRole}</p>
+            <p className="m-0 max-w-[120px] truncate font-mono text-sm text-[var(--color-muted)]">{column.assigneeRole}</p>
           ) : null}
         </div>
       </div>

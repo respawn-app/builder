@@ -205,6 +205,7 @@ describe("BoardRoute", () => {
                 kind: "agent",
                 nodeID: "review",
                 sortOrder: 2,
+                taskCount: 1,
               }),
               boardColumn({
                 assigneeRole: "qa",
@@ -246,6 +247,94 @@ describe("BoardRoute", () => {
     expect(backlog).toAppearBefore(implementation);
     expect(implementation).toAppearBefore(group);
     expect(group).toAppearBefore(done);
+  });
+
+  it("hides a group header while all grouped columns are collapsed", async () => {
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const mainSWEWorkflow = { ...workflow, display_name: "Main SWE" };
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes(
+        {
+          board: {
+            ...boardResponse.board,
+            selected_workflow: mainSWEWorkflow,
+            workflows: [mainSWEWorkflow],
+            groups: [
+              {
+                group_id: "group-review",
+                key: "review",
+                display_name: "Review group",
+                sort_order: 1,
+                node_ids: ["review", "qa"],
+              },
+            ],
+            columns: [
+              boardColumn({
+                displayName: "Backlog",
+                isBacklog: true,
+                key: "backlog",
+                kind: "start",
+                nodeID: "backlog",
+                sortOrder: 0,
+                taskCount: 1,
+              }),
+              boardColumn({
+                assigneeRole: "coder",
+                displayName: "Implementation",
+                key: "implementation",
+                kind: "agent",
+                nodeID: "implementation",
+                sortOrder: 1,
+              }),
+              boardColumn({
+                assigneeRole: "reviewer",
+                displayName: "Review",
+                groupID: "group-review",
+                key: "review",
+                kind: "agent",
+                nodeID: "review",
+                sortOrder: 2,
+              }),
+              boardColumn({
+                assigneeRole: "qa",
+                displayName: "QA",
+                groupID: "group-review",
+                key: "qa",
+                kind: "agent",
+                nodeID: "qa",
+                sortOrder: 3,
+              }),
+              boardColumn({
+                displayName: "Done",
+                isDone: true,
+                key: "done",
+                kind: "terminal",
+                nodeID: "done",
+                sortOrder: 99,
+                taskCount: 1,
+              }),
+            ],
+          },
+        },
+        {
+          backlog: { cards: boardResponse.board.cards },
+          done: { cards: [] },
+          implementation: { cards: [] },
+          qa: { cards: [] },
+          review: { cards: [] },
+        },
+      ),
+    ]);
+
+    render(<App services={services} />);
+
+    await screen.findByRole("heading", { hidden: true, name: "Review group" });
+    expect(screen.getByTestId("kanban-group-header-group-review")).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Review" }));
+
+    expect(screen.getByTestId("kanban-group-header-group-review")).not.toHaveAttribute("aria-hidden");
   });
 
   it("starts tasks from in-memory drag state after rerender when browser dataTransfer drops custom payloads", async () => {

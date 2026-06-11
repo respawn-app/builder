@@ -18,6 +18,7 @@ export type BoardColumnControllerProps = Readonly<{
   board: WorkflowBoard;
   column: BoardColumn;
   dropState: BoardColumnDropState;
+  isCollapsed: boolean;
   isFirstActive: boolean;
   onCardClick: (taskID: string) => void;
   onCardDragEnd: () => void;
@@ -25,6 +26,7 @@ export type BoardColumnControllerProps = Readonly<{
   onCardsLoadError: (error: unknown) => void;
   onDeleteTask: (taskID: string) => void;
   onDropTask: (event: DragEvent<HTMLElement>, column: BoardColumn) => void;
+  onExpandColumn: (columnID: string) => void;
   onInterruptTask: (taskID: string, runID: string) => void;
   onResumeTask: (taskID: string, runID: string) => void;
   scrollportRef: RefObject<HTMLElement | null>;
@@ -35,6 +37,7 @@ export function BoardColumnController({
   board,
   column,
   dropState,
+  isCollapsed,
   isFirstActive,
   onCardClick,
   onCardDragEnd,
@@ -42,14 +45,12 @@ export function BoardColumnController({
   onCardsLoadError,
   onDeleteTask,
   onDropTask,
+  onExpandColumn,
   onInterruptTask,
   onResumeTask,
   scrollportRef,
 }: BoardColumnControllerProps) {
   const [columnElement, setColumnElement] = useState<HTMLElement | null>(null);
-  const [expandedEmptyColumn, setExpandedEmptyColumn] = useState(false);
-  const canCollapseEmptyColumn = !column.isBacklog && !isFirstActive && column.taskCount === 0;
-  const isCollapsed = canCollapseEmptyColumn && !expandedEmptyColumn;
   const isVisible = useColumnVisibility(scrollportRef, columnElement);
   const queryEnabled = isVisible && !isCollapsed;
   const cardsQuery = useBoardNodeCards(board.projectID, board.selectedWorkflow.id, column.id, queryEnabled);
@@ -85,7 +86,7 @@ export function BoardColumnController({
         onDropTask(event, column);
       }}
       onExpandColumn={() => {
-        setExpandedEmptyColumn(true);
+        onExpandColumn(column.id);
       }}
       onInterruptTask={onInterruptTask}
       onLoadMoreCards={() => {

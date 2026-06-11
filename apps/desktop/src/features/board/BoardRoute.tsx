@@ -44,6 +44,8 @@ export type BoardRouteProps = Readonly<{
   resumeRunId: string;
 }>;
 
+const emptyExpandedEmptyColumnIDs: ReadonlySet<string> = new Set();
+
 export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId }: BoardRouteProps) {
   const { t } = useTranslation();
   const { push } = useStatusController();
@@ -129,6 +131,9 @@ function BoardContent({
   const { t } = useTranslation();
   const [workflowIssuesCollapsed, setWorkflowIssuesCollapsed] = useState(false);
   const [activeDrag, setActiveDrag] = useState<BoardCardDragPayload | null>(null);
+  const [expandedEmptyColumns, setExpandedEmptyColumns] = useState<
+    Readonly<{ ids: ReadonlySet<string>; scope: string }>
+  >(() => ({ ids: new Set(), scope: "" }));
   const [rollbackDrop, setRollbackDrop] = useState<PendingDrop | null>(null);
   const [missingInputDrop, setMissingInputDrop] = useState<PendingMissingInputDrop | null>(null);
   const activeDragRef = useRef<BoardCardDragPayload | null>(null);
@@ -164,6 +169,9 @@ function BoardContent({
   );
   const sections = useMemo(() => boardSections(board), [board]);
   const firstActive = activeColumns[0];
+  const columnExpansionScope = `${board.projectID}:${board.selectedWorkflow.id}`;
+  const expandedEmptyColumnIDs =
+    expandedEmptyColumns.scope === columnExpansionScope ? expandedEmptyColumns.ids : emptyExpandedEmptyColumnIDs;
   useWindowChromeTitle(board.selectedWorkflow.name || board.projectName);
   const reportActionError = useCallback(
     (id: string, title: string, error: unknown) => {
@@ -329,6 +337,23 @@ function BoardContent({
     return canStartHere || manualTargets.has(column.id) ? "allowed" : "blocked";
   }
 
+  function columnIsCollapsed(column: BoardColumn): boolean {
+    return (
+      !column.isBacklog &&
+      column.id !== firstActive?.id &&
+      column.taskCount === 0 &&
+      !expandedEmptyColumnIDs.has(column.id)
+    );
+  }
+
+  function expandColumn(columnID: string): void {
+    setExpandedEmptyColumns((current) => {
+      const next = new Set(current.scope === columnExpansionScope ? current.ids : []);
+      next.add(columnID);
+      return { ids: next, scope: columnExpansionScope };
+    });
+  }
+
   function confirmRollbackDrop(): void {
     if (rollbackDrop === null) {
       return;
@@ -407,13 +432,18 @@ function BoardContent({
         >
           {sections.map((section) =>
             section.kind === "group" ? (
-              <KanbanGroup group={toKanbanGroupVM(section.group)} key={section.id}>
+              <KanbanGroup
+                group={toKanbanGroupVM(section.group)}
+                hideHeader={section.columns.every(columnIsCollapsed)}
+                key={section.id}
+              >
                 {section.columns.map((column) => (
                   <BoardColumnController
                     actionsDisabled={actionsDisabled}
                     board={board}
                     column={column}
                     dropState={columnDropState(column)}
+                    isCollapsed={columnIsCollapsed(column)}
                     isFirstActive={column.id === firstActive?.id}
                     key={`${board.projectID}:${board.selectedWorkflow.id}:${column.id}`}
                     onCardClick={openTask}
@@ -428,6 +458,7 @@ function BoardContent({
                     onCardsLoadError={reportCardsLoadError}
                     onDeleteTask={deleteTask}
                     onDropTask={dropTask}
+                    onExpandColumn={expandColumn}
                     onInterruptTask={interruptTask}
                     onResumeTask={resumeTask}
                     scrollportRef={scrollportRef}
@@ -440,6 +471,7 @@ function BoardContent({
                 board={board}
                 column={section.column}
                 dropState={columnDropState(section.column)}
+                isCollapsed={columnIsCollapsed(section.column)}
                 isFirstActive={section.column.id === firstActive?.id}
                 key={`${board.projectID}:${board.selectedWorkflow.id}:${section.id}`}
                 onCardClick={openTask}
@@ -454,6 +486,7 @@ function BoardContent({
                 onCardsLoadError={reportCardsLoadError}
                 onDeleteTask={deleteTask}
                 onDropTask={dropTask}
+                onExpandColumn={expandColumn}
                 onInterruptTask={interruptTask}
                 onResumeTask={resumeTask}
                 scrollportRef={scrollportRef}
