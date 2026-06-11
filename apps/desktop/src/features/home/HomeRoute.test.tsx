@@ -115,6 +115,42 @@ describe("HomeRoute", () => {
     expect(window.location.pathname).toBe("/");
   });
 
+  it("renders Inbox cards without kind chips in the header", async () => {
+    const services = createTestServices([
+      ...startupRoutes,
+      {
+        method: "workflow.attention.list",
+        result: {
+          generated_at_unix_ms: 1,
+          items: [
+            {
+              ask_id: "ask-1",
+              id: "attention-1",
+              kind: "question",
+              message: "Pick answer",
+              occurred_at_unix_ms: 1,
+              project_id: "project-1",
+              run_id: "run-1",
+              session_id: "session-1",
+              task_id: "task-1",
+              task_short_id: "T-1",
+              task_title: "Resolve blocker",
+              task_transition_id: "",
+              workflow_id: "workflow-1",
+            },
+          ],
+          next_page_token: "",
+        },
+      },
+    ]);
+
+    render(<App services={services} />);
+
+    const row = await screen.findByTestId("attention-row");
+    expect(within(row).getByText("T-1")).toBeInTheDocument();
+    expect(within(row).queryByText("question")).not.toBeInTheDocument();
+  });
+
   it("opens workflow creation from the Workflows tab plus action", async () => {
     const services = createTestServices(startupRoutes);
 

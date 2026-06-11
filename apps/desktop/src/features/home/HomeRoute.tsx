@@ -12,7 +12,7 @@ import { useAppServices } from "../../app/useAppServices";
 import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useStatusController } from "../../app/useStatusController";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
-import { Badge, ErrorState, LoadingState, VirtualizedInfiniteList } from "../../ui";
+import { ErrorState, LoadingState, VirtualizedInfiniteList } from "../../ui";
 import { useOpenTaskDetail } from "../task-detail/useOpenTaskDetail";
 import { HomePrimaryPane, type HomePrimaryTab } from "./HomePrimaryPane";
 import { ProjectCreateDialog, type ProjectDraft } from "./ProjectCreateForm";
@@ -243,7 +243,6 @@ function AttentionRow({
         className="flex min-w-0 flex-wrap items-center gap-[var(--space-2)]"
         data-testid="attention-row-meta"
       >
-        <Badge tone="warning">{item.kind}</Badge>
         {item.taskShortID.length > 0 ? (
           <span className="min-w-0 truncate font-mono text-sm text-[var(--color-muted)]">
             {item.taskShortID}
