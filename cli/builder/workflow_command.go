@@ -366,7 +366,10 @@ func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 			return 1
 		}
 		_ = resp
-	} else if flagWasProvided(fs, "transition-description") && existingGroup != nil {
+	}
+	descriptionRollback := func() {}
+	if groupID != "" && flagWasProvided(fs, "transition-description") && existingGroup != nil {
+		previousGroup := *existingGroup
 		ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 		resp, updateErr := remote.UpdateWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupUpdateRequest{WorkflowID: def.Workflow.ID, GroupID: existingGroup.ID, SourceNodeID: existingGroup.SourceNodeID, TransitionID: existingGroup.TransitionID, DisplayName: existingGroup.DisplayName, Description: trimmedDescription})
 		cancel()
@@ -375,12 +378,23 @@ func workflowEdgeAddSubcommand(args []string, stdout io.Writer, stderr io.Writer
 			return 1
 		}
 		_ = resp
+		// Restore the prior description if a later step fails so a non-zero exit
+		// never leaves the transition group description partially mutated.
+		descriptionRollback = func() {
+			rbCtx, rbCancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
+			_, rbErr := remote.UpdateWorkflowTransitionGroup(rbCtx, serverapi.WorkflowTransitionGroupUpdateRequest{WorkflowID: def.Workflow.ID, GroupID: previousGroup.ID, SourceNodeID: previousGroup.SourceNodeID, TransitionID: previousGroup.TransitionID, DisplayName: previousGroup.DisplayName, Description: previousGroup.Description})
+			rbCancel()
+			if rbErr != nil {
+				fmt.Fprintf(stderr, "rollback transition group %s description failed: %v\n", previousGroup.ID, rbErr)
+			}
+		}
 	}
 	edgeID := "edge-" + uuid.NewString()
 	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	resp, err := remote.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: def.Workflow.ID, EdgeID: edgeID, TransitionGroupID: groupID, Key: *edgeKey, TargetNodeID: target.ID, ContextMode: *contextMode, ContextSource: parsedContextSource, RequiresApproval: *requiresApproval, PromptTemplate: *prompt, Parameters: parsedParameters})
 	cancel()
 	if err != nil {
+		descriptionRollback()
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
