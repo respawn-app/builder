@@ -24,17 +24,25 @@ export function useBoardMoveRunFeedback(): BoardMoveRunTracker {
   const observeInterruptedRun = useCallback(
     (input: Readonly<{ runID: string; taskID: string }>): void => {
       const runID = input.runID.trim();
-      if (runID.length === 0 || !pendingMoveRunIDs.has(runID)) {
+      if (runID.length === 0) {
         return;
       }
+      // Gate the notification on the membership check inside the state updater so
+      // concurrent observations of the same runID can never both pass a stale
+      // snapshot and queue duplicate notifications.
+      let removed = false;
       setPendingMoveRunIDs((current) => {
         if (!current.has(runID)) {
           return current;
         }
+        removed = true;
         const next = new Set(current);
         next.delete(runID);
         return next;
       });
+      if (!removed) {
+        return;
+      }
       push({
         id: `board-move-run-interrupted-${runID}`,
         tone: "danger",
@@ -43,7 +51,7 @@ export function useBoardMoveRunFeedback(): BoardMoveRunTracker {
         dismissible: false,
       });
     },
-    [pendingMoveRunIDs, push, t],
+    [push, t],
   );
 
   return { observeInterruptedRun, trackMoveRunIDs };
