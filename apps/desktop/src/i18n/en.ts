@@ -200,6 +200,7 @@ export const englishResources = {
       project: "Project",
       properties: "Properties",
       sourceWorkspace: "Source workspace",
+      onlyOneWorkspaceLinked: "Only one workspace is linked right now.",
       workspace: "Workspace",
       workflow: "Workflow",
       sourceWorkspaceLocked: "Source workspace locked after start.",

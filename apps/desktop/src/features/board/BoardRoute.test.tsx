@@ -989,7 +989,9 @@ describe("BoardRoute", () => {
     const panel = screen.getByRole("complementary", { name: "Create Backlog task" });
     expect(panel).toHaveAttribute("data-mode", "overlay");
     expect(opened).toHaveLength(0);
-    await within(sidebar).findByDisplayValue("workspace-1");
+    await waitFor(() => {
+      expect(within(sidebar).getByRole("button", { name: "Source workspace" })).toHaveTextContent("Main");
+    });
     fireEvent.change(within(sidebar).getByLabelText("Title"), { target: { value: "Sidebar task" } });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Create task" }));
 
@@ -1104,7 +1106,9 @@ describe("BoardRoute", () => {
     const sidebar = await screen.findByRole("complementary", { name: "Create Backlog task" });
     expect(sidebar).toHaveAttribute("data-mode", "overlay");
     expect(opened).toHaveLength(0);
-    await within(sidebar).findByDisplayValue("workspace-1");
+    await waitFor(() => {
+      expect(within(sidebar).getByRole("button", { name: "Source workspace" })).toHaveTextContent("Main");
+    });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fallback task" } });
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 
@@ -1240,7 +1244,9 @@ describe("BoardRoute", () => {
     render(<App services={services} />);
 
     expect(await screen.findByRole("dialog", { name: "Create Backlog task" })).toBeInTheDocument();
-    await screen.findByDisplayValue("workspace-1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Source workspace" })).toHaveTextContent("Main");
+    });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Native task" } });
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 
