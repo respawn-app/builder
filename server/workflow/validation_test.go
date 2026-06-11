@@ -1115,14 +1115,13 @@ func TestContextSourceValidation(t *testing.T) {
 		assertHasCodes(t, result, workflow.CodeInvalidContextSource)
 	})
 
-	t.Run("continue session role mismatch is invalid but compact continue allows it", func(t *testing.T) {
+	t.Run("continuation role mismatch is valid", func(t *testing.T) {
 		for _, tc := range []struct {
 			name        string
 			contextMode workflow.ContextMode
-			wantCode    bool
 		}{
-			{name: "continue", contextMode: workflow.ContextModeContinueSession, wantCode: true},
-			{name: "compact", contextMode: workflow.ContextModeCompactAndContinueSession, wantCode: false},
+			{name: "continue", contextMode: workflow.ContextModeContinueSession},
+			{name: "compact", contextMode: workflow.ContextModeCompactAndContinueSession},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				def := reviewAcceptanceWorkflow()
@@ -1133,12 +1132,7 @@ func TestContextSourceValidation(t *testing.T) {
 
 				result := validateForTask(def)
 
-				if tc.wantCode {
-					assertHasCodes(t, result, workflow.CodeInvalidContinueSessionRole)
-				} else {
-					assertNoCode(t, result, workflow.CodeInvalidContinueSessionRole)
-					assertNoCode(t, result, workflow.CodeInvalidContextSource)
-				}
+				assertNoCode(t, result, workflow.CodeInvalidContextSource)
 			})
 		}
 	})

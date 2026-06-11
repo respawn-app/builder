@@ -879,8 +879,8 @@ func (s *Service) activityItemsFromRows(task sqlitegen.TaskRecord, rows []taskAc
 			case "run_completed":
 				item.Summary = "Run completed"
 			case "run_interrupted":
-				item.Summary = "Run interrupted"
-				attention := serverapi.WorkflowAttentionItem{ID: attentionKindInterruptedRun + ":" + run.ID, Kind: attentionKindInterruptedRun, ProjectID: task.ProjectID, WorkflowID: task.WorkflowID, TaskID: task.ID, TaskShortID: task.ShortID, TaskTitle: task.Title, RunID: run.ID, SessionID: run.SessionID.String, Message: "Run interrupted", OccurredAtUnixMs: run.InterruptedAtUnixMs}
+				item.Summary = interruptedRunMessage(run.InterruptionReason, run.InterruptionDetailJson)
+				attention := serverapi.WorkflowAttentionItem{ID: attentionKindInterruptedRun + ":" + run.ID, Kind: attentionKindInterruptedRun, ProjectID: task.ProjectID, WorkflowID: task.WorkflowID, TaskID: task.ID, TaskShortID: task.ShortID, TaskTitle: task.Title, RunID: run.ID, SessionID: run.SessionID.String, Message: item.Summary, OccurredAtUnixMs: run.InterruptedAtUnixMs}
 				item.Attention = &attention
 			}
 		case "task_canceled":
@@ -1391,18 +1391,39 @@ func (s *Service) interruptedRunAttentionItems(ctx context.Context, projectID st
 	defer func() { _ = rows.Close() }()
 	items := []serverapi.WorkflowAttentionItem{}
 	for rows.Next() {
-		var runID, sessionID, reason, rowProjectID, workflowID, rowTaskID, shortID, title string
+		var runID, sessionID, reason, detailJSON, rowProjectID, workflowID, rowTaskID, shortID, title string
 		var occurred int64
-		if err := rows.Scan(&runID, &sessionID, &reason, &rowProjectID, &workflowID, &rowTaskID, &shortID, &title, &occurred); err != nil {
+		if err := rows.Scan(&runID, &sessionID, &reason, &detailJSON, &rowProjectID, &workflowID, &rowTaskID, &shortID, &title, &occurred); err != nil {
 			return nil, err
 		}
-		message := "Run interrupted"
-		if strings.TrimSpace(reason) != "" {
-			message = "Run interrupted: " + strings.TrimSpace(reason)
-		}
+		message := interruptedRunMessage(reason, detailJSON)
 		items = append(items, serverapi.WorkflowAttentionItem{ID: attentionKindInterruptedRun + ":" + runID, Kind: attentionKindInterruptedRun, ProjectID: rowProjectID, WorkflowID: workflowID, TaskID: rowTaskID, TaskShortID: shortID, TaskTitle: title, RunID: runID, SessionID: sessionID, Message: message, OccurredAtUnixMs: occurred})
 	}
 	return items, rows.Err()
+}
+
+func interruptedRunMessage(reason string, detailJSON string) string {
+	message := "Run interrupted"
+	if trimmedReason := strings.TrimSpace(reason); trimmedReason != "" {
+		message += ": " + trimmedReason
+	}
+	if detail := interruptionErrorDetail(detailJSON); detail != "" {
+		message += ": " + detail
+	}
+	return message
+}
+
+func interruptionErrorDetail(detailJSON string) string {
+	if strings.TrimSpace(detailJSON) == "" {
+		return ""
+	}
+	var detail struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(detailJSON), &detail); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(detail.Error)
 }
 
 func (s *Service) validationAttentionItems(ctx context.Context, projectID string, roleResolver workflow.RoleResolver) ([]serverapi.WorkflowAttentionItem, error) {

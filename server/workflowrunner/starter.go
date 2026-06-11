@@ -29,6 +29,7 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 	"builder/shared/transcriptdiag"
 )
 
@@ -137,17 +138,17 @@ func (s *Starter) StartWorkflowRun(ctx context.Context, req workflowscheduler.St
 		return err
 	}
 	if strings.TrimSpace(input.WorktreeID) == "" || strings.TrimSpace(input.WorktreeRoot) == "" {
-		return fmt.Errorf("workflow task %q has no managed worktree", input.Task.ID)
+		return s.startFailure(ctx, req, input, fmt.Errorf("workflow task %q has no managed worktree", input.Task.ID))
 	}
 	if input.Run.Generation != req.Generation {
-		return fmt.Errorf("stale workflow run generation: got %d want %d", req.Generation, input.Run.Generation)
+		return s.startFailure(ctx, req, input, fmt.Errorf("stale workflow run generation: got %d want %d", req.Generation, input.Run.Generation))
 	}
 	if err := s.validateRole(input.Node.SubagentRole); err != nil {
-		return err
+		return s.startFailure(ctx, req, input, err)
 	}
 	plan, warnings, err := s.planSession(ctx, input)
 	if err != nil {
-		return err
+		return s.startFailure(ctx, req, input, err)
 	}
 	// When the plan reuses an existing session (resume, continue, or in-place
 	// compact-and-continue), it is the previous node's persisted session — never
@@ -175,24 +176,67 @@ func (s *Starter) StartWorkflowRun(ctx context.Context, req workflowscheduler.St
 		WorkspaceRoot: input.WorkspaceRoot,
 		EffectiveCwd:  input.WorktreeRoot,
 	}); err != nil {
-		return errors.Join(err, cleanupSession())
+		return errors.Join(s.startFailure(ctx, req, input, err), cleanupSession())
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	if !s.registerRun(req, cancel) {
 		cancel()
-		return errors.Join(errors.New("workflow runtime starter closed"), cleanupSession())
+		return errors.Join(s.startFailure(ctx, req, input, errors.New("workflow runtime starter closed")), cleanupSession())
 	}
 	if err := s.metadata.UpdateSessionExecutionTargetByID(ctx, plan.Store.Meta().SessionID, input.WorkspaceID, input.WorktreeID, "."); err != nil {
 		cancel()
 		s.releaseRegisteredRun(req.RunID)
-		return errors.Join(err, cleanupSession())
+		return errors.Join(s.startFailure(ctx, req, input, err), cleanupSession())
 	}
 	if err := s.store.AttachRunSession(ctx, req.RunID, req.Generation, plan.Store.Meta().SessionID); err != nil {
 		cancel()
 		s.releaseRegisteredRun(req.RunID)
-		return errors.Join(err, cleanupSession())
+		return errors.Join(s.startFailure(ctx, req, input, err), cleanupSession())
 	}
 	go s.run(runCtx, req, input, plan, warnings)
+	return nil
+}
+
+func (s *Starter) startFailure(ctx context.Context, req workflowscheduler.StartRunRequest, input workflowstore.RunStartContext, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	if err := s.appendStartFailureTranscript(ctx, req, input, cause); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+func (s *Starter) appendStartFailureTranscript(ctx context.Context, req workflowscheduler.StartRunRequest, input workflowstore.RunStartContext, cause error) error {
+	sessionID := strings.TrimSpace(input.Run.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(input.SourceSessionID)
+	}
+	if sessionID == "" {
+		return nil
+	}
+	cfg := s.cfg
+	cfg.WorkspaceRoot = strings.TrimSpace(input.WorkspaceRoot)
+	containerDir := config.ProjectSessionsRoot(cfg, strings.TrimSpace(input.Task.ProjectID))
+	dir, err := sessionpath.ResolveScopedSessionDir(containerDir, sessionID)
+	if err != nil {
+		return fmt.Errorf("append workflow start failure transcript: resolve session: %w", err)
+	}
+	store, err := session.Open(dir, s.storeOptions...)
+	if err != nil {
+		return fmt.Errorf("append workflow start failure transcript: open session: %w", err)
+	}
+	text := "Workflow run start failed: " + strings.TrimSpace(cause.Error())
+	if strings.TrimSpace(cause.Error()) == "" {
+		text = "Workflow run start failed"
+	}
+	if _, _, err := store.AppendEvent(string(req.RunID), "local_entry", map[string]any{
+		"visibility": string(transcript.EntryVisibilityAuto),
+		"role":       string(transcript.EntryRoleDeveloperErrorFeedback),
+		"text":       text,
+	}); err != nil {
+		return fmt.Errorf("append workflow start failure transcript: append entry: %w", err)
+	}
 	return nil
 }
 
@@ -331,67 +375,66 @@ func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartC
 			s.removeFanoutClone(ctx, containerDir, disposableCloneID)
 		}
 	}()
+	var plan launch.SessionPlan
+	var err error
 	if strings.TrimSpace(input.Run.SessionID) != "" {
-		plan, err := planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.Run.SessionID})
+		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.Run.SessionID})
 		if err != nil {
 			return launch.SessionPlan{}, nil, err
 		}
 		if err := plan.Store.EnsureDurable(); err != nil {
 			return launch.SessionPlan{}, nil, err
 		}
-		return plan, nil, nil
-	}
-	var plan launch.SessionPlan
-	var err error
-	switch input.ContextMode {
-	case "", workflow.ContextModeNewSession:
-		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, ForceNewSession: true})
-	case workflow.ContextModeContinueSession:
-		if strings.TrimSpace(input.SourceSessionID) == "" {
-			return launch.SessionPlan{}, nil, errors.New("continue_session requires a source session")
-		}
-		if strings.TrimSpace(input.SourceNode.SubagentRole) != strings.TrimSpace(input.Node.SubagentRole) {
-			return launch.SessionPlan{}, nil, fmt.Errorf("continue_session requires same subagent role: source %q target %q", input.SourceNode.SubagentRole, input.Node.SubagentRole)
-		}
-		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.SourceSessionID})
-	case workflow.ContextModeCompactAndContinueSession:
-		if strings.TrimSpace(input.SourceSessionID) == "" {
-			return launch.SessionPlan{}, nil, errors.New("compact_and_continue_session requires a source session")
-		}
-		if strings.TrimSpace(input.SourceNode.SubagentRole) != strings.TrimSpace(input.Node.SubagentRole) {
-			return launch.SessionPlan{}, nil, fmt.Errorf("compact_and_continue_session requires same subagent role: source %q target %q", input.SourceNode.SubagentRole, input.Node.SubagentRole)
-		}
-		// In-place continuation reuses the source session; the runtime runs a real
-		// compaction before the node turn. A fan-out branch instead continues in an
-		// isolated full clone of the source so parallel branches never compact or
-		// mutate the shared source session concurrently.
-		continuationSessionID := input.SourceSessionID
-		if input.IsFanoutBranch {
-			continuationSessionID, err = s.cloneSourceSessionForFanout(containerDir, input.SourceSessionID)
-			if err != nil {
-				return launch.SessionPlan{}, nil, err
+	} else {
+		switch input.ContextMode {
+		case "", workflow.ContextModeNewSession:
+			plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, ForceNewSession: true})
+		case workflow.ContextModeContinueSession:
+			if strings.TrimSpace(input.SourceSessionID) == "" {
+				return launch.SessionPlan{}, nil, errors.New("continue_session requires a source session")
 			}
-			disposableCloneID = continuationSessionID
+			plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.SourceSessionID})
+		case workflow.ContextModeCompactAndContinueSession:
+			if strings.TrimSpace(input.SourceSessionID) == "" {
+				return launch.SessionPlan{}, nil, errors.New("compact_and_continue_session requires a source session")
+			}
+			// In-place continuation reuses the source session; the runtime runs a real
+			// compaction before the node turn. A fan-out branch instead continues in an
+			// isolated full clone of the source so parallel branches never compact or
+			// mutate the shared source session concurrently.
+			continuationSessionID := input.SourceSessionID
+			if input.IsFanoutBranch {
+				continuationSessionID, err = s.cloneSourceSessionForFanout(containerDir, input.SourceSessionID)
+				if err != nil {
+					return launch.SessionPlan{}, nil, err
+				}
+				disposableCloneID = continuationSessionID
+			}
+			plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: continuationSessionID})
+		default:
+			return launch.SessionPlan{}, nil, fmt.Errorf("unsupported workflow context mode %q", input.ContextMode)
 		}
-		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: continuationSessionID})
-	default:
-		return launch.SessionPlan{}, nil, fmt.Errorf("unsupported workflow context mode %q", input.ContextMode)
-	}
-	if err != nil {
-		return launch.SessionPlan{}, nil, err
-	}
-	warnings := []string{}
-	if input.ContextMode == "" || input.ContextMode == workflow.ContextModeNewSession {
-		plan, warnings, err = launch.ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: input.Node.SubagentRole}, auth.EmptyState())
 		if err != nil {
 			return launch.SessionPlan{}, nil, err
 		}
+		if err := plan.Store.EnsureDurable(); err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
 	}
-	if err := plan.Store.EnsureDurable(); err != nil {
+	warnings := []string{}
+	plan, warnings, err = launch.ApplyRunPromptOverrides(plan, workflowRunPromptOverrides(input.Node.SubagentRole), auth.EmptyState())
+	if err != nil {
 		return launch.SessionPlan{}, nil, err
 	}
 	planSucceeded = true
 	return plan, warnings, nil
+}
+
+func workflowRunPromptOverrides(role string) serverapi.RunPromptOverrides {
+	if workflow.IsDefaultAgentRole(role) {
+		return serverapi.RunPromptOverrides{AgentRoleSet: true}
+	}
+	return serverapi.RunPromptOverrides{AgentRole: role}
 }
 
 // cloneSourceSessionForFanout creates an isolated full clone of the source

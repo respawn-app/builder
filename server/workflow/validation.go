@@ -578,13 +578,7 @@ func (s *validationState) validateRuntimeSupport() {
 		if group, groupExists := s.groupsByID[edge.TransitionGroupID]; groupExists {
 			source, sourceExists = s.nodesByID[group.SourceNodeID]
 		}
-		contextSource, contextSourceValid := s.validateContextSource(edge, source, sourceExists, target, targetExists, ref)
-		if edge.ContextMode == ContextModeContinueSession && contextSourceValid {
-			selectedSource, ok := s.contextSourceNode(contextSource, source, sourceExists, target, targetExists)
-			if ok && targetExists && selectedSource.Kind == NodeKindAgent && target.Kind == NodeKindAgent && strings.TrimSpace(selectedSource.SubagentRole) != strings.TrimSpace(target.SubagentRole) {
-				s.addSemantic(CodeInvalidContinueSessionRole, "continue_session requires source and target agent nodes to use the same subagent role", ref)
-			}
-		}
+		s.validateContextSource(edge, source, sourceExists, target, targetExists, ref)
 		for _, issue := range UnsupportedRuntimeFeatures(RuntimeSupportEdge{ContextMode: edge.ContextMode, RequiresApproval: edge.RequiresApproval, TargetKind: targetKind, InputBindings: edge.InputBindings}) {
 			s.addSemantic(issue.Code, issue.Message, ref)
 		}
@@ -655,24 +649,6 @@ func (s *validationState) validateContextSource(edge Edge, source Node, sourceEx
 	default:
 		s.addSemantic(CodeInvalidContextSource, "context source kind is invalid", ref)
 		return contextSource, false
-	}
-}
-
-func (s *validationState) contextSourceNode(contextSource ContextSource, immediate Node, immediateExists bool, target Node, targetExists bool) (Node, bool) {
-	switch contextSource.Kind {
-	case ContextSourceImmediateSource:
-		return immediate, immediateExists
-	case ContextSourceSelectedNode:
-		nodeID, exists := s.nodeKeys[contextSource.NodeKey]
-		if !exists {
-			return Node{}, false
-		}
-		node, exists := s.nodesByID[nodeID]
-		return node, exists
-	case ContextSourcePreviousTarget:
-		return target, targetExists
-	default:
-		return Node{}, false
 	}
 }
 

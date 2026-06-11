@@ -1250,7 +1250,7 @@ func TestAttentionListProjectsApprovalQuestionAndInterruptedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimRun interrupted: %v", err)
 	}
-	if err := workflowStore.InterruptRunGeneration(ctx, interruptedStarted.RunID, interruptedClaimed.Generation, "manual", "{}"); err != nil {
+	if err := workflowStore.InterruptRunGeneration(ctx, interruptedStarted.RunID, interruptedClaimed.Generation, "manual", `{"error":"role missing"}`); err != nil {
 		t.Fatalf("InterruptRunGeneration: %v", err)
 	}
 
@@ -1264,6 +1264,9 @@ func TestAttentionListProjectsApprovalQuestionAndInterruptedRun(t *testing.T) {
 	}
 	if kinds["approval"].TaskTransitionID != string(pendingApproval.TransitionID) || kinds["question"].AskID != "ask-attention" || kinds["interrupted_run"].RunID != string(interruptedStarted.RunID) {
 		t.Fatalf("attention items = %+v", resp.Items)
+	}
+	if !strings.Contains(kinds["interrupted_run"].Message, "role missing") {
+		t.Fatalf("interrupted attention message = %q, want detail error", kinds["interrupted_run"].Message)
 	}
 	taskResp, err := view.ListTaskAttention(ctx, serverapi.WorkflowTaskAttentionListRequest{TaskID: string(questionTask.ID)}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {

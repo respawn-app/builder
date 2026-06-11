@@ -1,6 +1,7 @@
 package workflowrunner
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"builder/server/llm"
 	"builder/server/metadata"
 	"builder/server/registry"
+	"builder/server/session"
 	"builder/server/sessionpath"
 	askquestion "builder/server/tools/askquestion"
 	"builder/server/workflow"
@@ -24,6 +26,7 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 func TestSchedulerRunsNewSessionWorkflowNodeWithStructuredOutput(t *testing.T) {
@@ -405,8 +408,12 @@ func TestWorkflowRuntimeCompactAndContinueReusesSourceSessionWithRealCompaction(
 	}
 }
 
-func TestWorkflowRuntimeCompactAndContinueRejectsCrossRole(t *testing.T) {
-	fixture := newChainedStarterFixture(t)
+func TestWorkflowRuntimeCompactAndContinueAllowsCrossRole(t *testing.T) {
+	fixture := newStarterFixture(t, config.WorkflowCompletionModeStructuredOutput,
+		workflowtest.FinalAnswer(`{"commentary":"first comments","prior_summary":"first summary"}`),
+		workflowtest.FinalAnswer(`{"commentary":"compaction summary"}`),
+		workflowtest.FinalAnswer(`{"commentary":"second done"}`),
+	)
 	workflowID := createChainedStarterWorkflowWithContextMode(t, fixture.store, workflow.ContextModeCompactAndContinueSession, "reviewer")
 	if _, err := fixture.store.LinkWorkflow(context.Background(), fixture.projectID, workflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow chained: %v", err)
@@ -417,22 +424,29 @@ func TestWorkflowRuntimeCompactAndContinueRejectsCrossRole(t *testing.T) {
 		t.Fatalf("first Process: %v", err)
 	}
 	fixture.waitForRunCount(t, task.ID, 2)
-	secondErr := fixture.scheduler(t).Process(context.Background())
-	if secondErr == nil || !strings.Contains(secondErr.Error(), "requires same subagent role") {
-		t.Fatalf("second Process error = %v, want same-role rejection", secondErr)
+	if err := fixture.scheduler(t).Process(context.Background()); err != nil {
+		t.Fatalf("second Process: %v", err)
 	}
+	fixture.waitForCompletedRunCount(t, task.ID, 2)
 
 	runs, err := fixture.store.ListRuns(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
-	if len(runs) != 2 || runs[1].InterruptedAt == 0 {
-		t.Fatalf("runs = %+v, want cross-role compact_and_continue target interrupted", runs)
+	if len(runs) != 2 || runs[1].InterruptedAt != 0 || runs[1].CompletedAt == 0 || runs[0].SessionID != runs[1].SessionID {
+		t.Fatalf("runs = %+v, want cross-role compact_and_continue to complete in source session", runs)
 	}
-	var detail string
-	_ = fixture.metadata.DB().QueryRowContext(context.Background(), `SELECT interruption_detail_json FROM task_runs WHERE id = ?`, string(runs[1].ID)).Scan(&detail)
-	if !strings.Contains(detail, "requires same subagent role") {
-		t.Fatalf("interruption detail = %s, want same-role rejection", detail)
+	containerDir := config.ProjectSessionsRoot(fixture.cfg, fixture.projectID)
+	sourceDir, err := sessionpath.ResolveScopedSessionDir(containerDir, runs[1].SessionID)
+	if err != nil {
+		t.Fatalf("ResolveScopedSessionDir: %v", err)
+	}
+	sourceStore, err := session.Open(sourceDir, fixture.metadata.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("Open source session: %v", err)
+	}
+	if got := sourceStore.Meta().Continuation; got == nil || got.AgentRole != "reviewer" {
+		t.Fatalf("continuation role = %+v, want reviewer", got)
 	}
 }
 
@@ -457,6 +471,84 @@ func TestWorkflowRuntimeStartFailsWhenRoleDisappearedAfterTaskStart(t *testing.T
 	_ = fixture.metadata.DB().QueryRowContext(context.Background(), `SELECT interruption_detail_json FROM task_runs WHERE id = ?`, string(runs[0].ID)).Scan(&detail)
 	if !strings.Contains(detail, string(workflow.CodeAgentRoleMissing)) {
 		t.Fatalf("interruption detail = %s, want %s", detail, workflow.CodeAgentRoleMissing)
+	}
+}
+
+func TestWorkflowRuntimeStartFailureAppendsSourceSessionTranscriptEntry(t *testing.T) {
+	fixture := newStarterFixture(t, config.WorkflowCompletionModeStructuredOutput,
+		workflowtest.FinalAnswer(`{"commentary":"first comments","prior_summary":"first summary"}`),
+	)
+	workflowID := createChainedStarterWorkflowWithContextMode(t, fixture.store, workflow.ContextModeContinueSession, "reviewer")
+	if _, err := fixture.store.LinkWorkflow(context.Background(), fixture.projectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow chained: %v", err)
+	}
+	task := fixture.createStartedTask(t)
+	scheduler := fixture.scheduler(t)
+
+	if err := scheduler.Process(context.Background()); err != nil {
+		t.Fatalf("first Process: %v", err)
+	}
+	fixture.waitForRunCount(t, task.ID, 2)
+	runs, err := fixture.store.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns after first run: %v", err)
+	}
+	sourceSessionID := runs[0].SessionID
+	if strings.TrimSpace(sourceSessionID) == "" {
+		t.Fatalf("source run has no session: %+v", runs[0])
+	}
+
+	delete(fixture.cfg.Settings.Subagents, "reviewer")
+	fixture.rebuildStarter(t)
+	scheduler = fixture.scheduler(t)
+	if err := scheduler.Process(context.Background()); err == nil {
+		t.Fatal("second Process error = nil, want runtime start failure")
+	}
+
+	runs, err = fixture.store.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns after failure: %v", err)
+	}
+	if len(runs) != 2 || runs[1].InterruptedAt == 0 || strings.TrimSpace(runs[1].SessionID) != "" {
+		t.Fatalf("failed target run = %+v, want interrupted before session attach", runs)
+	}
+	containerDir := config.ProjectSessionsRoot(fixture.cfg, fixture.projectID)
+	sourceDir, err := sessionpath.ResolveScopedSessionDir(containerDir, sourceSessionID)
+	if err != nil {
+		t.Fatalf("ResolveScopedSessionDir: %v", err)
+	}
+	file, err := os.Open(filepath.Join(sourceDir, "events.jsonl"))
+	if err != nil {
+		t.Fatalf("Open events.jsonl: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+	foundFailureEntry := false
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var event session.Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatalf("decode event: %v", err)
+		}
+		if event.Kind != "local_entry" {
+			continue
+		}
+		var entry struct {
+			Role string `json:"role"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(event.Payload, &entry); err != nil {
+			t.Fatalf("decode local_entry: %v", err)
+		}
+		if entry.Role == string(transcript.EntryRoleDeveloperErrorFeedback) && strings.Contains(entry.Text, string(workflow.CodeAgentRoleMissing)) {
+			foundFailureEntry = true
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan events.jsonl: %v", err)
+	}
+	if !foundFailureEntry {
+		t.Fatal("source transcript events missing start failure local entry")
 	}
 }
 
@@ -687,6 +779,33 @@ func (f starterFixture) waitForCompletedRun(t *testing.T, taskID workflow.TaskID
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for workflow run completion")
+}
+
+func (f starterFixture) waitForCompletedRunCount(t *testing.T, taskID workflow.TaskID, count int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := f.store.ListRuns(context.Background(), taskID)
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		completed := 0
+		for _, run := range runs {
+			if run.InterruptedAt != 0 {
+				var detail string
+				_ = f.metadata.DB().QueryRowContext(context.Background(), `SELECT interruption_detail_json FROM task_runs WHERE id = ?`, string(run.ID)).Scan(&detail)
+				t.Fatalf("run interrupted: %+v detail=%s", run, detail)
+			}
+			if run.CompletedAt != 0 {
+				completed++
+			}
+		}
+		if completed == count {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d completed workflow runs", count)
 }
 
 func (f starterFixture) waitForWaitingAsk(t *testing.T, taskID workflow.TaskID, askID string) workflowstore.RunRecord {

@@ -2396,7 +2396,7 @@ func TestManualMoveRejectsActiveParallelBatch(t *testing.T) {
 	}
 }
 
-func TestStartTaskRejectsCrossRoleContinueSessionContextMode(t *testing.T) {
+func TestStartTaskAllowsCrossRoleContinueSessionContextMode(t *testing.T) {
 	ctx, store, binding := newTestStoreContext(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeContinueSession, "reviewer")
 	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
@@ -2405,8 +2405,8 @@ func TestStartTaskRejectsCrossRoleContinueSessionContextMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask invalid workflow backlog: %v", err)
 	}
-	if _, err := store.StartTask(ctx, task.ID); err == nil || !strings.Contains(err.Error(), string(workflow.CodeInvalidContinueSessionRole)) {
-		t.Fatalf("StartTask error = %v, want %s", err, workflow.CodeInvalidContinueSessionRole)
+	if _, err := store.StartTask(ctx, task.ID); err != nil {
+		t.Fatalf("StartTask: %v", err)
 	}
 }
 
