@@ -56,7 +56,7 @@ export function PrimitiveBoard({
           <span className="text-sm text-[var(--color-muted)]">Spinners</span>
           <Spinner size="sm" testID="dev-showcase-spinner-sm" />
           <Spinner testID="dev-showcase-spinner-md" />
-          <Spinner className="h-[18px] w-[18px]" testID="dev-showcase-spinner-task-card" />
+          <Spinner className="h-[18px] w-[18px]" strokeWidth={1.5} testID="dev-showcase-spinner-task-card" />
         </div>
         <div className="grid gap-[var(--space-3)] md:grid-cols-2">
           <TextInput
