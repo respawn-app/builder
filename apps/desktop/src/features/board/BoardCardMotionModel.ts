@@ -3,6 +3,7 @@ import type { KanbanCardVM } from "./BoardColumnViewModel";
 import type { BoardSection } from "./BoardModel";
 
 export type BoardCardColumnsSnapshot = ReadonlyMap<string, readonly KanbanCardVM[]>;
+export type BoardCardColumnCountSnapshot = ReadonlyMap<string, number>;
 
 export type BoardCardMotionParticipants = Readonly<{
   namesByCardID: ReadonlyMap<string, string>;
@@ -78,6 +79,20 @@ export function dirtyBoardCardColumnIDs(
     const nextCards = nextDisplayed.get(columnID) ?? [];
     return !boardCardSnapshotsEqual(new Map([[columnID, currentCards]]), new Map([[columnID, nextCards]]));
   });
+}
+
+export function dirtyBoardCardCountColumnIDs(
+  currentCounts: BoardCardColumnCountSnapshot,
+  nextCounts: BoardCardColumnCountSnapshot,
+): readonly string[] {
+  const columnIDs = new Set([...currentCounts.keys(), ...nextCounts.keys()]);
+  return Array.from(columnIDs).filter((columnID) => (currentCounts.get(columnID) ?? 0) !== (nextCounts.get(columnID) ?? 0));
+}
+
+export function boardCardColumnCountSnapshot(
+  board: Readonly<{ columns: readonly Pick<BoardColumn, "id" | "taskCount">[] }>,
+): BoardCardColumnCountSnapshot {
+  return new Map(board.columns.map((column) => [column.id, column.taskCount]));
 }
 
 export function boardCardColumnIDsWithCards(snapshot: BoardCardColumnsSnapshot): ReadonlySet<string> {

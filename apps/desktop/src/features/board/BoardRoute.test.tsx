@@ -402,7 +402,7 @@ describe("BoardRoute", () => {
       { method: "workflow.board.get", result: boardResponse },
       {
         method: "workflow.board.nodeCards.list",
-        handler: (params: JsonValue) => {
+        handler: async (params: JsonValue) => {
           const nodeID = isObject(params) && typeof params.node_id === "string" ? params.node_id : "";
           nodeCardCalls.push(nodeID);
           return boardNodeCardsResponse(nodeID, nodeID === "backlog" ? [firstBoardCard()] : [], "");
@@ -448,7 +448,7 @@ describe("BoardRoute", () => {
       },
       {
         method: "workflow.board.nodeCards.list",
-        handler: (params: JsonValue) => {
+        handler: async (params: JsonValue) => {
           const nodeID = isObject(params) && typeof params.node_id === "string" ? params.node_id : "";
           nodeCardCalls.push(nodeID);
           return boardNodeCardsResponse(nodeID, [], "");
@@ -476,7 +476,7 @@ describe("BoardRoute", () => {
       { method: "workflow.board.get", result: boardResponse },
       {
         method: "workflow.board.nodeCards.list",
-        handler: (params: JsonValue) => {
+        handler: async (params: JsonValue) => {
           const nodeID = isObject(params) && typeof params.node_id === "string" ? params.node_id : "";
           nodeCardCalls.push(nodeID);
           return boardNodeCardsResponse(nodeID, [], "");
@@ -505,6 +505,134 @@ describe("BoardRoute", () => {
     await waitFor(() => {
       expect(nodeCardCalls).toEqual(["done"]);
     });
+  });
+
+  it("waits for a count-dirty collapsed target column before animating a moved card", async () => {
+    const visibility = installIntersectionObserverMock();
+    const originalStartViewTransitionDescriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+    const startViewTransition = vi.fn((update: () => void | Promise<void>) => {
+      const updateCallbackDone = Promise.resolve(update());
+      return {
+        finished: updateCallbackDone,
+        ready: Promise.resolve(),
+        updateCallbackDone,
+      };
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    });
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const movableCard = {
+      ...firstBoardCard(),
+      actions: {
+        ...firstBoardCard().actions,
+        can_start: false,
+        manual_move_target_node_ids: ["node-2"],
+      },
+    };
+    const reconCard = {
+      ...movableCard,
+      active_node_ids: ["node-2"],
+      status: {
+        ...movableCard.status,
+        kind: "running",
+        label: "Running",
+        native_state: "running",
+        node_ids: ["node-2"],
+      },
+    };
+    const reconColumn = {
+      node: {
+        node_id: "node-2",
+        key: "recon",
+        kind: "agent",
+        display_name: "Recon",
+        assignee_role: "analyst",
+      },
+      group_id: "group-1",
+      sort_order: 2,
+      is_backlog: false,
+      is_done: false,
+      task_count: 0,
+    };
+    const initialBoard = {
+      board: {
+        ...boardResponse.board,
+        cards: [movableCard],
+        columns: [boardColumnAt(0), boardColumnAt(1), reconColumn, boardColumnAt(2)],
+        groups: [{ ...firstBoardGroup(), node_ids: ["node-1", "node-2"] }],
+      },
+    };
+    const movedBoard = {
+      board: {
+        ...initialBoard.board,
+        columns: [
+          { ...boardColumnAt(0), task_count: 0 },
+          boardColumnAt(1),
+          { ...reconColumn, task_count: 1 },
+          boardColumnAt(2),
+        ],
+      },
+    };
+    const reconCards = deferredBoardCardsResponse();
+    let backlogCardCalls = 0;
+    const nodeCardCalls: string[] = [];
+    const services = createTestServices([
+      ...startupRoutes,
+      {
+        method: "workflow.board.get",
+        handler: (_params, callIndex) => (callIndex === 0 ? initialBoard : movedBoard),
+      },
+      {
+        method: "workflow.board.nodeCards.list",
+        handler: async (params: JsonValue) => {
+          const nodeID = isObject(params) && typeof params.node_id === "string" ? params.node_id : "";
+          nodeCardCalls.push(nodeID);
+          if (nodeID === "backlog") {
+            backlogCardCalls += 1;
+            return boardNodeCardsResponse(nodeID, backlogCardCalls === 1 ? [movableCard] : [], "");
+          }
+          if (nodeID === "node-2") {
+            return reconCards.promise;
+          }
+          return boardNodeCardsResponse(nodeID, [], "");
+        },
+      },
+      { method: "workflow.task.move", result: {} },
+    ]);
+
+    try {
+      render(<App services={services} />);
+
+      expect(await screen.findByRole("heading", { name: "Backlog" })).toBeInTheDocument();
+      act(() => {
+        visibility.reveal("Backlog");
+        visibility.reveal("Recon");
+      });
+      const card = await screen.findByRole("article", { name: "Write focused tests" });
+      act(() => {
+        visibility.reveal("Write focused tests");
+      });
+      startViewTransition.mockClear();
+
+      fireEvent.dragStart(card, { dataTransfer: new TestDataTransfer() });
+      fireEvent.drop(screen.getByRole("listitem", { name: "Recon" }), { dataTransfer: new TestDataTransfer() });
+
+      await waitFor(() => {
+        expect(nodeCardCalls).toContain("node-2");
+      });
+      expect(startViewTransition).not.toHaveBeenCalled();
+
+      await act(async () => {
+        reconCards.resolve(boardNodeCardsResponse("node-2", [reconCard], ""));
+      });
+      await waitFor(() => {
+        expect(startViewTransition).toHaveBeenCalledOnce();
+      });
+    } finally {
+      restoreStartViewTransition(originalStartViewTransitionDescriptor);
+    }
   });
 
   it("renders pending-approval tasks in their source node column", async () => {
@@ -2156,6 +2284,25 @@ function boardNodeCardsResponse(
     next_page_token: nextPageToken,
     generated_at_unix_ms: 1,
   };
+}
+
+function deferredBoardCardsResponse(): Readonly<{
+  promise: Promise<ReturnType<typeof boardNodeCardsResponse>>;
+  resolve: (response: ReturnType<typeof boardNodeCardsResponse>) => void;
+}> {
+  let resolve: (response: ReturnType<typeof boardNodeCardsResponse>) => void = () => undefined;
+  const promise = new Promise<ReturnType<typeof boardNodeCardsResponse>>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+function restoreStartViewTransition(descriptor: PropertyDescriptor | undefined): void {
+  if (descriptor === undefined) {
+    Reflect.deleteProperty(document, "startViewTransition");
+    return;
+  }
+  Object.defineProperty(document, "startViewTransition", descriptor);
 }
 
 function taskDetailResponseForCancel() {

@@ -125,7 +125,13 @@
     animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  .view-transition-board-card::view-transition-old(*) {
+  .view-transition-board-card::view-transition-image-pair(*) {
+    isolation: isolate;
+  }
+
+  .view-transition-board-card::view-transition-old(*),
+  .view-transition-board-card::view-transition-new(*) {
+    animation-duration: var(--motion-normal);
     animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
 

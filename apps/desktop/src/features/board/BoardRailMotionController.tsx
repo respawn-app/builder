@@ -16,17 +16,21 @@ import { chromeContentPaddingClassName } from "../../ui/chromePadding";
 import { BoardCardMotionContext, type BoardCardMotionContextValue } from "./BoardCardMotionContext";
 import { KanbanColumn, KanbanGroup } from "./BoardColumns";
 import {
+  boardCardColumnCountSnapshot,
   boardCardMotionParticipants,
   boardCardColumnIDsWithCards,
   boardCardSnapshotsEqual,
   boardCardSnapshotFromEntries,
   boardRailLayoutSignature,
   cardBelongsToColumn,
+  dirtyBoardCardCountColumnIDs,
   dirtyBoardCardColumnIDs,
+  type BoardCardColumnCountSnapshot,
   type BoardCardColumnsSnapshot,
 } from "./BoardCardMotionModel";
 import { toKanbanCardVM, toKanbanColumnVM, toKanbanGroupVM, type KanbanCardVM } from "./BoardColumnViewModel";
 import type { BoardCardDragPayload, BoardColumnDropState } from "./BoardDragTypes";
+import { registerCardElement } from "./BoardCardVisibilityRegistry";
 import { boardSections } from "./BoardModel";
 import { useBoardNodeCards } from "./useBoardData";
 import { useColumnVisibility } from "./useColumnVisibility";
@@ -34,8 +38,10 @@ import { useColumnVisibility } from "./useColumnVisibility";
 type BoardColumnQuerySnapshot = Readonly<{
   cards: readonly KanbanCardVM[];
   generation: number;
+  hasData: boolean;
   isFetching: boolean;
   isSettled: boolean;
+  taskCount: number;
 }>;
 
 type BoardMotionPhase = "idle" | "arming" | "running";
@@ -50,6 +56,7 @@ type ArmedTransition = Readonly<{
 }>;
 
 type DisplayedSnapshot = Readonly<{
+  columnCounts: BoardCardColumnCountSnapshot;
   layoutSignature: string;
   columns: BoardCardColumnsSnapshot;
 }>;
@@ -94,7 +101,9 @@ export function BoardRailMotionController({
 }: BoardRailMotionControllerProps) {
   const sections = useMemo(() => boardSections(board), [board]);
   const layoutSignature = useMemo(() => boardRailLayoutSignature(board, sections, firstActiveID), [board, firstActiveID, sections]);
+  const boardColumnCounts = useMemo(() => boardCardColumnCountSnapshot(board), [board]);
   const [displayedSnapshot, setDisplayedSnapshot] = useState<DisplayedSnapshot>(() => ({
+    columnCounts: boardColumnCounts,
     columns: new Map(),
     layoutSignature,
   }));
@@ -104,8 +113,12 @@ export function BoardRailMotionController({
   const [heldExpandedColumnIDs, setHeldExpandedColumnIDs] = useState<ReadonlySet<string>>(() => new Set());
   const [columnVersion, setColumnVersion] = useState(0);
   const displayedColumns = displayedSnapshot.layoutSignature === layoutSignature ? displayedSnapshot.columns : emptyColumnsSnapshot;
+  const displayedColumnCounts =
+    displayedSnapshot.layoutSignature === layoutSignature ? displayedSnapshot.columnCounts : boardColumnCounts;
   const latestColumnsRef = useRef<ReadonlyMap<string, BoardColumnQuerySnapshot>>(new Map());
   const displayedColumnsRef = useRef(displayedColumns);
+  const displayedColumnCountsRef = useRef(displayedColumnCounts);
+  const boardColumnCountsRef = useRef(boardColumnCounts);
   const visibleCardIDsRef = useRef<ReadonlySet<string>>(new Set());
   const cardElementsRef = useRef<ReadonlyMap<string, HTMLElement>>(new Map());
   const cardObserverRef = useRef<IntersectionObserver | null>(null);
@@ -131,12 +144,22 @@ export function BoardRailMotionController({
     (fromTimeout: boolean): void => {
       const nextDisplayed = latestSnapshot();
       const currentDisplayed = displayedColumnsRef.current;
-      if (boardCardSnapshotsEqual(currentDisplayed, nextDisplayed)) {
+      const currentCounts = displayedColumnCountsRef.current;
+      const nextCounts = boardColumnCountsRef.current;
+      const dirtyCountColumns = dirtyBoardCardCountColumnIDs(currentCounts, nextCounts);
+      if (boardCardSnapshotsEqual(currentDisplayed, nextDisplayed) && dirtyCountColumns.length === 0) {
         clearStaleSnapshotTimer(timeoutRef);
         return;
       }
-      const dirtyColumns = dirtyBoardCardColumnIDs(currentDisplayed, nextDisplayed);
-      const dirtySettled = dirtyColumns.every((columnID) => latestColumnsRef.current.get(columnID)?.isSettled ?? true);
+      const dirtyCountColumnSet = new Set(dirtyCountColumns);
+      const dirtyColumns = unionColumnIDs(dirtyBoardCardColumnIDs(currentDisplayed, nextDisplayed), dirtyCountColumns);
+      const dirtySettled = dirtyColumns.every((columnID) =>
+        columnSnapshotSettledForBoardCount(
+          latestColumnsRef.current.get(columnID),
+          nextCounts.get(columnID) ?? 0,
+          dirtyCountColumnSet.has(columnID),
+        ),
+      );
       if (!fromTimeout && !dirtySettled) {
         clearStaleSnapshotTimer(timeoutRef);
         timeoutRef.current = window.setTimeout(() => {
@@ -150,7 +173,8 @@ export function BoardRailMotionController({
       const participants = boardCardMotionParticipants(currentDisplayed, nextDisplayed, visibleCardIDsRef.current);
       if (participants.namesByCardID.size === 0) {
         displayedColumnsRef.current = nextDisplayed;
-        setDisplayedSnapshot({ columns: nextDisplayed, layoutSignature });
+        displayedColumnCountsRef.current = nextCounts;
+        setDisplayedSnapshot({ columnCounts: nextCounts, columns: nextDisplayed, layoutSignature });
         setRevealCardIDs(participants.revealCardIDs);
         scheduleRevealClear(revealTimeoutsRef, participants.revealCardIDs, setRevealCardIDs);
         return;
@@ -173,6 +197,18 @@ export function BoardRailMotionController({
   );
 
   useLayoutEffect(() => {
+    boardColumnCountsRef.current = boardColumnCounts;
+  }, [boardColumnCounts, layoutSignature]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      if (layoutSignatureRef.current === layoutSignature) {
+        setColumnVersion((version) => version + 1);
+      }
+    });
+  }, [boardColumnCounts, layoutSignature]);
+
+  useLayoutEffect(() => {
     if (layoutSignatureRef.current !== layoutSignature) {
       layoutSignatureRef.current = layoutSignature;
       runtimeGenerationRef.current += 1;
@@ -189,13 +225,15 @@ export function BoardRailMotionController({
       setArmedTransition(null);
       const nextDisplayed = new Map<string, readonly KanbanCardVM[]>();
       displayedColumnsRef.current = nextDisplayed;
-      setDisplayedSnapshot({ columns: nextDisplayed, layoutSignature });
+      displayedColumnCountsRef.current = boardColumnCounts;
+      setDisplayedSnapshot({ columnCounts: boardColumnCounts, columns: nextDisplayed, layoutSignature });
     }
-  }, [latestSnapshot, layoutSignature]);
+  }, [boardColumnCounts, latestSnapshot, layoutSignature]);
 
   useEffect(() => {
     if (displayedSnapshot.layoutSignature === layoutSignature) {
       displayedColumnsRef.current = displayedSnapshot.columns;
+      displayedColumnCountsRef.current = displayedSnapshot.columnCounts;
     }
   }, [displayedSnapshot, layoutSignature]);
 
@@ -211,20 +249,24 @@ export function BoardRailMotionController({
     };
   }, []);
 
-  const reportColumnSnapshot = useCallback((columnID: string, snapshot: BoardColumnQuerySnapshot): void => {
-    const current = latestColumnsRef.current;
-    const previous = current.get(columnID);
-    if (previous !== undefined && previous.generation > snapshot.generation) {
-      return;
-    }
-    latestColumnsRef.current = new Map(current).set(columnID, snapshot);
-    if (!displayedColumnsRef.current.has(columnID)) {
-      const nextDisplayed = new Map(displayedColumnsRef.current).set(columnID, snapshot.cards);
-      displayedColumnsRef.current = nextDisplayed;
-      setDisplayedSnapshot({ columns: nextDisplayed, layoutSignature });
-    }
-    setColumnVersion((version) => version + 1);
-  }, [layoutSignature]);
+  const reportColumnSnapshot = useCallback(
+    (columnID: string, snapshot: BoardColumnQuerySnapshot): void => {
+      boardColumnCountsRef.current = boardColumnCounts;
+      const current = latestColumnsRef.current;
+      const previous = current.get(columnID);
+      if (previous !== undefined && previous.generation > snapshot.generation) {
+        return;
+      }
+      latestColumnsRef.current = new Map(current).set(columnID, snapshot);
+      if (!displayedColumnsRef.current.has(columnID)) {
+        const nextDisplayed = new Map(displayedColumnsRef.current).set(columnID, snapshot.cards);
+        displayedColumnsRef.current = nextDisplayed;
+        setDisplayedSnapshot({ columnCounts: displayedColumnCountsRef.current, columns: nextDisplayed, layoutSignature });
+      }
+      setColumnVersion((version) => version + 1);
+    },
+    [boardColumnCounts, layoutSignature],
+  );
 
   useEffect(() => {
     if (columnVersion === 0 || phaseRef.current !== "idle") {
@@ -261,7 +303,9 @@ export function BoardRailMotionController({
         update: () => {
           flushSync(() => {
             displayedColumnsRef.current = armedTransition.nextDisplayed;
+            displayedColumnCountsRef.current = boardColumnCountsRef.current;
             setDisplayedSnapshot({
+              columnCounts: boardColumnCountsRef.current,
               columns: armedTransition.nextDisplayed,
               layoutSignature: armedTransition.layoutSignature,
             });
@@ -449,10 +493,12 @@ function BoardColumnMotionBoundary({
     onReportColumnSnapshot(column.id, {
       cards: cardVMs,
       generation: generationRef.current,
+      hasData: cardsQuery.data !== undefined,
       isFetching: cardsQuery.isFetching,
       isSettled: !queryEnabled || (!cardsQuery.isPending && !cardsQuery.isFetching),
+      taskCount: column.taskCount,
     });
-  }, [cardVMs, cardsQuery.isFetching, cardsQuery.isPending, column.id, onReportColumnSnapshot, queryEnabled]);
+  }, [cardVMs, cardsQuery.data, cardsQuery.isFetching, cardsQuery.isPending, column.id, column.taskCount, onReportColumnSnapshot, queryEnabled]);
 
   return (
     <KanbanColumn
@@ -519,65 +565,24 @@ function withoutTimeout(timeouts: ReadonlySet<number>, timeout: number): Readonl
   return next;
 }
 
-type BoardCardVisibilityRegistry = Readonly<{
-  cardElementsRef: { current: ReadonlyMap<string, HTMLElement> },
-  cardObserverRef: { current: IntersectionObserver | null },
-  visibleCardIDsRef: { current: ReadonlySet<string> },
-}>;
-
-function registerCardElement(
-  registry: BoardCardVisibilityRegistry,
-  cardID: string,
-  element: HTMLElement | null,
-): void {
-  const { cardElementsRef, cardObserverRef, visibleCardIDsRef } = registry;
-  const currentElement = cardElementsRef.current.get(cardID);
-  if (currentElement !== undefined) {
-    cardObserverRef.current?.unobserve(currentElement);
-  }
-
-  const nextElements = new Map(cardElementsRef.current);
-  if (element === null) {
-    nextElements.delete(cardID);
-    visibleCardIDsRef.current = nextVisibleCardIDs(visibleCardIDsRef.current, cardID, false);
-    cardElementsRef.current = nextElements;
-    return;
-  }
-
-  element.dataset.boardCardMotionId = cardID;
-  nextElements.set(cardID, element);
-  cardElementsRef.current = nextElements;
-
-  if (typeof IntersectionObserver === "undefined") {
-    visibleCardIDsRef.current = nextVisibleCardIDs(visibleCardIDsRef.current, cardID, true);
-    return;
-  }
-
-  cardObserverRef.current ??= new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!(entry.target instanceof HTMLElement)) {
-          continue;
-        }
-        const observedCardID = entry.target.dataset.boardCardMotionId;
-        if (observedCardID === undefined) {
-          continue;
-        }
-        visibleCardIDsRef.current = nextVisibleCardIDs(
-          visibleCardIDsRef.current,
-          observedCardID,
-          entry.isIntersecting,
-        );
-      }
-    });
-  cardObserverRef.current.observe(element);
+function unionColumnIDs(left: readonly string[], right: readonly string[]): readonly string[] {
+  return Array.from(new Set([...left, ...right]));
 }
 
-function nextVisibleCardIDs(current: ReadonlySet<string>, cardID: string, visible: boolean): ReadonlySet<string> {
-  const next = new Set(current);
-  if (visible) {
-    next.add(cardID);
-  } else {
-    next.delete(cardID);
+function columnSnapshotSettledForBoardCount(
+  snapshot: BoardColumnQuerySnapshot | undefined,
+  taskCount: number,
+  countDirty: boolean,
+): boolean {
+  if (snapshot === undefined) {
+    return !countDirty || taskCount === 0;
   }
-  return next;
+  if (taskCount > 0 && snapshot.cards.length === 0) {
+    return false;
+  }
+  return (
+    snapshot.isSettled &&
+    (!countDirty || snapshot.taskCount === taskCount) &&
+    (!countDirty || taskCount === 0 || snapshot.hasData)
+  );
 }

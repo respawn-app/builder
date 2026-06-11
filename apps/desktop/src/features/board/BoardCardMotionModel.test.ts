@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { KanbanCardVM } from "./BoardColumnViewModel";
 import {
+  boardCardColumnCountSnapshot,
   boardCardMotionParticipants,
   boardCardSnapshotFromEntries,
   boardCardSnapshotsEqual,
   boardCardViewTransitionName,
+  dirtyBoardCardCountColumnIDs,
 } from "./BoardCardMotionModel";
 
 describe("BoardCardMotionModel", () => {
@@ -57,6 +59,26 @@ describe("BoardCardMotionModel", () => {
     expect(
       boardCardSnapshotsEqual(snapshot, boardCardSnapshotFromEntries([["backlog", [{ ...card("task-1"), title: "Changed" }]]])),
     ).toBe(false);
+  });
+
+  it("detects dirty columns from board read-model task count changes", () => {
+    const board = {
+      columns: [
+        { id: "backlog", taskCount: 1 },
+        { id: "recon", taskCount: 0 },
+      ],
+    };
+    const nextBoard = {
+      columns: [
+        { id: "backlog", taskCount: 0 },
+        { id: "recon", taskCount: 1 },
+      ],
+    };
+
+    expect(dirtyBoardCardCountColumnIDs(boardCardColumnCountSnapshot(board), boardCardColumnCountSnapshot(nextBoard))).toEqual([
+      "backlog",
+      "recon",
+    ]);
   });
 });
 
