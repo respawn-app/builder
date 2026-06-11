@@ -154,8 +154,8 @@ describe("KanbanColumn", () => {
     );
 
     expect(within(screen.getByRole("article", { name: "Running task" })).getByTestId("task-card-active-run-spinner")).toHaveClass(
-      "h-[21px]",
-      "w-[21px]",
+      "h-[18px]",
+      "w-[18px]",
     );
     expect(
       within(screen.getByRole("article", { name: "Approval task" })).queryByTestId("task-card-active-run-spinner"),
