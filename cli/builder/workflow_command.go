@@ -767,6 +767,7 @@ func (f *repeatedStringFlag) Set(value string) error {
 // reference guaranteed-prior transitions as {{.Params.<transition_id>.<key>}}.
 func parseWorkflowParameters(raw []string) ([]serverapi.WorkflowParameter, error) {
 	parameters := make([]serverapi.WorkflowParameter, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
 	for _, entry := range raw {
 		key, description, found := strings.Cut(entry, "=")
 		key = strings.TrimSpace(key)
@@ -777,6 +778,13 @@ func parseWorkflowParameters(raw []string) ([]serverapi.WorkflowParameter, error
 		if !workflowkey.Valid(key) {
 			return nil, fmt.Errorf("parameter key %q is invalid; it must %s", key, workflowkey.Description)
 		}
+		if workflowkey.ReservedParameter(key) {
+			return nil, fmt.Errorf("parameter key %q is reserved and cannot be declared", key)
+		}
+		if seen[key] {
+			return nil, fmt.Errorf("parameter key %q is declared more than once", key)
+		}
+		seen[key] = true
 		parameters = append(parameters, serverapi.WorkflowParameter{Key: key, Description: description})
 	}
 	return parameters, nil

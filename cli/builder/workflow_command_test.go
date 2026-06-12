@@ -432,10 +432,13 @@ func TestParseWorkflowParameters(t *testing.T) {
 	if parsed[1].Key != "changes" || parsed[1].Description != "What to fix" {
 		t.Fatalf("parsed[1] = %+v", parsed[1])
 	}
-	for _, bad := range []string{"keyonly", "=description", "key=", "  =  ", "bad key=desc", "Bad=desc", "1bad=desc", "bad-key=desc"} {
+	for _, bad := range []string{"keyonly", "=description", "key=", "  =  ", "bad key=desc", "Bad=desc", "1bad=desc", "bad-key=desc", "commentary=desc", "transition=desc"} {
 		if _, err := parseWorkflowParameters([]string{bad}); err == nil {
 			t.Fatalf("parseWorkflowParameters(%q) = nil error, want failure", bad)
 		}
+	}
+	if _, err := parseWorkflowParameters([]string{"summary=first", "summary=second"}); err == nil {
+		t.Fatalf("parseWorkflowParameters with duplicate keys = nil error, want failure")
 	}
 }
 

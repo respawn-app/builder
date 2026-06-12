@@ -7,11 +7,6 @@ import (
 	"builder/shared/workflowkey"
 )
 
-var reservedParameterKeys = map[string]bool{
-	"commentary": true,
-	"transition": true,
-}
-
 func ValidateDefinition(def Definition, opts ValidationOptions) ValidationResult {
 	context := opts.Context
 	if context == "" {
@@ -490,7 +485,7 @@ func (s *validationState) validateParameters(edge Edge, ref ValidationError) {
 		key := strings.TrimSpace(parameter.Key)
 		parameterRef := ref
 		parameterRef.FieldName = key
-		if key == "" || !workflowkey.Valid(key) || len(key) > MaxParameterKeyChars || reservedParameterKeys[key] {
+		if key == "" || !workflowkey.Valid(key) || len(key) > MaxParameterKeyChars || workflowkey.ReservedParameter(key) {
 			s.addHard(CodeInvalidParameter, fmt.Sprintf("%s: parameter #%d %s", edgeMessageSubject(edge), ordinal, "key is invalid"), parameterRef)
 		}
 		if seen[key] {
