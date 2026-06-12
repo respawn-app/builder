@@ -219,6 +219,38 @@ func TestManagerModeComposition(t *testing.T) {
 	}
 }
 
+func TestAlwaysManagerReacquiresAfterInhibitorRestartFailure(t *testing.T) {
+	guard := &fakeSleepInhibitor{}
+	timers := &manualTimerFactory{}
+	manager, err := NewManager(
+		config.SleepPreventionModeAlways,
+		nil,
+		withGuard(guard),
+		withAcquireRetryDelay(defaultActiveAcquireRetry),
+		withReleaseTimerFactory(timers.AfterFunc),
+	)
+	if err != nil {
+		t.Fatalf("always manager: %v", err)
+	}
+	defer manager.Close()
+	waitForCondition(t, func() bool { return guard.acquireCount() == 1 && guard.held() }, "always-mode startup acquire")
+
+	// A restart failure: the next re-acquire fails, then the guard reports the failure.
+	guard.setAcquireError(errors.New("restart failed"))
+	guard.failFromGuard(errors.New("inhibitor exited"))
+
+	// Always mode must keep retrying on a timer rather than giving up permanently.
+	retry := timers.waitForTimer(t, 0)
+	if retry.duration != defaultActiveAcquireRetry {
+		t.Fatalf("retry timer duration = %s, want %s", retry.duration, defaultActiveAcquireRetry)
+	}
+
+	// Once the inhibitor recovers, the scheduled retry re-acquires the guard.
+	guard.setAcquireError(nil)
+	retry.Fire()
+	waitForCondition(t, func() bool { return guard.held() }, "always-mode reacquire after retry")
+}
+
 func newTestManager(t *testing.T, guard *fakeSleepInhibitor, timers *manualTimerFactory) *Manager {
 	t.Helper()
 	manager, err := NewManager(

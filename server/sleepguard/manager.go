@@ -81,18 +81,21 @@ func NewManager(mode config.SleepPreventionMode, onError func(err error), opts .
 
 	switch mode {
 	case config.SleepPreventionModeAlways:
+		always := newAlwaysController(guard, cfg.retryDelay, cfg.timerFactory, onError, true)
 		guard.SetErrorHandler(func(err error) {
 			log.Printf("sleepguard: inhibitor restart failed: %v", err)
 			if onError != nil {
 				onError(err)
 			}
+			always.OnInhibitorFailed()
 		})
-		m.controller = &alwaysController{guard: guard}
+		m.controller = always
 		if err := guard.Acquire(); err != nil {
 			log.Printf("sleepguard: always-mode acquire failed: %v", err)
 			if onError != nil {
 				onError(err)
 			}
+			always.OnInhibitorFailed()
 			return m, err
 		}
 	case config.SleepPreventionModeActive:
@@ -154,14 +157,134 @@ type noopController struct{}
 
 func (noopController) Close() {}
 
+type alwaysCommandKind int
+
+const (
+	alwaysCommandInhibitorFailed alwaysCommandKind = iota
+	alwaysCommandRetryAcquire
+	alwaysCommandClose
+)
+
+type alwaysCommand struct {
+	kind  alwaysCommandKind
+	epoch uint64
+}
+
+// alwaysController keeps the inhibitor permanently held. Unlike a passive
+// holder, it re-acquires after an inhibitor failure and keeps retrying on a
+// timer, so a single transient restart failure can't leave always-mode sleep
+// prevention disabled for the rest of the process lifetime.
 type alwaysController struct {
-	guard  sleepInhibitor
-	closed atomic.Bool
+	guard        sleepInhibitor
+	retryDelay   time.Duration
+	timerFactory releaseTimerFactory
+	onError      func(error)
+
+	commands chan alwaysCommand
+	done     chan struct{}
+	closed   atomic.Bool
+}
+
+func newAlwaysController(guard sleepInhibitor, retryDelay time.Duration, timerFactory releaseTimerFactory, onError func(error), held bool) *alwaysController {
+	controller := &alwaysController{
+		guard:        guard,
+		retryDelay:   retryDelay,
+		timerFactory: timerFactory,
+		onError:      onError,
+		commands:     make(chan alwaysCommand, 32),
+		done:         make(chan struct{}),
+	}
+	go controller.run(held)
+	return controller
+}
+
+func (c *alwaysController) OnInhibitorFailed() {
+	if c == nil || c.closed.Load() {
+		return
+	}
+	select {
+	case c.commands <- alwaysCommand{kind: alwaysCommandInhibitorFailed}:
+	case <-c.done:
+	}
 }
 
 func (c *alwaysController) Close() {
-	if c != nil && c.guard != nil && c.closed.CompareAndSwap(false, true) {
-		c.guard.Release()
+	if c == nil || !c.closed.CompareAndSwap(false, true) {
+		return
+	}
+	select {
+	case c.commands <- alwaysCommand{kind: alwaysCommandClose}:
+	case <-c.done:
+		return
+	}
+	<-c.done
+}
+
+func (c *alwaysController) run(held bool) {
+	defer close(c.done)
+	var epoch uint64
+	var retryTimer releaseTimer
+	cancelRetry := func() {
+		if retryTimer != nil {
+			retryTimer.Stop()
+			retryTimer = nil
+		}
+	}
+	scheduleRetry := func() {
+		if retryTimer != nil {
+			return
+		}
+		epoch++
+		timerEpoch := epoch
+		retryTimer = c.timerFactory(c.retryDelay, func() {
+			c.enqueueTimer(alwaysCommandRetryAcquire, timerEpoch)
+		})
+	}
+	tryAcquire := func() {
+		if held {
+			return
+		}
+		if err := c.guard.Acquire(); err != nil {
+			if c.onError != nil {
+				c.onError(err)
+			}
+			scheduleRetry()
+			return
+		}
+		cancelRetry()
+		held = true
+	}
+	if !held {
+		scheduleRetry()
+	}
+	for cmd := range c.commands {
+		switch cmd.kind {
+		case alwaysCommandInhibitorFailed:
+			held = false
+			tryAcquire()
+		case alwaysCommandRetryAcquire:
+			if cmd.epoch != epoch || held {
+				continue
+			}
+			retryTimer = nil
+			tryAcquire()
+		case alwaysCommandClose:
+			cancelRetry()
+			if held {
+				c.guard.Release()
+			}
+			return
+		}
+	}
+}
+
+func (c *alwaysController) enqueueTimer(kind alwaysCommandKind, epoch uint64) {
+	if c.closed.Load() {
+		return
+	}
+	select {
+	case c.commands <- alwaysCommand{kind: kind, epoch: epoch}:
+	case <-c.done:
 	}
 }
 
