@@ -1327,6 +1327,61 @@ func TestAttentionListProjectsApprovalQuestionAndInterruptedRun(t *testing.T) {
 	}
 }
 
+func TestAttentionListFillsPagePastDroppedCandidatesAndScopesTokenToProject(t *testing.T) {
+	ctx, store, workflowStore, binding := newWorkflowViewTestContextStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	approvalWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, approvalWorkflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow approval: %v", err)
+	}
+	requireDoneTransitionApproval(t, ctx, store, approvalWorkflowID)
+	approvalTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Approval", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask approval: %v", err)
+	}
+	approvalStarted, err := workflowStore.StartTask(ctx, approvalTask.ID)
+	if err != nil {
+		t.Fatalf("StartTask approval: %v", err)
+	}
+	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: approvalStarted.RunID, TransitionID: "done"}); err != nil {
+		t.Fatalf("CompleteRun approval: %v", err)
+	}
+
+	// Two extra valid linked workflows produce validation_blocker candidates that
+	// get dropped (they validate cleanly). Force them newest so they sort ahead
+	// of the approval, spanning the first candidate fetch window.
+	for i, title := range []string{"Clean A", "Clean B"} {
+		cleanWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+		if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, cleanWorkflowID, false); err != nil {
+			t.Fatalf("LinkWorkflow %s: %v", title, err)
+		}
+		if _, err := store.DB().ExecContext(ctx, `UPDATE workflows SET updated_at_unix_ms = ? WHERE id = ?`, int64(1_000_000_000_000+i), string(cleanWorkflowID)); err != nil {
+			t.Fatalf("force clean workflow timestamp: %v", err)
+		}
+	}
+
+	// With pageSize 1 the dropped candidates fill the first fetch; the page must
+	// still surface the real approval item instead of coming back empty.
+	page, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: binding.ProjectID, PageSize: 1}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Kind != "approval" {
+		t.Fatalf("attention page = %+v, want the approval item past dropped candidates", page.Items)
+	}
+	if page.NextPageToken == "" {
+		t.Fatal("expected a next page token while candidates remain")
+	}
+
+	// A token minted for this project must be rejected for a different project.
+	if _, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: "project-other", PageSize: 1, PageToken: page.NextPageToken}, workflow.StaticRoleResolver{"coder": true}); err == nil {
+		t.Fatal("expected attention page token to be rejected for a different project")
+	}
+}
+
 func TestPendingQuestionResolverSearchesBeforeOngoingTail(t *testing.T) {
 	entries := make([]clientui.ChatEntry, 0, 650)
 	for i := 0; i < 650; i++ {

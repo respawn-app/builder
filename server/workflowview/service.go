@@ -630,7 +630,7 @@ func (s *Service) ListAttention(ctx context.Context, req serverapi.WorkflowAtten
 	if pageSize == 0 {
 		pageSize = 50
 	}
-	cursor, err := parseAttentionPageToken(req.PageToken)
+	cursor, err := parseAttentionPageToken(req.PageToken, strings.TrimSpace(req.ProjectID))
 	if err != nil {
 		return serverapi.WorkflowAttentionListResponse{}, err
 	}
@@ -686,34 +686,51 @@ type attentionCandidateRow struct {
 }
 
 func (s *Service) attentionItemsPage(ctx context.Context, projectID string, pageSize int, cursor attentionPageCursor, roleResolver workflow.RoleResolver) ([]serverapi.WorkflowAttentionItem, string, error) {
-	candidates, err := s.attentionItemCandidates(ctx, projectID, "", cursor, pageSize+1)
-	if err != nil {
-		return nil, "", err
-	}
 	items := make([]serverapi.WorkflowAttentionItem, 0, pageSize)
 	questions := newPendingQuestionResolver(s.transcripts)
-	nextPageToken := ""
-	overflowedItems := false
-	for _, candidate := range candidates {
-		item, ok, err := s.attentionItemFromCandidate(ctx, candidate, roleResolver, questions)
+	current := cursor
+	// attentionItemFromCandidate drops candidates that no longer warrant
+	// attention (e.g. a validation_blocker whose workflow now validates), so a
+	// single pageSize+1 fetch can come back short while later candidates still
+	// hold real items. Keep advancing the candidate cursor until the page is
+	// full or the candidate stream is exhausted.
+	for len(items) < pageSize {
+		candidates, err := s.attentionItemCandidates(ctx, projectID, "", current, pageSize+1)
 		if err != nil {
 			return nil, "", err
 		}
-		if !ok {
-			continue
-		}
-		if len(items) >= pageSize {
-			overflowedItems = true
-			nextPageToken = attentionPageToken(items[len(items)-1])
+		if len(candidates) == 0 {
 			break
 		}
-		items = append(items, item)
+		moreCandidates := len(candidates) > pageSize
+		batch := candidates
+		if moreCandidates {
+			batch = candidates[:pageSize]
+		}
+		for i := range batch {
+			candidate := batch[i]
+			item, ok, err := s.attentionItemFromCandidate(ctx, candidate, roleResolver, questions)
+			if err != nil {
+				return nil, "", err
+			}
+			if !ok {
+				continue
+			}
+			items = append(items, item)
+			if len(items) == pageSize {
+				return items, attentionCandidatePageToken(projectID, candidate), nil
+			}
+		}
+		if !moreCandidates {
+			break
+		}
+		current = attentionCandidateCursor(batch[len(batch)-1])
 	}
-	if !overflowedItems && len(candidates) > pageSize {
-		last := candidates[len(candidates)-1]
-		nextPageToken = attentionCandidatePageToken(last)
-	}
-	return items, nextPageToken, nil
+	return items, "", nil
+}
+
+func attentionCandidateCursor(row attentionCandidateRow) attentionPageCursor {
+	return attentionPageCursor{occurredAtUnixMs: row.occurredAtUnixMs, itemID: row.id, hasValue: true}
 }
 
 func (s *Service) attentionItemCandidates(ctx context.Context, projectID string, taskID string, cursor attentionPageCursor, limit int) ([]attentionCandidateRow, error) {
@@ -1378,32 +1395,44 @@ func activityPageToken(item serverapi.WorkflowTaskActivityItem) string {
 	return strconv.FormatInt(item.OccurredAtUnixMs, 10) + "|" + base64.RawURLEncoding.EncodeToString([]byte(item.ActivityID))
 }
 
-func parseAttentionPageToken(token string) (attentionPageCursor, error) {
+// parseAttentionPageToken decodes a page token and rejects it unless it was
+// issued for expectedProjectID, so a token can't silently paginate a different
+// project's attention list from the wrong cursor.
+func parseAttentionPageToken(token string, expectedProjectID string) (attentionPageCursor, error) {
 	trimmed := strings.TrimSpace(token)
 	if trimmed == "" {
 		return attentionPageCursor{}, nil
 	}
-	parts := strings.SplitN(trimmed, "|", 2)
-	if len(parts) != 2 {
+	parts := strings.SplitN(trimmed, "|", 3)
+	if len(parts) != 3 {
 		return attentionPageCursor{}, errors.New("page_token is invalid")
 	}
-	occurredAt, err := strconv.ParseInt(parts[0], 10, 64)
+	decodedProjectID, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return attentionPageCursor{}, errors.New("page_token is invalid")
+	}
+	if string(decodedProjectID) != strings.TrimSpace(expectedProjectID) {
+		return attentionPageCursor{}, errors.New("page_token does not match project")
+	}
+	occurredAt, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || occurredAt < 0 {
 		return attentionPageCursor{}, errors.New("page_token is invalid")
 	}
-	decodedID, err := base64.RawURLEncoding.DecodeString(parts[1])
+	decodedID, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil || strings.TrimSpace(string(decodedID)) == "" {
 		return attentionPageCursor{}, errors.New("page_token is invalid")
 	}
 	return attentionPageCursor{occurredAtUnixMs: occurredAt, itemID: string(decodedID), hasValue: true}, nil
 }
 
-func attentionPageToken(item serverapi.WorkflowAttentionItem) string {
-	return strconv.FormatInt(item.OccurredAtUnixMs, 10) + "|" + base64.RawURLEncoding.EncodeToString([]byte(item.ID))
+func attentionPageTokenFor(projectID string, occurredAtUnixMs int64, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(projectID))) + "|" +
+		strconv.FormatInt(occurredAtUnixMs, 10) + "|" +
+		base64.RawURLEncoding.EncodeToString([]byte(id))
 }
 
-func attentionCandidatePageToken(item attentionCandidateRow) string {
-	return strconv.FormatInt(item.occurredAtUnixMs, 10) + "|" + base64.RawURLEncoding.EncodeToString([]byte(item.id))
+func attentionCandidatePageToken(projectID string, item attentionCandidateRow) string {
+	return attentionPageTokenFor(projectID, item.occurredAtUnixMs, item.id)
 }
 
 func (s *Service) approvalAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
