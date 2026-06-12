@@ -29,7 +29,6 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
-	"builder/shared/transcript"
 	"builder/shared/transcriptdiag"
 )
 
@@ -138,17 +137,17 @@ func (s *Starter) StartWorkflowRun(ctx context.Context, req workflowscheduler.St
 		return err
 	}
 	if strings.TrimSpace(input.WorktreeID) == "" || strings.TrimSpace(input.WorktreeRoot) == "" {
-		return s.startFailure(ctx, req, input, fmt.Errorf("workflow task %q has no managed worktree", input.Task.ID))
+		return fmt.Errorf("workflow task %q has no managed worktree", input.Task.ID)
 	}
 	if input.Run.Generation != req.Generation {
-		return s.startFailure(ctx, req, input, fmt.Errorf("stale workflow run generation: got %d want %d", req.Generation, input.Run.Generation))
+		return fmt.Errorf("stale workflow run generation: got %d want %d", req.Generation, input.Run.Generation)
 	}
 	if err := s.validateRole(input.Node.SubagentRole); err != nil {
-		return s.startFailure(ctx, req, input, err)
+		return err
 	}
 	plan, warnings, err := s.planSession(ctx, input)
 	if err != nil {
-		return s.startFailure(ctx, req, input, err)
+		return err
 	}
 	// When the plan reuses an existing session (resume, continue, or in-place
 	// compact-and-continue), it is the previous node's persisted session — never
@@ -176,67 +175,24 @@ func (s *Starter) StartWorkflowRun(ctx context.Context, req workflowscheduler.St
 		WorkspaceRoot: input.WorkspaceRoot,
 		EffectiveCwd:  input.WorktreeRoot,
 	}); err != nil {
-		return errors.Join(s.startFailure(ctx, req, input, err), cleanupSession())
+		return errors.Join(err, cleanupSession())
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	if !s.registerRun(req, cancel) {
 		cancel()
-		return errors.Join(s.startFailure(ctx, req, input, errors.New("workflow runtime starter closed")), cleanupSession())
+		return errors.Join(errors.New("workflow runtime starter closed"), cleanupSession())
 	}
 	if err := s.metadata.UpdateSessionExecutionTargetByID(ctx, plan.Store.Meta().SessionID, input.WorkspaceID, input.WorktreeID, "."); err != nil {
 		cancel()
 		s.releaseRegisteredRun(req.RunID)
-		return errors.Join(s.startFailure(ctx, req, input, err), cleanupSession())
+		return errors.Join(err, cleanupSession())
 	}
 	if err := s.store.AttachRunSession(ctx, req.RunID, req.Generation, plan.Store.Meta().SessionID); err != nil {
 		cancel()
 		s.releaseRegisteredRun(req.RunID)
-		return errors.Join(s.startFailure(ctx, req, input, err), cleanupSession())
+		return errors.Join(err, cleanupSession())
 	}
 	go s.run(runCtx, req, input, plan, warnings)
-	return nil
-}
-
-func (s *Starter) startFailure(ctx context.Context, req workflowscheduler.StartRunRequest, input workflowstore.RunStartContext, cause error) error {
-	if cause == nil {
-		return nil
-	}
-	if err := s.appendStartFailureTranscript(ctx, req, input, cause); err != nil {
-		return errors.Join(cause, err)
-	}
-	return cause
-}
-
-func (s *Starter) appendStartFailureTranscript(ctx context.Context, req workflowscheduler.StartRunRequest, input workflowstore.RunStartContext, cause error) error {
-	sessionID := strings.TrimSpace(input.Run.SessionID)
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(input.SourceSessionID)
-	}
-	if sessionID == "" {
-		return nil
-	}
-	cfg := s.cfg
-	cfg.WorkspaceRoot = strings.TrimSpace(input.WorkspaceRoot)
-	containerDir := config.ProjectSessionsRoot(cfg, strings.TrimSpace(input.Task.ProjectID))
-	dir, err := sessionpath.ResolveScopedSessionDir(containerDir, sessionID)
-	if err != nil {
-		return fmt.Errorf("append workflow start failure transcript: resolve session: %w", err)
-	}
-	store, err := session.Open(dir, s.storeOptions...)
-	if err != nil {
-		return fmt.Errorf("append workflow start failure transcript: open session: %w", err)
-	}
-	text := "Workflow run start failed: " + strings.TrimSpace(cause.Error())
-	if strings.TrimSpace(cause.Error()) == "" {
-		text = "Workflow run start failed"
-	}
-	if _, _, err := store.AppendEvent(string(req.RunID), "local_entry", map[string]any{
-		"visibility": string(transcript.EntryVisibilityAuto),
-		"role":       string(transcript.EntryRoleDeveloperErrorFeedback),
-		"text":       text,
-	}); err != nil {
-		return fmt.Errorf("append workflow start failure transcript: append entry: %w", err)
-	}
 	return nil
 }
 
