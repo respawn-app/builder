@@ -938,6 +938,14 @@ func TestServiceCommentsAndReadModels(t *testing.T) {
 	if gotPagedCommentIDs[comment.Comment.ID] != 1 || gotPagedCommentIDs[secondComment.Comment.ID] != 1 || len(gotPagedCommentIDs) != 2 {
 		t.Fatalf("paged comment ids = %+v, want both seeded comments exactly once", gotPagedCommentIDs)
 	}
+	for _, badToken := range []string{"garbage", "-1", "abc|def", "100"} {
+		if _, err := service.ListWorkflowTaskComments(ctx, serverapi.WorkflowTaskCommentListRequest{TaskID: task.Task.ID, PageToken: badToken}); err == nil {
+			t.Fatalf("ListWorkflowTaskComments accepted invalid page token %q", badToken)
+		}
+	}
+	if _, err := service.ListWorkflowTaskComments(ctx, serverapi.WorkflowTaskCommentListRequest{TaskID: task.Task.ID, PageSize: serverapi.WorkflowTaskCommentListMaxPageSize + 1}); err == nil {
+		t.Fatalf("ListWorkflowTaskComments accepted oversized page size")
+	}
 	board, err := service.GetWorkflowBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID})
 	if err != nil {
 		t.Fatalf("GetWorkflowBoard: %v", err)

@@ -3,6 +3,7 @@ package workflowsvc
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"strconv"
@@ -779,18 +780,18 @@ func (s *Service) ListWorkflowTaskComments(ctx context.Context, req serverapi.Wo
 	if pageSize == 0 {
 		pageSize = 100
 	}
-	offset, err := parseCommentOffsetPageToken(req.PageToken)
+	cursor, err := parseCommentPageToken(req.PageToken)
 	if err != nil {
 		return serverapi.WorkflowTaskCommentListResponse{}, err
 	}
-	comments, err := s.store.ListCommentsPage(ctx, workflow.TaskID(req.TaskID), offset, pageSize+1)
+	comments, err := s.store.ListCommentsPage(ctx, workflow.TaskID(req.TaskID), cursor, pageSize+1)
 	if err != nil {
 		return serverapi.WorkflowTaskCommentListResponse{}, err
 	}
 	nextPageToken := ""
 	if len(comments) > pageSize {
 		comments = comments[:pageSize]
-		nextPageToken = strconv.Itoa(offset + pageSize)
+		nextPageToken = commentPageToken(comments[len(comments)-1])
 	}
 	out := make([]serverapi.WorkflowTaskComment, 0, len(comments))
 	for _, comment := range comments {
@@ -799,16 +800,31 @@ func (s *Service) ListWorkflowTaskComments(ctx context.Context, req serverapi.Wo
 	return serverapi.WorkflowTaskCommentListResponse{Comments: out, NextPageToken: nextPageToken}, nil
 }
 
-func parseCommentOffsetPageToken(token string) (int, error) {
+// parseCommentPageToken decodes a stable keyset cursor (created_at|base64(id)),
+// mirroring the task-activity page token so concurrent comment inserts/deletes
+// can't shift an in-flight infinite-scroll page.
+func parseCommentPageToken(token string) (workflowstore.CommentPageCursor, error) {
 	trimmed := strings.TrimSpace(token)
 	if trimmed == "" {
-		return 0, nil
+		return workflowstore.CommentPageCursor{}, nil
 	}
-	offset, err := strconv.Atoi(trimmed)
-	if err != nil || offset < 0 {
-		return 0, errors.New("page_token is invalid")
+	timestampPart, encodedID, ok := strings.Cut(trimmed, "|")
+	if !ok {
+		return workflowstore.CommentPageCursor{}, errors.New("page_token is invalid")
 	}
-	return offset, nil
+	createdAt, err := strconv.ParseInt(timestampPart, 10, 64)
+	if err != nil || createdAt < 0 {
+		return workflowstore.CommentPageCursor{}, errors.New("page_token is invalid")
+	}
+	decodedID, err := base64.RawURLEncoding.DecodeString(encodedID)
+	if err != nil || strings.TrimSpace(string(decodedID)) == "" {
+		return workflowstore.CommentPageCursor{}, errors.New("page_token is invalid")
+	}
+	return workflowstore.CommentPageCursor{CreatedAtUnixMs: createdAt, ID: string(decodedID), HasValue: true}, nil
+}
+
+func commentPageToken(comment workflowstore.CommentRecord) string {
+	return strconv.FormatInt(comment.CreatedAt, 10) + "|" + base64.RawURLEncoding.EncodeToString([]byte(comment.ID))
 }
 
 func (s *Service) ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentReplaceRequest) error {

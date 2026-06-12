@@ -1,6 +1,7 @@
 package serverapi
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -184,18 +185,35 @@ func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
 	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "comment", Author: "agent"}).Validate(); err != nil {
 		t.Fatalf("valid agent comment add rejected: %v", err)
 	}
-	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "comment", Author: "system"}).Validate(); err == nil || !strings.Contains(err.Error(), "author") {
-		t.Fatalf("system comment author error = %v", err)
+	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "comment", Author: "system"}).Validate(); !isWorkflowFieldError(err, "author", WorkflowRequestErrorInvalidValue) {
+		t.Fatalf("system comment author error = %#v, want invalid_value on author", err)
 	}
-	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "", Author: "user"}).Validate(); err == nil || !strings.Contains(err.Error(), "body") {
-		t.Fatalf("empty comment body error = %v", err)
+	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "", Author: "user"}).Validate(); !isWorkflowFieldError(err, "body", WorkflowRequestErrorRequired) {
+		t.Fatalf("empty comment body error = %#v, want required on body", err)
 	}
 	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: 10}).Validate(); err != nil {
 		t.Fatalf("valid activity list rejected: %v", err)
 	}
-	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "page_size") {
-		t.Fatalf("invalid activity page size error = %v", err)
+	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: -1}).Validate(); !isWorkflowFieldError(err, "page_size", WorkflowRequestErrorInvalidMode) {
+		t.Fatalf("invalid activity page size error = %#v, want invalid_mode on page_size", err)
 	}
+	if err := (WorkflowTaskCommentListRequest{TaskID: "task-1", PageSize: WorkflowTaskCommentListMaxPageSize}).Validate(); err != nil {
+		t.Fatalf("max comment page size rejected: %v", err)
+	}
+	if err := (WorkflowTaskCommentListRequest{TaskID: "task-1", PageSize: -1}).Validate(); !isWorkflowFieldError(err, "page_size", WorkflowRequestErrorInvalidMode) {
+		t.Fatalf("negative comment page size error = %#v, want invalid_mode on page_size", err)
+	}
+	if err := (WorkflowTaskCommentListRequest{TaskID: "task-1", PageSize: WorkflowTaskCommentListMaxPageSize + 1}).Validate(); !isWorkflowFieldError(err, "page_size", WorkflowRequestErrorInvalidMode) {
+		t.Fatalf("oversized comment page size error = %#v, want invalid_mode on page_size", err)
+	}
+}
+
+func isWorkflowFieldError(err error, field string, code string) bool {
+	var validationErr WorkflowRequestValidationError
+	if !errors.As(err, &validationErr) {
+		return false
+	}
+	return validationErr.Field == field && validationErr.Code == code
 }
 
 func TestWorkflowValidateRequestValidation(t *testing.T) {

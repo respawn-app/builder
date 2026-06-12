@@ -1591,12 +1591,19 @@ func validateWorkflowTaskCommentAuthorKind(author string) error {
 	}
 }
 
+// WorkflowTaskCommentListMaxPageSize bounds a single comment page so a
+// client-supplied page_size cannot drive an oversized storage query/response.
+const WorkflowTaskCommentListMaxPageSize = 100
+
 func (r WorkflowTaskCommentListRequest) Validate() error {
 	if err := validateRequired("task_id", r.TaskID); err != nil {
 		return err
 	}
 	if r.PageSize < 0 {
 		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", "page_size must be non-negative")
+	}
+	if r.PageSize > WorkflowTaskCommentListMaxPageSize {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", fmt.Sprintf("page_size must be <= %d", WorkflowTaskCommentListMaxPageSize))
 	}
 	if strings.TrimSpace(r.PageToken) != r.PageToken {
 		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_token", "page_token must not have leading or trailing whitespace")

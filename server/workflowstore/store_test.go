@@ -426,6 +426,57 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	}
 }
 
+func TestListCommentsPageKeysetStaysStableWhenNewerCommentInserted(t *testing.T) {
+	ctx, store, binding := newTestStoreContext(t)
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Comments"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	first, err := store.AddComment(ctx, task.ID, "first", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment first: %v", err)
+	}
+	second, err := store.AddComment(ctx, task.ID, "second", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment second: %v", err)
+	}
+	setCommentCreatedAt(t, ctx, store, first.ID, 1000)
+	setCommentCreatedAt(t, ctx, store, second.ID, 2000)
+
+	page1, err := store.ListCommentsPage(ctx, task.ID, CommentPageCursor{}, 1)
+	if err != nil {
+		t.Fatalf("ListCommentsPage page1: %v", err)
+	}
+	if len(page1) != 1 || page1[0].ID != second.ID {
+		t.Fatalf("page1 = %+v, want newest comment %q", page1, second.ID)
+	}
+
+	// A newer comment arriving between page reads must not shift the cursor:
+	// an offset would now return the already-seen comment, a keyset must not.
+	third, err := store.AddComment(ctx, task.ID, "third", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment third: %v", err)
+	}
+	setCommentCreatedAt(t, ctx, store, third.ID, 3000)
+
+	cursor := CommentPageCursor{CreatedAtUnixMs: page1[0].CreatedAt, ID: page1[0].ID, HasValue: true}
+	page2, err := store.ListCommentsPage(ctx, task.ID, cursor, 1)
+	if err != nil {
+		t.Fatalf("ListCommentsPage page2: %v", err)
+	}
+	if len(page2) != 1 || page2[0].ID != first.ID {
+		t.Fatalf("page2 = %+v, want next-older comment %q with no duplicate/skip", page2, first.ID)
+	}
+}
+
+func setCommentCreatedAt(t *testing.T, ctx context.Context, store *Store, commentID string, createdAtUnixMs int64) {
+	t.Helper()
+	if _, err := store.db.ExecContext(ctx, `UPDATE task_comments SET created_at_unix_ms = ? WHERE id = ?`, createdAtUnixMs, commentID); err != nil {
+		t.Fatalf("force comment timestamp: %v", err)
+	}
+}
+
 func TestTaskCreatePersistsSourceWorkspaceAndOptionalBody(t *testing.T) {
 	ctx, store, binding := newTestStoreContext(t)
 	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)

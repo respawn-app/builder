@@ -3912,6 +3912,74 @@ func (q *Queries) ListTaskComments(ctx context.Context, arg ListTaskCommentsPara
 	return items, nil
 }
 
+const listTaskCommentsPage = `-- name: ListTaskCommentsPage :many
+SELECT
+    id,
+    task_id,
+    body,
+    author_kind,
+    author_id,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM task_comments
+WHERE task_id = ?1
+    AND (
+        ?2 = 0
+        OR created_at_unix_ms < ?3
+        OR (
+            created_at_unix_ms = ?3
+            AND id < ?4
+        )
+    )
+ORDER BY created_at_unix_ms DESC, id DESC
+LIMIT ?5
+`
+
+type ListTaskCommentsPageParams struct {
+	TaskID                string
+	HasCursor             interface{}
+	CursorCreatedAtUnixMs int64
+	CursorID              string
+	LimitRows             int64
+}
+
+func (q *Queries) ListTaskCommentsPage(ctx context.Context, arg ListTaskCommentsPageParams) ([]TaskComment, error) {
+	rows, err := q.db.QueryContext(ctx, listTaskCommentsPage,
+		arg.TaskID,
+		arg.HasCursor,
+		arg.CursorCreatedAtUnixMs,
+		arg.CursorID,
+		arg.LimitRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TaskComment
+	for rows.Next() {
+		var i TaskComment
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Body,
+			&i.AuthorKind,
+			&i.AuthorID,
+			&i.CreatedAtUnixMs,
+			&i.UpdatedAtUnixMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskNodePlacements = `-- name: ListTaskNodePlacements :many
 SELECT
     id,

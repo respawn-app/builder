@@ -1655,6 +1655,28 @@ ORDER BY created_at_unix_ms DESC, id DESC
 LIMIT sqlc.arg(limit_rows)
 OFFSET sqlc.arg(offset_rows);
 
+-- name: ListTaskCommentsPage :many
+SELECT
+    id,
+    task_id,
+    body,
+    author_kind,
+    author_id,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM task_comments
+WHERE task_id = sqlc.arg(task_id)
+    AND (
+        sqlc.arg(has_cursor) = 0
+        OR created_at_unix_ms < sqlc.arg(cursor_created_at_unix_ms)
+        OR (
+            created_at_unix_ms = sqlc.arg(cursor_created_at_unix_ms)
+            AND id < sqlc.arg(cursor_id)
+        )
+    )
+ORDER BY created_at_unix_ms DESC, id DESC
+LIMIT sqlc.arg(limit_rows);
+
 -- name: GetWorkspaceBindingByID :one
 SELECT
     p.id AS project_id,
