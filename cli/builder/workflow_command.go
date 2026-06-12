@@ -457,16 +457,6 @@ func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 	if flagWasProvided(fs, "transition-description") {
 		updatedGroup.Description = strings.TrimSpace(*transitionDescription)
 	}
-	if updatedGroup != group {
-		ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
-		resp, updateErr := remote.UpdateWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupUpdateRequest{WorkflowID: def.Workflow.ID, GroupID: updatedGroup.ID, SourceNodeID: updatedGroup.SourceNodeID, TransitionID: updatedGroup.TransitionID, DisplayName: updatedGroup.DisplayName, Description: updatedGroup.Description})
-		cancel()
-		if updateErr != nil {
-			fmt.Fprintln(stderr, updateErr)
-			return 1
-		}
-		_ = resp
-	}
 	updatedEdge := edge
 	if strings.TrimSpace(*edgeKey) != "" {
 		updatedEdge.Key = strings.TrimSpace(*edgeKey)
@@ -506,6 +496,19 @@ func workflowEdgeUpdateSubcommand(args []string, stdout io.Writer, stderr io.Wri
 			return 2
 		}
 		updatedEdge.Parameters = parsedParameters
+	}
+	// Commit the transition group change only after every edge flag has parsed, so
+	// a malformed --param or --context-source can never leave the group mutated
+	// while the command exits non-zero before touching the edge.
+	if updatedGroup != group {
+		groupCtx, groupCancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
+		groupResp, updateErr := remote.UpdateWorkflowTransitionGroup(groupCtx, serverapi.WorkflowTransitionGroupUpdateRequest{WorkflowID: def.Workflow.ID, GroupID: updatedGroup.ID, SourceNodeID: updatedGroup.SourceNodeID, TransitionID: updatedGroup.TransitionID, DisplayName: updatedGroup.DisplayName, Description: updatedGroup.Description})
+		groupCancel()
+		if updateErr != nil {
+			fmt.Fprintln(stderr, updateErr)
+			return 1
+		}
+		_ = groupResp
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), workflowCommandTimeout)
 	defer cancel()
