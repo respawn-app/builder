@@ -36,4 +36,21 @@ ORDER BY rowid ASC;
 DROP TABLE task_comments;
 ALTER TABLE task_comments_new RENAME TO task_comments;
 
+-- Recreate the lookup index dropped together with the old task_comments table
+-- (originally added by migration 00020) so comment list/activity queries keep
+-- using it instead of scanning as histories grow.
+CREATE INDEX task_comments_task_updated_idx
+    ON task_comments(task_id, updated_at_unix_ms DESC);
+
+CREATE TEMP TABLE migration_remove_system_task_comment_author_check_zero(value INTEGER NOT NULL CHECK (value = 0));
+
+INSERT INTO migration_remove_system_task_comment_author_check_zero(value)
+SELECT 1
+WHERE EXISTS (
+    SELECT 1
+    FROM pragma_foreign_key_check
+);
+
+DROP TABLE migration_remove_system_task_comment_author_check_zero;
+
 PRAGMA foreign_keys = ON;
