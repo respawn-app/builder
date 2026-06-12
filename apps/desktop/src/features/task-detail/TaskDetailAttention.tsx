@@ -81,7 +81,10 @@ function QuestionForm({
   const selectedOption = selection.userSelected ? selection.selectedOption : recommendedOption;
   const answer = selection.answer;
   const answerID = useId();
-  const canSubmit = selectedOption === null ? false : selectedOption > 0 || answer.trim().length > 0;
+  // A real option (>0) can submit on its own; otherwise any typed freeform answer
+  // is submittable, including freeform-only asks where no option is ever selected
+  // (selectedOption stays null). submit() coerces a null/none selection to 0.
+  const canSubmit = (selectedOption !== null && selectedOption > 0) || answer.trim().length > 0;
   const interactionDisabled = disabled || answerQuestion.isPending || selection.submitted;
   const submitDisabled = interactionDisabled || !canSubmit;
   const radioValue = selectedOption === null ? "" : selectedOption.toString();
