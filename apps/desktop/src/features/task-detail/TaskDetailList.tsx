@@ -115,7 +115,7 @@ export function TaskDetailList({
       renderItem={(item) => (
         <TaskDetailListRow
           activityCount={activityItems.length}
-          commentCount={commentItems.length}
+          commentCount={detail.comments.length}
           detail={detail}
           disabled={disabled}
           draft={draft}
@@ -408,16 +408,19 @@ function commentStatusItems({
   commentsError: unknown;
   commentsPending: boolean;
 }>): readonly TaskDetailListItem[] {
+  // Once rows are loaded, keep them visible. A failed/pending later page must
+  // not collapse already-loaded comments into a single status row; the
+  // infinite-list footer surfaces ongoing pagination state instead.
+  if (commentItems.length > 0) {
+    return [];
+  }
   if (commentsPending) {
     return [{ kind: "comments-loading" }];
   }
   if (commentsError != null) {
     return [{ kind: "comments-error", error: commentsError }];
   }
-  if (commentItems.length === 0) {
-    return [{ kind: "comments-empty" }];
-  }
-  return [];
+  return [{ kind: "comments-empty" }];
 }
 
 function activityStatusItems({
@@ -429,16 +432,18 @@ function activityStatusItems({
   activityItems: readonly ActivityItem[];
   activityPending: boolean;
 }>): readonly TaskDetailListItem[] {
+  // Keep already-loaded activity rows visible across later page fetches; only
+  // show a full status row when nothing has loaded yet.
+  if (activityItems.length > 0) {
+    return [];
+  }
   if (activityPending) {
     return [{ kind: "activity-loading" }];
   }
   if (activityError != null) {
     return [{ kind: "activity-error", error: activityError }];
   }
-  if (activityItems.length === 0) {
-    return [{ kind: "activity-empty" }];
-  }
-  return [];
+  return [{ kind: "activity-empty" }];
 }
 
 function taskDetailListItemKey(item: TaskDetailListItem): string {

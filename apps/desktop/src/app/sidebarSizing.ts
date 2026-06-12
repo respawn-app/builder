@@ -22,14 +22,24 @@ export const defaultSidebarSizePreference: SidebarSizePreference = {
   minWidthPx: sidebarMinWidthPx,
 };
 
+// normalizePx coerces a possibly non-finite (NaN/Infinity) width — e.g. from a
+// corrupted cached preference — to a finite integer so it can't propagate into
+// an invalid inline width that leaves the sidebar stuck.
+function normalizePx(value: number, fallback: number): number {
+  return Number.isFinite(value) ? Math.round(value) : fallback;
+}
+
 export function clampSidebarWidth(
   widthPx: number,
   maxWidthPx = Number.MAX_SAFE_INTEGER,
   minWidthPx = sidebarMinWidthPx,
 ): number {
-  const roundedMaxWidthPx = Math.max(0, Math.round(maxWidthPx));
-  const effectiveMinWidthPx = Math.min(Math.max(0, Math.round(minWidthPx)), roundedMaxWidthPx);
-  return Math.min(Math.max(Math.round(widthPx), effectiveMinWidthPx), roundedMaxWidthPx);
+  const roundedMaxWidthPx = Math.max(0, normalizePx(maxWidthPx, Number.MAX_SAFE_INTEGER));
+  const effectiveMinWidthPx = Math.min(
+    Math.max(0, normalizePx(minWidthPx, sidebarMinWidthPx)),
+    roundedMaxWidthPx,
+  );
+  return Math.min(Math.max(normalizePx(widthPx, effectiveMinWidthPx), effectiveMinWidthPx), roundedMaxWidthPx);
 }
 
 export function initialSidebarWidthForViewport(
@@ -46,7 +56,7 @@ export function sidebarResizeBoundsForShellWidth(
   shellWidthPx: number,
   preference: SidebarSizePreference = defaultSidebarSizePreference,
 ): SidebarResizeBounds {
-  const roundedShellWidthPx = Math.max(0, Math.round(shellWidthPx));
+  const roundedShellWidthPx = Math.max(0, normalizePx(shellWidthPx, 0));
   const maxWidthPx = Math.round(roundedShellWidthPx * sidebarMaxWidthRatio);
   return {
     maxWidthPx,

@@ -42,6 +42,18 @@ export function TaskDetailContent({
   const [questionSelections, setQuestionSelections] = useState<ReadonlyMap<string, QuestionSelectionState>>(
     () => new Map(),
   );
+  // When the surface switches to a different task, drop the previous task's
+  // in-progress comment edit, new-comment draft, and question selections so they
+  // don't bleed into the newly loaded task. Reset during render (the React
+  // "adjust state on prop change" pattern) rather than in an effect. The
+  // title/body draft resets via its own sourceKey above.
+  const [loadedTaskID, setLoadedTaskID] = useState(detail.id);
+  if (loadedTaskID !== detail.id) {
+    setLoadedTaskID(detail.id);
+    setEditingComment(null);
+    setNewCommentBody("");
+    setQuestionSelections(new Map());
+  }
   const update = useUpdateTask(detail.id);
   const mutations = useTaskMutations(detail.id, onMutated);
   const connection = useConnectionSnapshot();

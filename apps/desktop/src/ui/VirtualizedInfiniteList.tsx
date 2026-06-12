@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { cx } from "./classes";
 import { Spinner } from "./Spinner";
+import { resolveLoadMore } from "./virtualizedInfiniteListLoadMore";
 
 export type VirtualizedInfiniteListProps<TItem> = Readonly<{
   items: readonly TItem[];
@@ -45,6 +46,7 @@ export function VirtualizedInfiniteList<TItem>({
 }: VirtualizedInfiniteListProps<TItem>) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastLoadMoreKeyRef = useRef("");
+  const wasFetchingNextPageRef = useRef(false);
   const headerCount = header === undefined ? 0 : 1;
   const emptyCount = items.length === 0 && empty !== undefined ? 1 : 0;
   const placeholderCount = hasNextPage ? 1 : 0;
@@ -87,15 +89,17 @@ export function VirtualizedInfiniteList<TItem>({
   useEffect(() => {
     const lastItem = virtualItems.at(-1);
     const lastDataIndex = headerCount + items.length - 1;
-    const nextLoadMoreKey = loadMoreKey ?? items.length.toString();
-    if (
-      lastItem !== undefined &&
-      lastItem.index >= lastDataIndex &&
-      hasNextPage &&
-      !isFetchingNextPage &&
-      lastLoadMoreKeyRef.current !== nextLoadMoreKey
-    ) {
-      lastLoadMoreKeyRef.current = nextLoadMoreKey;
+    const decision = resolveLoadMore({
+      atBottom: lastItem !== undefined && lastItem.index >= lastDataIndex,
+      hasNextPage,
+      isFetchingNextPage,
+      lastLoadMoreKey: lastLoadMoreKeyRef.current,
+      loadMoreKey: loadMoreKey ?? items.length.toString(),
+      wasFetchingNextPage: wasFetchingNextPageRef.current,
+    });
+    wasFetchingNextPageRef.current = isFetchingNextPage;
+    lastLoadMoreKeyRef.current = decision.lastLoadMoreKey;
+    if (decision.shouldLoad) {
       onLoadMore();
     }
   }, [hasNextPage, headerCount, isFetchingNextPage, items.length, loadMoreKey, onLoadMore, virtualItems]);

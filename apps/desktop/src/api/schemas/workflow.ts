@@ -819,7 +819,7 @@ export const commentAddResponseSchema = z.object({ comment: commentSchema });
 
 export const commentPageSchema: z.ZodType<CommentPage> = z
   .object({
-    comments: z.array(commentSchema),
+    comments: z.array(commentSchema).nullish().transform(emptyArray),
     next_page_token: z.string().optional().default(""),
   })
   .transform((value) => ({

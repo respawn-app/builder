@@ -211,18 +211,20 @@ export function PropertiesIsland({
             {t("board.resume")}
           </Button>
         ) : null}
-        {activeRuns.map((run) => (
-          <Button
-            disabled={disabled}
-            key={run.id}
-            onClick={() => {
-              void mutations.interrupt.mutateAsync(run.id);
-            }}
-            variant="secondary"
-          >
-            {t("board.interrupt")} <span className="font-mono">{run.id}</span>
-          </Button>
-        ))}
+        {detail.actions.canInterrupt
+          ? activeRuns.map((run) => (
+              <Button
+                disabled={disabled}
+                key={run.id}
+                onClick={() => {
+                  void mutations.interrupt.mutateAsync(run.id);
+                }}
+                variant="secondary"
+              >
+                {t("board.interrupt")} <span className="font-mono">{run.id}</span>
+              </Button>
+            ))
+          : null}
         {detail.actions.canCancel ? (
           <Popover>
             <PopoverTrigger asChild>
