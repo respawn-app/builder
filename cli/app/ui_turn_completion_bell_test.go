@@ -49,8 +49,8 @@ func TestSubmitDoneDefersTurnCompletionBellUntilQueuedTurnsFinish(t *testing.T) 
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after queued turns drain, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: second" {
-		t.Fatalf("last message = %q, want %q", got, "builder: second")
+	if got := ringer.Last(); got != "kent: second" {
+		t.Fatalf("last message = %q, want %q", got, "kent: second")
 	}
 	if updated.isBusy() {
 		t.Fatal("expected UI idle after queued turns drain")
@@ -183,7 +183,7 @@ func TestManualCompactRingsWhenIdleAfterCompaction(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after idle manual compaction, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
+	if got := ringer.Last(); got != "kent: Compaction finished" {
 		t.Fatalf("last ring = %q, want compaction completion", got)
 	}
 }
@@ -230,7 +230,7 @@ func TestQueuedCompactRingsAfterCompactionWhenQueueIsDrained(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after queued compact, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
+	if got := ringer.Last(); got != "kent: Compaction finished" {
 		t.Fatalf("last ring = %q, want compaction completion", got)
 	}
 }
@@ -315,7 +315,7 @@ func TestQueuedCompactDefersBellUntilFollowingQueuedMessageDrains(t *testing.T) 
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count after following queued message drained = %d, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
+	if got := ringer.Last(); got != "kent: Compaction finished" {
 		t.Fatalf("last ring = %q, want compaction completion", got)
 	}
 }
@@ -364,7 +364,7 @@ func TestManualCompactWithQueuedSteeringDoesNotRing(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after queued steering drain, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
+	if got := ringer.Last(); got != "kent: Compaction finished" {
 		t.Fatalf("last ring = %q, want compaction completion", got)
 	}
 }
@@ -390,7 +390,7 @@ func TestManualCompactRingsAfterQueuedLocalCommandDrains(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count after queued local command drain = %d, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
+	if got := ringer.Last(); got != "kent: Compaction finished" {
 		t.Fatalf("last ring = %q, want compaction completion", got)
 	}
 }
@@ -453,7 +453,7 @@ func TestManualCompactWithPendingQueuedDrainHydrationDoesNotRing(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count after later queued drain = %d, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
+	if got := ringer.Last(); got != "kent: Compaction finished" {
 		t.Fatalf("last ring = %q, want compaction completion", got)
 	}
 }

@@ -15,6 +15,7 @@ import (
 
 	"core/cli/app"
 	"core/cli/selfcmd"
+	"core/shared/brand"
 	"core/shared/buildinfo"
 	"core/shared/config"
 	"core/shared/sessionenv"
@@ -117,7 +118,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		return taskSubcommand(args[1:], stdout, stderr)
 	}
 
-	rootFS := newCommandFlagSet("builder", stderr, rootUsage)
+	rootFS := newCommandFlagSet(brand.Command, stderr, rootUsage)
 	showVersion := rootFS.Bool("version", false, "print version and exit")
 	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
 	flags := registerSessionFlags(rootFS)

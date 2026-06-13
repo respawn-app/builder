@@ -6,6 +6,7 @@ import (
 
 	tuiinput "core/cli/tui/input"
 	"core/server/llm"
+	"core/shared/brand"
 	"core/shared/config"
 	sharedtheme "core/shared/theme"
 	"core/shared/toolspec"
@@ -274,7 +275,7 @@ func (m *onboardingModel) renderThemePreview(width int) []string {
 	if modelLabel == "" {
 		modelLabel = "gpt-5"
 	}
-	statusLine := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render("builder") +
+	statusLine := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(brand.Command) +
 		lipgloss.NewStyle().Foreground(palette.muted).Render(" | ") +
 		lipgloss.NewStyle().Foreground(palette.foreground).Render("ready") +
 		lipgloss.NewStyle().Foreground(palette.muted).Render(" | ") +

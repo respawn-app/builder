@@ -279,7 +279,7 @@ func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
 	if got := ringer.Count(); got != 2 {
 		t.Fatalf("ask notification count = %d, want 2", got)
 	}
-	wantLast := "builder: Question: " + second.req.Question
+	wantLast := "kent: Question: " + second.req.Question
 	if got := ringer.Last(); got != wantLast {
 		t.Fatalf("last ask notification = %q, want %q", got, wantLast)
 	}

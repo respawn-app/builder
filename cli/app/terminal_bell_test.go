@@ -123,8 +123,8 @@ func TestBellHooksRingOnAskRequests(t *testing.T) {
 	if got := ringer.Count(); got != 2 {
 		t.Fatalf("ring count = %d, want 2", got)
 	}
-	if got := ringer.Last(); got != "builder: Action required: approval" {
-		t.Fatalf("last message = %q, want %q", got, "builder: Action required: approval")
+	if got := ringer.Last(); got != "kent: Action required: approval" {
+		t.Fatalf("last message = %q, want %q", got, "kent: Action required: approval")
 	}
 }
 
@@ -177,8 +177,8 @@ func TestUIAskEventNotifiesBellHookForActiveAndQueuedPrompts(t *testing.T) {
 	if got := ringer.Count(); got != 2 {
 		t.Fatalf("ask notification count = %d, want 2", got)
 	}
-	if got := ringer.Last(); got != "builder: Question: Second?" {
-		t.Fatalf("last ask notification = %q, want %q", got, "builder: Question: Second?")
+	if got := ringer.Last(); got != "kent: Question: Second?" {
+		t.Fatalf("last ask notification = %q, want %q", got, "kent: Question: Second?")
 	}
 }
 
@@ -215,8 +215,8 @@ func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after queue drain, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: turn complete" {
-		t.Fatalf("last message = %q, want %q", got, "builder: turn complete")
+	if got := ringer.Last(); got != "kent: turn complete" {
+		t.Fatalf("last message = %q, want %q", got, "kent: turn complete")
 	}
 
 	hooks.OnTurnQueueDrained()
@@ -263,8 +263,8 @@ func TestBellHooksIncludeAssistantPreviewInTurnCompleteNotification(t *testing.T
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "  First line\n\nSecond line with details  "}}})
 	hooks.OnTurnQueueDrained()
 
-	if got := ringer.Last(); got != "builder: First line Second line with details" {
-		t.Fatalf("last message = %q, want %q", got, "builder: First line Second line with details")
+	if got := ringer.Last(); got != "kent: First line Second line with details" {
+		t.Fatalf("last message = %q, want %q", got, "kent: First line Second line with details")
 	}
 }
 
@@ -277,8 +277,8 @@ func TestBellHooksFallbackToTurnCompleteForWhitespacePreview(t *testing.T) {
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "\n\t  "}}})
 	hooks.OnTurnQueueDrained()
 
-	if got := ringer.Last(); got != "builder: turn complete" {
-		t.Fatalf("last message = %q, want %q", got, "builder: turn complete")
+	if got := ringer.Last(); got != "kent: turn complete" {
+		t.Fatalf("last message = %q, want %q", got, "kent: turn complete")
 	}
 }
 
@@ -328,8 +328,8 @@ func TestBellHooksNoopAssistantEventPreservesUnrelatedActiveTurn(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after unrelated active turn completes, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: second" {
-		t.Fatalf("last message = %q, want %q", got, "builder: second")
+	if got := ringer.Last(); got != "kent: second" {
+		t.Fatalf("last message = %q, want %q", got, "kent: second")
 	}
 }
 
@@ -389,8 +389,8 @@ func TestBellHooksRingOnceAfterQueuedTurnsDrain(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after queue drain, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: second" {
-		t.Fatalf("last message = %q, want %q", got, "builder: second")
+	if got := ringer.Last(); got != "kent: second" {
+		t.Fatalf("last message = %q, want %q", got, "kent: second")
 	}
 }
 
@@ -418,8 +418,8 @@ func TestBellHooksRingOnUserCompactionCompletion(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after user compaction completion, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
-		t.Fatalf("last message = %q, want %q", got, "builder: Compaction finished")
+	if got := ringer.Last(); got != "kent: Compaction finished" {
+		t.Fatalf("last message = %q, want %q", got, "kent: Compaction finished")
 	}
 }
 
@@ -447,7 +447,7 @@ func TestBellHooksDeferUserCompactionCompletionUntilQueueDrains(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count after queue drain = %d, want 1", got)
 	}
-	if got := ringer.Last(); got != "builder: Compaction finished" {
-		t.Fatalf("last message = %q, want %q", got, "builder: Compaction finished")
+	if got := ringer.Last(); got != "kent: Compaction finished" {
+		t.Fatalf("last message = %q, want %q", got, "kent: Compaction finished")
 	}
 }
