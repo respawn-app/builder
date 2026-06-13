@@ -89,7 +89,7 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 	}
 	if includeToolSection {
 		out.WriteString("\n[tools]\n")
-		out.WriteString("# Leave both patch/edit commented to use Builder's model-based default:\n")
+		out.WriteString("# Leave both patch/edit commented to use Kent's model-based default:\n")
 		out.WriteString("# patch for first-party OpenAI or gpt-* models, edit otherwise.\n")
 		writeToolLines(&out, state.Settings.EnabledTools)
 	}
@@ -140,7 +140,7 @@ func writeBuiltInSubagentSections(builder *strings.Builder) {
 	}
 	builder.WriteString("\n[subagents.fast]\n")
 	builder.WriteString("# inherits all main settings unless overridden\n")
-	builder.WriteString("# agent_callable = true # set false to hide/block this role from Builder-session subagent calls\n")
+	builder.WriteString("# agent_callable = true # set false to hide/block this role from Kent-session subagent calls\n")
 	builder.WriteString("# description = \"\" # model-visible role description for future/catalog uses\n")
 	builder.WriteString("# model = \"gpt-5.4-mini\" # built-in heuristic on exact OpenAI first-party setups\n")
 	builder.WriteString("# priority_request_mode = true # built-in heuristic on exact OpenAI first-party setups\n")

@@ -270,7 +270,7 @@ type sessionWorkspaceRetargetError struct {
 
 func (e sessionWorkspaceRetargetError) Error() string {
 	return fmt.Sprintf(
-		"workspace root %q is missing; run `builder rebind %s %s`",
+		"workspace root %q is missing; run `kent rebind %s %s`",
 		e.workspaceRoot,
 		strconv.Quote(e.sessionID),
 		strconv.Quote(e.newRoot),

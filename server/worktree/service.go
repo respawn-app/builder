@@ -1535,7 +1535,7 @@ func (s *Service) branchCleanupSkippedMessage(target syncedWorktree, explicitDel
 	if explicitDeleteBranch || (target.record.BuilderManaged && target.record.CreatedBranch) {
 		return ""
 	}
-	return fmt.Sprintf("Kept branch %s: Builder cannot prove this worktree created it", branchName)
+	return fmt.Sprintf("Kept branch %s: Kent cannot prove this worktree created it", branchName)
 }
 
 func pathAvailability(path string) string {

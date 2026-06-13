@@ -57,7 +57,7 @@ func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerRead
 		response.Causes = []serverapi.ServerReadinessCause{{
 			Code:       "server_not_ready",
 			Severity:   "error",
-			Summary:    "Builder server is not ready.",
+			Summary:    "Kent server is not ready.",
 			NextAction: "Resolve the startup blocker and retry.",
 		}}
 	}

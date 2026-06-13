@@ -121,7 +121,7 @@ func TestBuildToolRegistryMissingWorkspaceRootSuggestsRebind(t *testing.T) {
 			if !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("expected os.ErrNotExist, got %v", err)
 			}
-			want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`builder rebind " + strconv.Quote(sessionID) + " " + strconv.Quote(newWorkspace) + "`"
+			want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`kent rebind " + strconv.Quote(sessionID) + " " + strconv.Quote(newWorkspace) + "`"
 			if got := err.Error(); got != want {
 				t.Fatalf("error = %q, want %q", got, want)
 			}

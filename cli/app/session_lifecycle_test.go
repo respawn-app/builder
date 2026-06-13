@@ -74,7 +74,7 @@ func TestRunSessionLifecycleMissingWorkspacePrepareRuntimeSuggestsRebind(t *test
 	if len(summaries) != 1 {
 		t.Fatalf("session count = %d, want 1", len(summaries))
 	}
-	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`builder rebind " + strconv.Quote(summaries[0].SessionID) + " " + strconv.Quote(newWorkspace) + "`"
+	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`kent rebind " + strconv.Quote(summaries[0].SessionID) + " " + strconv.Quote(newWorkspace) + "`"
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}

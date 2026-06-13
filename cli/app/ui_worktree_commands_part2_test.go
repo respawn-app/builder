@@ -356,7 +356,7 @@ func TestWorktreeDeleteDoneShowsBranchCleanupOutcome(t *testing.T) {
 		resp: serverapi.WorktreeDeleteResponse{
 			Target:               clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"},
 			Worktree:             serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
-			BranchCleanupMessage: "Kept branch feature-a: Builder cannot prove this worktree created it",
+			BranchCleanupMessage: "Kept branch feature-a: Kent cannot prove this worktree created it",
 		},
 	})
 	updated := next.(*uiModel)
