@@ -21,6 +21,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/sessionenv"
 	"builder/shared/toolspec"
 )
 
@@ -73,7 +74,7 @@ func (r *recordingGoalRemote) ClearGoal(context.Context, serverapi.RuntimeGoalCl
 }
 
 func TestGoalShowUsesBuilderSessionID(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "session-1")
+	t.Setenv(sessionenv.BuilderSessionID, "session-1")
 	remote := &recordingGoalRemote{goal: &serverapi.RuntimeGoal{ID: "goal-1", Objective: "ship goal mode", Status: "active"}}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -95,7 +96,7 @@ func TestGoalShowUsesBuilderSessionID(t *testing.T) {
 }
 
 func TestGoalAgentEnvAllowsSetWithAgentActor(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "session-1")
+	t.Setenv(sessionenv.BuilderSessionID, "session-1")
 	remote := &recordingGoalRemote{goal: &serverapi.RuntimeGoal{ID: "goal-1", Objective: "new goal", Status: "active"}}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -117,7 +118,7 @@ func TestGoalAgentEnvAllowsSetWithAgentActor(t *testing.T) {
 }
 
 func TestGoalAgentEnvSetOverwritePrintsDeniedPrompt(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "session-1")
+	t.Setenv(sessionenv.BuilderSessionID, "session-1")
 	existing := &serverapi.RuntimeGoal{ID: "goal-1", Objective: "existing goal", Status: "active"}
 	remote := &recordingGoalRemote{
 		goal:   existing,
@@ -151,7 +152,7 @@ func TestGoalAgentEnvSetOverwritePrintsDeniedPrompt(t *testing.T) {
 }
 
 func TestGoalAgentEnvDeniesNonSetMutationWithoutDialing(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "session-1")
+	t.Setenv(sessionenv.BuilderSessionID, "session-1")
 	remote := &recordingGoalRemote{}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -169,7 +170,7 @@ func TestGoalAgentEnvDeniesNonSetMutationWithoutDialing(t *testing.T) {
 }
 
 func TestGoalSetRejectsEmptyObjectiveBeforeDialing(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "")
+	t.Setenv(sessionenv.BuilderSessionID, "")
 	remote := &recordingGoalRemote{}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -187,7 +188,7 @@ func TestGoalSetRejectsEmptyObjectiveBeforeDialing(t *testing.T) {
 }
 
 func TestGoalAgentCompleteRequiresConfirmTripwire(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "session-1")
+	t.Setenv(sessionenv.BuilderSessionID, "session-1")
 	remote := &recordingGoalRemote{goal: &serverapi.RuntimeGoal{ID: "goal-1", Objective: "ship goal mode", Status: "active"}}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -231,7 +232,7 @@ func TestGoalCompleteAlreadyCompletePrintsAlreadyCompletePrompt(t *testing.T) {
 		{name: "with confirm", args: []string{"complete", "--confirm"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("BUILDER_SESSION_ID", "session-1")
+			t.Setenv(sessionenv.BuilderSessionID, "session-1")
 			remote := &recordingGoalRemote{goal: &serverapi.RuntimeGoal{ID: "goal-1", Objective: "ship goal mode", Status: "complete"}}
 			restore := replaceGoalCommandRemoteOpener(t, remote)
 			defer restore()
@@ -258,7 +259,7 @@ func TestGoalCompleteAlreadyCompletePrintsAlreadyCompletePrompt(t *testing.T) {
 }
 
 func TestGoalCompleteUsesFreshTimeoutForCompletionRPC(t *testing.T) {
-	t.Setenv("BUILDER_SESSION_ID", "session-1")
+	t.Setenv(sessionenv.BuilderSessionID, "session-1")
 	remote := &recordingGoalRemote{goal: &serverapi.RuntimeGoal{ID: "goal-1", Objective: "ship goal mode", Status: "active"}}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -363,7 +364,7 @@ func TestGoalCommandSubprocessTargetsLiveSessionFromUnboundWorktree(t *testing.T
 		})
 	}()
 
-	t.Setenv("BUILDER_SESSION_ID", store.Meta().SessionID)
+	t.Setenv(sessionenv.BuilderSessionID, store.Meta().SessionID)
 	showOutput, showErr := runGoalCommandSubprocess(t, builderPath, unboundWorktree, store.Meta().SessionID, "show", "--json")
 	if showErr != "" {
 		t.Fatalf("goal show stderr = %q", showErr)

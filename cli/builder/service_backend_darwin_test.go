@@ -238,7 +238,7 @@ func TestLaunchdRestartIfInstalledReplacesStaleLoadedServiceAfterTransientBootst
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls = %#v, want %#v", *calls, want)
 	}
-	wantStdout := "Builder background service is installed. Restarting it after update; sessions may fail briefly.\nRestarted Builder background service.\n"
+	wantStdout := serviceDisplayName + " is installed. Restarting it after update; sessions may fail briefly.\nRestarted " + serviceDisplayName + ".\n"
 	if stdout.String() != wantStdout {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), wantStdout)
 	}

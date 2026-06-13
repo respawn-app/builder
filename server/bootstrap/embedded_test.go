@@ -9,6 +9,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/generated"
+	"builder/shared/brand"
 	"builder/shared/config"
 )
 
@@ -70,7 +71,7 @@ func TestBuildGeneratedSupportUsesSharedSyncPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGeneratedSupport: %v", err)
 	}
-	wantSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	wantSkillsRoot := filepath.Join(home, brand.ConfigDirName, ".generated", "skills")
 	if result.GeneratedSkillsRoot != wantSkillsRoot {
 		t.Fatalf("generated skills root = %q, want %q", result.GeneratedSkillsRoot, wantSkillsRoot)
 	}

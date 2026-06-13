@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"builder/shared/brand"
 )
 
 var processStartHome = os.Getenv("HOME")
@@ -78,7 +80,7 @@ func refuseRealPersistenceRootUnderGoTest(absRoot string) error {
 		return nil
 	}
 	for _, home := range protectedPersistenceRootHomes() {
-		realRoot, err := filepath.Abs(filepath.Join(home, ".builder"))
+		realRoot, err := filepath.Abs(filepath.Join(home, brand.ConfigDirName))
 		if err != nil {
 			return fmt.Errorf("resolve protected persistence root: %w", err)
 		}

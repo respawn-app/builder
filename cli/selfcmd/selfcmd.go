@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"builder/shared/brand"
 )
 
-const fallbackBinaryName = "builder"
+const fallbackBinaryName = brand.Command
 
 func BuilderCommand() string {
 	return formatBuilderCommand(currentExecutablePath())

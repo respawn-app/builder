@@ -6,6 +6,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
+	"builder/shared/brand"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"context"
@@ -515,7 +516,7 @@ func TestManualLocalCompactionRebuildsCanonicalContextOrder(t *testing.T) {
 	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
 		t.Fatalf("write workspace AGENTS.md: %v", err)
 	}
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	store := mustCreateNamedTestSession(t, "ws", workspace)
 	client := &fakeCompactionClient{responses: []llm.Response{{

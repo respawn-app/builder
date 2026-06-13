@@ -713,7 +713,7 @@ func TestSessionIDSubcommandFailsOutsideBuilderShell(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "BUILDER_SESSION_ID is not set") {
+	if !strings.Contains(stderr.String(), sessionenv.BuilderSessionID+" is not set") {
 		t.Fatalf("stderr = %q, want missing env error", stderr.String())
 	}
 }

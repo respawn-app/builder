@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/shared/brand"
 	"builder/shared/config"
 )
 
@@ -97,7 +98,7 @@ func TestEnsureReadyHeadlessWritesDefaultSettingsAndReloadsMetadata(t *testing.T
 	if !changed {
 		t.Fatal("expected onboarding changes")
 	}
-	settingsPath := filepath.Join(home, ".builder", "config.toml")
+	settingsPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	if reloaded.Source.SettingsPath != settingsPath {
 		t.Fatalf("settings path = %q, want %q", reloaded.Source.SettingsPath, settingsPath)
 	}

@@ -6,6 +6,7 @@ import (
 	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/server/runtime"
+	"builder/shared/brand"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"context"
@@ -578,11 +579,11 @@ func findRawStatusOverlayLine(t *testing.T, lines []string, want string) string 
 func TestStatusEnvironmentWarnsWhenRecoveredGeneratedFilesExist(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Join(home, ".builder", "recovered", "old"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName, "recovered", "old"), 0o755); err != nil {
 		t.Fatalf("mkdir recovered: %v", err)
 	}
 	result := defaultUIStatusCollector{}.CollectEnvironment(context.Background(), newStatusRequestForTest(withStatusWorkspaceRoot(t.TempDir())), uiStatusSnapshot{})
-	if !strings.Contains(result.CollectorWarning, "~/.builder/.generated folder was edited") {
+	if !strings.Contains(result.CollectorWarning, brand.PersistenceRoot+"/.generated folder was edited") {
 		t.Fatalf("expected recovered generated warning, got %q", result.CollectorWarning)
 	}
 }

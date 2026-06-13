@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"builder/shared/config"
+	"builder/shared/sessionenv"
 	"builder/shared/toolspec"
 )
 
@@ -453,7 +454,7 @@ func TestRunnerUserHookReplacesOutput(t *testing.T) {
 
 func TestRunnerUserHookInheritsOwnerSessionID(t *testing.T) {
 	hookPath := writeHookScript(t, `#!/bin/sh
-printf '{"processed":true,"replaced_output":"%s"}' "$BUILDER_SESSION_ID"
+printf '{"processed":true,"replaced_output":"%s"}' "$`+sessionenv.BuilderSessionID+`"
 `)
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})
 	result, err := runner.Apply(context.Background(), Request{

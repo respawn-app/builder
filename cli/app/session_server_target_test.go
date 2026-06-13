@@ -7,6 +7,7 @@ import (
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	askquestion "builder/server/tools/askquestion"
+	"builder/shared/brand"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -108,16 +109,16 @@ func TestConfiguredDaemonPlanSessionUsesSessionWorkspaceLocalConfig(t *testing.T
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
 	configureAppTestServerPort(t)
-	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create home config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"home-model\"\nthinking_level = \"low\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, brand.ConfigDirName, "config.toml"), []byte("model = \"home-model\"\nthinking_level = \"low\"\n"), 0o644); err != nil {
 		t.Fatalf("write home config: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspace, ".builder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspace, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create workspace config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, ".builder", "config.toml"), []byte("model = \"workspace-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, brand.ConfigDirName, "config.toml"), []byte("model = \"workspace-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 	glob, err := config.LoadGlobal(config.LoadOptions{})

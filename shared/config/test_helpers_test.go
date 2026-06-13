@@ -1,6 +1,7 @@
 package config
 
 import (
+	"builder/shared/brand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,7 @@ func newConfigTestEnv(t *testing.T) (string, string) {
 func newConfigTestFile(t *testing.T) (string, string, string) {
 	t.Helper()
 	home, workspace := newConfigTestEnv(t)
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	ensureConfigTestDir(t, configPath)
 	return home, workspace, configPath
 }

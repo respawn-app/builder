@@ -23,6 +23,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/brand"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
@@ -185,7 +186,7 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 		t.Fatalf("start embedded server: %v", err)
 	}
 	t.Cleanup(func() { _ = server.Close() })
-	generatedSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	generatedSkillsRoot := filepath.Join(home, brand.ConfigDirName, ".generated", "skills")
 	if entries, err := os.ReadDir(generatedSkillsRoot); err != nil {
 		t.Fatalf("expected embedded startup to seed generated skills through bootstrap: %v", err)
 	} else if len(entries) == 0 {

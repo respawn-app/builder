@@ -13,6 +13,7 @@ import (
 	"builder/cli/app/internal/onboardingimportgenerated"
 	"builder/cli/app/internal/onboardingimportproviders"
 	"builder/cli/app/internal/onboardingimportskills"
+	"builder/shared/brand"
 )
 
 type onboardingImportProviderID = onboardingimportchoice.ProviderID
@@ -128,7 +129,7 @@ func discoverExistingOnboardingSkillNames(globalRoot string, workspaceRoot strin
 func onboardingExistingSkillRoots(globalRoot string, workspaceRoot string) []string {
 	roots := []string{filepath.Join(globalRoot, "skills")}
 	if strings.TrimSpace(workspaceRoot) != "" {
-		roots = append(roots, filepath.Join(workspaceRoot, ".builder", "skills"))
+		roots = append(roots, filepath.Join(workspaceRoot, brand.ConfigDirName, "skills"))
 	}
 	return roots
 }

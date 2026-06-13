@@ -12,11 +12,13 @@ import (
 	"builder/server/session"
 	serverstartup "builder/server/startup"
 	"builder/server/tools/askquestion"
+	"builder/shared/brand"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/sessionenv"
 	"builder/shared/testopenai"
 	"bytes"
 	"context"
@@ -74,7 +76,7 @@ func saveReadyAppAuthState(t *testing.T, workspace string) {
 func TestLoadRemoteAttachConfigUsesSessionWorkspaceWhenWorkspaceImplicit(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	worktree := filepath.Join(home, brand.ConfigDirName, "worktrees", "project", "feature")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
@@ -115,8 +117,8 @@ func TestLoadRemoteAttachConfigRejectsStaleWorkspaceContextSession(t *testing.T)
 	if err == nil {
 		t.Fatal("expected stale workspace context session to fail")
 	}
-	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
-		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
+	if !strings.Contains(err.Error(), sessionenv.BuilderSessionID+" points to missing Builder session") {
+		t.Fatalf("error = %q, want %s context", err, sessionenv.BuilderSessionID)
 	}
 }
 
@@ -137,7 +139,7 @@ func TestLoadRemoteAttachConfigKeepsExplicitSessionLookupStrict(t *testing.T) {
 func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	worktree := filepath.Join(home, brand.ConfigDirName, "worktrees", "project", "feature")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
@@ -187,8 +189,8 @@ func TestRunPromptRejectsStaleWorkspaceContextSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected stale workspace context session to fail")
 	}
-	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
-		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
+	if !strings.Contains(err.Error(), sessionenv.BuilderSessionID+" points to missing Builder session") {
+		t.Fatalf("error = %q, want %s context", err, sessionenv.BuilderSessionID)
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("expected no llm calls, got %d", hits.Load())

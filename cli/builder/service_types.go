@@ -13,15 +13,16 @@ import (
 	"strings"
 	"time"
 
+	"builder/shared/brand"
 	"builder/shared/config"
 	"builder/shared/protocol"
 )
 
 const (
-	serviceDisplayName     = "Builder background service"
-	serviceLaunchdLabel    = "pro.respawn.builder.server"
-	serviceSystemdUnitName = "builder.service"
-	serviceWindowsTaskName = "Builder Server"
+	serviceDisplayName     = brand.ServiceDisplayName
+	serviceLaunchdLabel    = brand.ServiceLaunchdLabel
+	serviceSystemdUnitName = brand.ServiceSystemdUnitName
+	serviceWindowsTaskName = brand.ServiceWindowsTaskName
 	serviceLogDirName      = "logs"
 	serviceStdoutLogName   = "server.log"
 	serviceStderrLogName   = "server.err.log"

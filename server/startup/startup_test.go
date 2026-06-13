@@ -15,6 +15,7 @@ import (
 	"builder/server/generated"
 	"builder/server/metadata"
 	"builder/server/rootlock"
+	"builder/shared/brand"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -259,7 +260,7 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	if generatedCalls != 1 {
 		t.Fatalf("generated sync calls = %d, want 1", generatedCalls)
 	}
-	generatedSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	generatedSkillsRoot := filepath.Join(home, brand.ConfigDirName, ".generated", "skills")
 	if entries, err := os.ReadDir(generatedSkillsRoot); err != nil {
 		t.Fatalf("expected StartCore to seed generated skills through bootstrap: %v", err)
 	} else if len(entries) == 0 {

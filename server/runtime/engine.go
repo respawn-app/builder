@@ -12,6 +12,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/server/workflowruntime"
+	"builder/shared/brand"
 	"builder/shared/clientui"
 	"builder/shared/compaction"
 	"builder/shared/config"
@@ -23,7 +24,7 @@ import (
 const (
 	interruptMessage                  = "User interrupted you"
 	agentsFileName                    = "AGENTS.md"
-	agentsGlobalDirName               = ".builder"
+	agentsGlobalDirName               = brand.ConfigDirName
 	systemPromptFileName              = "SYSTEM.md"
 	agentsInjectedHeader              = "# Project context and authoritative instructions from the ./AGENTS.md file:"
 	agentsInjectedFenceLabel          = "md"

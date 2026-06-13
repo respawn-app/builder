@@ -11,6 +11,7 @@ import (
 	"builder/cli/app/internal/oauthadapter"
 	"builder/server/auth"
 	"builder/server/authflow"
+	"builder/shared/brand"
 	"builder/shared/config"
 )
 
@@ -77,7 +78,7 @@ func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.
 	if _, err := os.Stat(authPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no persisted auth state at %q, got err=%v", authPath, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".builder", "config.toml")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, brand.ConfigDirName, "config.toml")); err != nil {
 		t.Fatalf("expected config bootstrap artifacts to exist: %v", err)
 	}
 }
@@ -85,10 +86,10 @@ func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.
 func TestBootstrapAppReadyEnvAuthDoesNotOpenAuthPicker(t *testing.T) {
 	home, workspace := newRegisteredAppWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", "sk-env")
-	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"gpt-5\"\nopenai_base_url = \"http://127.0.0.1:8080/v1\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, brand.ConfigDirName, "config.toml"), []byte("model = \"gpt-5\"\nopenai_base_url = \"http://127.0.0.1:8080/v1\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -121,10 +122,10 @@ func TestBootstrapAppReadyEnvAuthDoesNotOpenAuthPicker(t *testing.T) {
 
 func TestBootstrapAppNoAuthPreferenceDoesNotOpenAuthPicker(t *testing.T) {
 	home, workspace := newRegisteredAppWorkspace(t)
-	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, brand.ConfigDirName, "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -449,7 +450,7 @@ func TestBootstrapAppSkipAuthDoesNotPersistAuthState(t *testing.T) {
 	if _, err := os.Stat(authPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no persisted auth state at %q, got err=%v", authPath, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".builder", "config.toml")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, brand.ConfigDirName, "config.toml")); err != nil {
 		t.Fatalf("expected onboarding config bootstrap artifacts to exist: %v", err)
 	}
 }

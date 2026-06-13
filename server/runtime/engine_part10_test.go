@@ -5,6 +5,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/brand"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"context"
@@ -19,7 +20,7 @@ func TestInjectsGlobalAndWorkspaceAgentsBeforeFirstUserMessage(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	globalDir := filepath.Join(home, ".builder")
+	globalDir := filepath.Join(home, brand.ConfigDirName)
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatalf("mkdir global dir: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestFreshChildSessionReinjectsDeveloperContextEvenWhenParentAlreadyInjected
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	globalDir := filepath.Join(home, ".builder")
+	globalDir := filepath.Join(home, brand.ConfigDirName)
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatalf("mkdir global dir: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestFreshChildSessionReinjectsDeveloperContextEvenWhenParentAlreadyInjected
 	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
 		t.Fatalf("write workspace AGENTS.md: %v", err)
 	}
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	storeRoot := t.TempDir()
 	parent := mustCreateNamedTestSessionAt(t, storeRoot, "parent", workspace)
@@ -223,8 +224,8 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "home-skill", "from home")
-	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "home-skill"), "home-skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	storeRoot := t.TempDir()
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
@@ -297,8 +298,8 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "home-skill", "from home")
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "home-skill"), "home-skill", "from home")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "Workspace Skill", "from workspace")
 
 	storeRoot := t.TempDir()
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
@@ -336,8 +337,8 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	validSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "valid-skill"), "valid-skill", "from workspace")
-	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	validSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "valid-skill"), "valid-skill", "from workspace")
+	brokenLinkPath := filepath.Join(workspace, brand.ConfigDirName, "skills", "broken-skill")
 	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-skill-dir"), brokenLinkPath); err != nil {
 		t.Fatalf("symlink broken skill dir: %v", err)
 	}

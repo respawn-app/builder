@@ -8,10 +8,12 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"builder/shared/brand"
 )
 
 const (
-	builderDirName   = ".builder"
+	builderDirName   = brand.ConfigDirName
 	generatedDirName = ".generated"
 	promptsDirName   = "prompts"
 	commandsDirName  = "commands"

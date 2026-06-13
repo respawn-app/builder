@@ -4,6 +4,7 @@ import (
 	tuiinput "builder/cli/tui/input"
 	"builder/server/auth"
 	"builder/server/llm"
+	"builder/shared/brand"
 	"builder/shared/config"
 	"builder/shared/theme"
 	"os"
@@ -276,7 +277,7 @@ func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T
 	if err := os.WriteFile(filepath.Join(sourceDir, "demo-skill", "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
 		t.Fatalf("write skill source: %v", err)
 	}
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}

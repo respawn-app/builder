@@ -4,7 +4,9 @@ import (
 	"builder/server/tools"
 	"builder/server/tools/shell/postprocess"
 	"builder/server/tools/shell/shellenv"
+	"builder/shared/brand"
 	"builder/shared/config"
+	"builder/shared/sessionenv"
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
@@ -185,8 +187,8 @@ func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 		"KEEP=1",
 	}, "session-abc"))
 
-	if env["BUILDER_SESSION_ID"] != "session-abc" {
-		t.Fatalf("BUILDER_SESSION_ID = %q, want session-abc", env["BUILDER_SESSION_ID"])
+	if env[sessionenv.BuilderSessionID] != "session-abc" {
+		t.Fatalf("BUILDER_SESSION_ID = %q, want session-abc", env[sessionenv.BuilderSessionID])
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
@@ -196,7 +198,7 @@ func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 func TestManagerStartEmbedsOwnerSessionIDInProcessEnv(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	result, err := manager.Start(context.Background(), ExecRequest{
-		Command:        []string{"/bin/sh", "-c", "printf %s \"$BUILDER_SESSION_ID\""},
+		Command:        []string{"/bin/sh", "-c", "printf %s \"$" + sessionenv.BuilderSessionID + "\""},
 		DisplayCommand: "print builder session id",
 		OwnerSessionID: "session-env-123",
 		Workdir:        t.TempDir(),
@@ -222,7 +224,7 @@ func TestEnrichEnvAddsManagedRGConfigPathWhenAvailable(t *testing.T) {
 	}
 
 	env := envSliceToMap(t, shellenv.EnrichForSession([]string{"KEEP=1"}, ""))
-	want := filepath.Join(home, ".builder", "rg.conf")
+	want := filepath.Join(home, brand.ConfigDirName, "rg.conf")
 	if env["RIPGREP_CONFIG_PATH"] != want {
 		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want %q", env["RIPGREP_CONFIG_PATH"], want)
 	}

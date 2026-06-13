@@ -5,13 +5,14 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"builder/shared/brand"
 	"builder/shared/protocol"
 	"builder/shared/toolspec"
 )
 
 const (
-	DefaultAppName       = "builder"
-	DefaultPersistence   = "~/.builder"
+	DefaultAppName       = brand.Command
+	DefaultPersistence   = brand.PersistenceRoot
 	databaseDirName      = "db"
 	globalAuthConfigName = "auth.json"
 )

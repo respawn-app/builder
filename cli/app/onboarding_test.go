@@ -8,6 +8,7 @@ import (
 	"builder/prompts"
 	"builder/server/generated"
 	"builder/server/runtime"
+	"builder/shared/brand"
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
@@ -548,7 +549,7 @@ func TestBuildSkillSelectionScreenAddsToggleAllOptionWhenThereAreMoreThanTwoItem
 func TestDiscoverOnboardingImportsIncludesGeneratedSkillCandidates(t *testing.T) {
 	home := newAppTestHome(t)
 
-	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, ".builder"), "")
+	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, brand.ConfigDirName), "")
 	if discovery.err != nil {
 		t.Fatalf("discover onboarding imports: %v", discovery.err)
 	}
@@ -632,9 +633,9 @@ func TestSkillSelectionCandidatesHideGeneratedSkillsShadowedByExistingSkills(t *
 func TestDiscoverOnboardingImportsHidesGeneratedSkillsShadowedByWorkspaceSkills(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	writeOnboardingTestSkill(t, filepath.Join(workspace, ".builder", "skills", "builder-dogfooding"), "builder-dogfooding", "workspace override")
+	writeOnboardingTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "builder-dogfooding"), "builder-dogfooding", "workspace override")
 
-	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, ".builder"), workspace)
+	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, brand.ConfigDirName), workspace)
 	if discovery.err != nil {
 		t.Fatalf("discover onboarding imports: %v", discovery.err)
 	}
@@ -697,7 +698,7 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 		},
 	}
 	state.settings.SkillToggles = buildSkillToggles(&state, state.skillSelection)
-	model := newOnboardingModelForWorkspace(filepath.Join(home, ".builder"), "", state)
+	model := newOnboardingModelForWorkspace(filepath.Join(home, brand.ConfigDirName), "", state)
 	msg := model.finalizeCmd(false)()
 	done, ok := msg.(onboardingFinalizeDoneMsg)
 	if !ok {

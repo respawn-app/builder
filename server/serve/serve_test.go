@@ -18,6 +18,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/rootlock"
 	"builder/server/startup"
+	"builder/shared/brand"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -581,7 +582,7 @@ model = "blocked-model"
 
 func writeServeSettings(t *testing.T, home string, contents string) {
 	t.Helper()
-	settingsDir := filepath.Join(home, ".builder")
+	settingsDir := filepath.Join(home, brand.ConfigDirName)
 	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
 		t.Fatalf("create settings dir: %v", err)
 	}

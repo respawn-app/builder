@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/shared/brand"
 	"builder/shared/config"
 )
 
@@ -213,12 +214,12 @@ func windowsServiceTestSpec(t *testing.T) serviceSpec {
 	temp := t.TempDir()
 	t.Setenv("APPDATA", filepath.Join(temp, "AppData", "Roaming"))
 	return serviceSpec{
-		Config:        config.App{PersistenceRoot: filepath.Join(temp, ".builder")},
+		Config:        config.App{PersistenceRoot: filepath.Join(temp, brand.ConfigDirName)},
 		Executable:    filepath.Join(temp, "builder.exe"),
 		Arguments:     []string{"serve"},
-		LogDir:        filepath.Join(temp, ".builder", "logs"),
-		StdoutLogPath: filepath.Join(temp, ".builder", "logs", "server.log"),
-		StderrLogPath: filepath.Join(temp, ".builder", "logs", "server.err.log"),
+		LogDir:        filepath.Join(temp, brand.ConfigDirName, "logs"),
+		StdoutLogPath: filepath.Join(temp, brand.ConfigDirName, "logs", "server.log"),
+		StderrLogPath: filepath.Join(temp, brand.ConfigDirName, "logs", "server.err.log"),
 		Endpoint:      "http://127.0.0.1:53082",
 	}
 }
