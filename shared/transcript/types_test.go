@@ -24,3 +24,22 @@ func TestNormalizeToolCallMetaPreservesExplicitRenderHint(t *testing.T) {
 		t.Fatalf("expected explicit render hint preserved, got %+v", meta.RenderHint)
 	}
 }
+
+func TestToolCallMetaEqualIncludesShellOutputStatus(t *testing.T) {
+	left := &ToolCallMeta{ToolName: "exec_command", IsShell: true, RawOutputRequested: true}
+	right := &ToolCallMeta{ToolName: "exec_command", IsShell: true}
+
+	if ToolCallMetaEqual(left, right) {
+		t.Fatal("expected raw output status to affect tool metadata equality")
+	}
+
+	right.RawOutputRequested = true
+	if !ToolCallMetaEqual(left, right) {
+		t.Fatal("expected matching raw output status to be equal")
+	}
+
+	right.OutputTruncated = true
+	if ToolCallMetaEqual(left, right) {
+		t.Fatal("expected truncation status to affect tool metadata equality")
+	}
+}

@@ -10,6 +10,8 @@ import (
 
 	"builder/server/tools"
 	"builder/server/tools/shell/postprocess"
+	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 type execCommandInput struct {
@@ -111,5 +113,21 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 	if marshalErr != nil {
 		return tools.Result{}, marshalErr
 	}
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
+	toolResult := tools.Result{CallID: c.ID, Name: c.Name, Output: body}
+	if in.Raw || result.Truncated {
+		toolResult.Presentation = shellOutputStatusPresentation(c.Name, in.Raw, result.Truncated)
+	}
+	return toolResult, nil
+}
+
+func shellOutputStatusPresentation(name toolspec.ID, rawRequested bool, truncated bool) *transcript.ToolCallMeta {
+	if !rawRequested && !truncated {
+		return nil
+	}
+	return &transcript.ToolCallMeta{
+		ToolName:           string(name),
+		IsShell:            true,
+		RawOutputRequested: rawRequested,
+		OutputTruncated:    truncated,
+	}
 }

@@ -81,14 +81,15 @@ func shellToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage
 			renderHint = nil
 		}
 		return transcript.ToolCallMeta{
-			ToolName:      string(toolID),
-			IsShell:       true,
-			UserInitiated: parseShellToolCallUserInitiated(raw),
-			Command:       command,
-			CompactText:   command,
-			InlineMeta:    inlineMeta,
-			TimeoutLabel:  inlineMeta,
-			RenderHint:    renderHint,
+			ToolName:           string(toolID),
+			IsShell:            true,
+			UserInitiated:      parseShellToolCallUserInitiated(raw),
+			Command:            command,
+			CompactText:        command,
+			InlineMeta:         inlineMeta,
+			TimeoutLabel:       inlineMeta,
+			RenderHint:         renderHint,
+			RawOutputRequested: parseShellToolCallRawOutputRequested(raw),
 		}
 	}
 }
@@ -379,6 +380,16 @@ func parseShellToolCallUserInitiated(raw json.RawMessage) bool {
 		return false
 	}
 	return in.UserInitiated
+}
+
+func parseShellToolCallRawOutputRequested(raw json.RawMessage) bool {
+	var in struct {
+		Raw bool `json:"raw"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return false
+	}
+	return in.Raw
 }
 
 func parseAskQuestionToolCall(raw json.RawMessage) (string, []string, int, bool) {

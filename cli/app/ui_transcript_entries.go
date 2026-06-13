@@ -234,6 +234,8 @@ func transcriptToolCallMeta(meta *clientui.ToolCallMeta) *transcript.ToolCallMet
 		Question:               meta.Question,
 		RecommendedOptionIndex: meta.RecommendedOptionIndex,
 		OmitSuccessfulResult:   meta.OmitSuccessfulResult,
+		RawOutputRequested:     meta.RawOutputRequested,
+		OutputTruncated:        meta.OutputTruncated,
 	}
 	if len(meta.Suggestions) > 0 {
 		out.Suggestions = append([]string(nil), meta.Suggestions...)
@@ -271,6 +273,8 @@ func transcriptToolCallMetaClient(meta *transcript.ToolCallMeta) *clientui.ToolC
 		Question:               meta.Question,
 		RecommendedOptionIndex: meta.RecommendedOptionIndex,
 		OmitSuccessfulResult:   meta.OmitSuccessfulResult,
+		RawOutputRequested:     meta.RawOutputRequested,
+		OutputTruncated:        meta.OutputTruncated,
 	}
 	if len(meta.Suggestions) > 0 {
 		out.Suggestions = append([]string(nil), meta.Suggestions...)

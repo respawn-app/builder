@@ -82,6 +82,8 @@ func TestSessionSnapshotCapabilitiesCoverReadModelFields(t *testing.T) {
 			"Suggestions",
 			"RecommendedOptionIndex",
 			"OmitSuccessfulResult",
+			"RawOutputRequested",
+			"OutputTruncated",
 		),
 		reflect.TypeOf(clientui.ToolRenderHint{}): fieldSet("Kind", "Path", "ResultOnly", "ShellDialect"),
 		reflect.TypeOf(clientui.TranscriptPageRequest{}): fieldSet(

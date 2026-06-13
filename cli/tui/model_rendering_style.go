@@ -130,6 +130,29 @@ func renderRoleSymbol(prefix string, style roleSymbolColorStyle) string {
 	return styleEscape(transform, false) + prefix + "\x1b[0m"
 }
 
+func (m Model) shellWarningSymbolOverride(role RenderIntent, meta *transcript.ToolCallMeta) string {
+	if !usesWarningShellSymbol(role, meta) {
+		return ""
+	}
+	prefix := rolePrefix(role)
+	if prefix == "" {
+		return ""
+	}
+	symbol := renderRoleSymbol(prefix, roleSymbolColorStyle{color: m.palette().warningColor})
+	if role.IsToolHeadline() && m.toolSymbolGap > 1 {
+		return symbol + strings.Repeat(" ", m.toolSymbolGap)
+	}
+	return symbol + " "
+}
+
+func usesWarningShellSymbol(role RenderIntent, meta *transcript.ToolCallMeta) bool {
+	if !role.IsShellPreview() || meta == nil {
+		return false
+	}
+	normalized := transcript.NormalizeToolCallMeta(*meta)
+	return normalized.RawOutputRequested || normalized.OutputTruncated
+}
+
 func rolePrefix(role RenderIntent) string {
 	if TranscriptRole(role).IsCompaction() {
 		return "@"

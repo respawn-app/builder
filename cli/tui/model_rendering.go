@@ -24,7 +24,8 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 		case TranscriptRoleToolCall:
 			blocks = append(blocks, m.detailToolCallSpec(idx, entry, consumedResults, resultIndex))
 		case TranscriptRoleToolResult, TranscriptRoleToolResultOK, TranscriptRoleToolResultError:
-			blockRole := RenderIntentTool.BaseToolResultIntent(role)
+			meta := cloneToolCallMeta(entry.ToolCall)
+			blockRole := resultOnlyToolBlockRole(role, meta)
 			text := entry.Text
 			absoluteIndex := m.absoluteTranscriptIndex(idx)
 			expandable := false
@@ -39,10 +40,13 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 				expanded:   m.detailEntryExpanded(absoluteIndex),
 				expandable: expandable,
 				render: func(model Model, symbolOverride string) []string {
-					if model.detailEntryExpanded(absoluteIndex) || blockRole == RenderIntentToolError {
-						return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, text, false, nil, symbolOverride), true, symbolOverride)
+					if symbolOverride == "" {
+						symbolOverride = model.shellWarningSymbolOverride(blockRole, meta)
 					}
-					return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, model.firstDetailPreviewLine(text, "Tool output"), false, nil, symbolOverride), false, symbolOverride)
+					if model.detailEntryExpanded(absoluteIndex) || blockRole.IsToolErrorHeadline() {
+						return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, text, false, meta, symbolOverride), true, symbolOverride)
+					}
+					return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, model.firstDetailPreviewLine(text, "Tool output"), false, meta, symbolOverride), false, symbolOverride)
 				},
 			})
 		default:
@@ -136,16 +140,33 @@ func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role Transcript
 		if opts.mode == transcriptBlockModeOngoing {
 			return ongoingBlock{}, false
 		}
-		blockRole := RenderIntentTool.BaseToolResultIntent(role)
+		meta := cloneToolCallMeta(entry.ToolCall)
+		blockRole := resultOnlyToolBlockRole(role, meta)
+		symbolOverride := m.shellWarningSymbolOverride(blockRole, meta)
 		return ongoingBlock{
 			role:       blockRole,
-			lines:      m.flattenEntryWithMetaAndSymbol(blockRole, entry.Text, false, nil, ""),
+			lines:      m.flattenEntryWithMetaAndSymbol(blockRole, entry.Text, false, meta, symbolOverride),
 			entryIndex: m.absoluteTranscriptIndex(entryIndex),
 			entryEnd:   m.absoluteTranscriptIndex(entryIndex),
 		}, true
 	default:
 		return m.standardEntryBlock(entryIndex, entry, intent, consumed, opts), true
 	}
+}
+
+func resultOnlyToolBlockRole(resultRole TranscriptRole, meta *transcript.ToolCallMeta) RenderIntent {
+	blockRole := RenderIntentTool
+	switch {
+	case isAskQuestionToolCall(meta):
+		blockRole = RenderIntentToolQuestion
+	case isWebSearchToolCall(meta):
+		blockRole = RenderIntentToolWebSearch
+	case isPatchToolCall(meta):
+		blockRole = RenderIntentToolPatch
+	case meta != nil && meta.UsesShellRendering():
+		blockRole = RenderIntentToolShell
+	}
+	return blockRole.BaseToolResultIntent(resultRole)
 }
 
 func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) ongoingBlock {
@@ -168,15 +189,16 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	}
 	effectiveMeta := entry.ToolCall
 	if resultIdx >= 0 && m.transcriptInput.Entries[resultIdx].ToolCall != nil {
-		effectiveMeta = m.transcriptInput.Entries[resultIdx].ToolCall
+		effectiveMeta = effectiveToolCallMeta(entry.ToolCall, m.transcriptInput.Entries[resultIdx].ToolCall)
 		combined = transcript.CompactToolCallText(effectiveMeta, combined)
 		if isPatchToolCall(effectiveMeta) {
 			blockRole = RenderIntentToolPatch.BaseToolResultIntent(TranscriptRoleFromWire(string(m.transcriptInput.Entries[resultIdx].Role)))
 		}
 	}
-	lines := m.flattenEntryWithMetaAndSymbol(blockRole, combined, opts.mode == transcriptBlockModeOngoing, effectiveMeta, "")
+	symbolOverride := m.shellWarningSymbolOverride(blockRole, effectiveMeta)
+	lines := m.flattenEntryWithMetaAndSymbol(blockRole, combined, opts.mode == transcriptBlockModeOngoing, effectiveMeta, symbolOverride)
 	if opts.mode == transcriptBlockModeOngoing {
-		lines = m.ongoingToolWithTreeGuideWithSymbol(blockRole, lines, "")
+		lines = m.ongoingToolWithTreeGuideWithSymbol(blockRole, lines, symbolOverride)
 	}
 	return ongoingBlock{
 		role:       blockRole,
@@ -224,7 +246,7 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	absoluteEnd := m.absoluteTranscriptIndex(entryEnd)
 	meta := cloneToolCallMeta(entry.ToolCall)
 	if entryEnd != entryIndex && m.transcriptInput.Entries[entryEnd].ToolCall != nil {
-		meta = cloneToolCallMeta(m.transcriptInput.Entries[entryEnd].ToolCall)
+		meta = effectiveToolCallMeta(entry.ToolCall, m.transcriptInput.Entries[entryEnd].ToolCall)
 		if isPatchToolCall(meta) {
 			blockRole = RenderIntentToolPatch.BaseToolResultIntent(TranscriptRoleFromWire(string(m.transcriptInput.Entries[entryEnd].Role)))
 		}
@@ -237,6 +259,9 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		expandable: m.detailToolCallExpandable(blockRole, entry, resultSummary, combined, meta, resultText),
 		render: func(model Model, symbolOverride string) []string {
+			if symbolOverride == "" {
+				symbolOverride = model.shellWarningSymbolOverride(blockRole, meta)
+			}
 			if !model.detailEntryExpanded(absoluteIndex) {
 				return model.detailCollapsedToolLinesWithSymbol(blockRole, entry, resultSummary, symbolOverride)
 			}
@@ -246,6 +271,33 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 			return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, combined, false, meta, symbolOverride), true, symbolOverride)
 		},
 	}
+}
+
+func effectiveToolCallMeta(callMeta, resultMeta *transcript.ToolCallMeta) *transcript.ToolCallMeta {
+	if resultMeta == nil {
+		return cloneToolCallMeta(callMeta)
+	}
+	normalizedResult := transcript.NormalizeToolCallMeta(*resultMeta)
+	if callMeta == nil || !isShellStatusOnlyToolCallMeta(normalizedResult) {
+		return cloneToolCallMeta(&normalizedResult)
+	}
+	merged := transcript.NormalizeToolCallMeta(*callMeta)
+	merged.RawOutputRequested = merged.RawOutputRequested || normalizedResult.RawOutputRequested
+	merged.OutputTruncated = merged.OutputTruncated || normalizedResult.OutputTruncated
+	return &merged
+}
+
+func isShellStatusOnlyToolCallMeta(meta transcript.ToolCallMeta) bool {
+	return meta.IsShell &&
+		strings.TrimSpace(meta.Command) == "" &&
+		strings.TrimSpace(meta.CompactText) == "" &&
+		strings.TrimSpace(meta.PatchSummary) == "" &&
+		strings.TrimSpace(meta.PatchDetail) == "" &&
+		meta.PatchRender == nil &&
+		meta.Question == "" &&
+		len(meta.Suggestions) == 0 &&
+		meta.RecommendedOptionIndex == 0 &&
+		(meta.RawOutputRequested || meta.OutputTruncated)
 }
 
 func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions, defaultRole RenderIntent) ongoingBlock {

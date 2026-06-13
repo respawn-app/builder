@@ -92,6 +92,7 @@ type ExecResult struct {
 	Running           bool
 	Backgrounded      bool
 	MovedToBackground bool
+	Truncated         bool
 }
 
 type BackgroundNoticeSummary struct {

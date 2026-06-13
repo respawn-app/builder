@@ -195,6 +195,10 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	if shellMeta.RenderHint == nil || shellMeta.RenderHint.Kind != transcript.ToolRenderKindShell || shellMeta.RenderHint.ShellDialect != transcript.ToolShellDialectPosix {
 		t.Fatalf("expected shell render hint with posix dialect, got %+v", shellMeta.RenderHint)
 	}
+	rawShellMeta := execTool.BuildToolCallMeta(ToolCallContext{DefaultShellPath: "/bin/zsh", GOOS: "darwin"}, json.RawMessage(`{"command":"printf raw","raw":true}`))
+	if !rawShellMeta.RawOutputRequested {
+		t.Fatalf("expected raw exec_command transcript metadata to record raw output request, got %+v", rawShellMeta)
+	}
 
 	patch, _ := DefinitionFor(toolspec.ToolPatch)
 	patchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`"*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch\n"`))
