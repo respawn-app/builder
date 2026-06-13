@@ -49,9 +49,9 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	}
 	opts = workspaceConfig.Options
 	cfg := workspaceConfig.Config
-	builderSessionCaller := strings.TrimSpace(opts.WorkspaceContextSessionID) != ""
+	kentSessionCaller := strings.TrimSpace(opts.WorkspaceContextSessionID) != ""
 	contextAgentRole := strings.TrimSpace(workspaceConfig.ContextAgentRole)
-	if err := validateRunPromptAgentRole(cfg.Settings, opts.AgentRole, builderSessionCaller, contextAgentRole); err != nil {
+	if err := validateRunPromptAgentRole(cfg.Settings, opts.AgentRole, kentSessionCaller, contextAgentRole); err != nil {
 		return nil, nil, err
 	}
 	target, err := serverattach.Resolve[runprompttarget.Target](ctx, serverattach.Request[runprompttarget.Target]{
@@ -99,13 +99,13 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 
 const nonCallableSubagentRoleMessage = "User has disallowed calling this agent by other agents like you. Do not try to circumvent this, pick another suitable agent or do the work manually and let the user know your desire to use the subagent at the end of the task"
 
-func validateRunPromptAgentRole(settings config.Settings, rawRole string, builderSessionCaller bool, contextAgentRole string) error {
+func validateRunPromptAgentRole(settings config.Settings, rawRole string, kentSessionCaller bool, contextAgentRole string) error {
 	roleName := config.NormalizeSubagentSelector(rawRole)
 	if roleName == "" {
 		if strings.TrimSpace(rawRole) != "" && !config.IsReservedSubagentRoleName(rawRole) {
 			return errors.New("invalid agent role " + strconv.Quote(rawRole))
 		}
-		if builderSessionCaller {
+		if kentSessionCaller {
 			if err := validateContextAgentRoleCallable(settings, contextAgentRole); err != nil {
 				return err
 			}
@@ -114,9 +114,9 @@ func validateRunPromptAgentRole(settings config.Settings, rawRole string, builde
 	}
 	role, exists := settings.Subagents[roleName]
 	if !exists && roleName != config.BuiltInSubagentRoleFast {
-		return errors.New("Unrecognized role " + strconv.Quote(roleName) + ". It may have been removed by the user during the session. Available roles: [" + strings.Join(config.AvailableSubagentRoleNames(settings, builderSessionCaller), ", ") + "]")
+		return errors.New("Unrecognized role " + strconv.Quote(roleName) + ". It may have been removed by the user during the session. Available roles: [" + strings.Join(config.AvailableSubagentRoleNames(settings, kentSessionCaller), ", ") + "]")
 	}
-	if builderSessionCaller && !config.SubagentRoleCallable(role) {
+	if kentSessionCaller && !config.SubagentRoleCallable(role) {
 		return errors.New(nonCallableSubagentRoleMessage)
 	}
 	return nil

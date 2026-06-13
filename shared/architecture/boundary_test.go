@@ -740,7 +740,7 @@ type cliInternalBoundaryCase struct {
 	Packages             []string
 	Label                string
 	ForbidServer         bool
-	ForbidAllBuilder     bool
+	ForbidAllCore     bool
 	ServerViolationLabel string
 }
 
@@ -761,7 +761,7 @@ func TestCLIAppInternalPackageBoundaries(t *testing.T) {
 		{Name: "TargetResolve", Packages: []string{"targetresolve"}, Label: "target resolver package", ForbidServer: true},
 		{Name: "TargetStartup", Packages: []string{"targetstartup"}, Label: "target startup package", ForbidServer: true},
 		{Name: "ServerAttach", Packages: []string{"serverattach"}, Label: "server attach package", ForbidServer: true},
-		{Name: "DaemonLaunch", Packages: []string{"daemonlaunch"}, Label: "daemon launch package", ForbidAllBuilder: true},
+		{Name: "DaemonLaunch", Packages: []string{"daemonlaunch"}, Label: "daemon launch package", ForbidAllCore: true},
 		{Name: "RemoteAttach", Packages: []string{"remoteattach", "remotebinding"}, Label: "remote attach package", ForbidServer: true},
 		{Name: "SessionTarget", Packages: []string{"sessiontarget"}, Label: "session target package", ForbidServer: true},
 		{Name: "RunPromptTarget", Packages: []string{"runprompttarget"}, Label: "run prompt target package", ForbidServer: true},
@@ -816,8 +816,8 @@ func assertCLIAppInternalPackageBoundary(t *testing.T, tc cliInternalBoundaryCas
 			for _, spec := range file.Imports {
 				importPath := strings.Trim(spec.Path.Value, "\"")
 				switch {
-				case tc.ForbidAllBuilder && strings.HasPrefix(importPath, "core/"):
-					violations = append(violations, relPath+": "+tc.Label+" must not import Builder packages "+importPath)
+				case tc.ForbidAllCore && strings.HasPrefix(importPath, "core/"):
+					violations = append(violations, relPath+": "+tc.Label+" must not import core packages "+importPath)
 				case tc.ForbidServer && strings.HasPrefix(importPath, "core/server/"):
 					message := tc.ServerViolationLabel
 					if message == "" {

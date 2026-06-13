@@ -232,7 +232,7 @@ Entry shape: checklist title line, summary evidence paragraph, impact paragraph,
 
 - [ ] `TD-040` [P2] `sessions.launch_visible` has unclear product semantics.
 
-  `sessions.launch_visible` is stored in metadata migrations and used by list queries to decide which sessions appear in project/session surfaces. During review, the field had no clear product meaning for Nikita beyond the current implementation detail, so it should not be promoted as a product decision without a better domain name and ownership contract.
+  `sessions.launch_visible` is stored in metadata migrations and used by list queries to decide which sessions appear in project/session surfaces. During review, the field had no clear product meaning for User beyond the current implementation detail, so it should not be promoted as a product decision without a better domain name and ownership contract.
 
   An opaque sticky visibility cache can become accidental product truth. If future session listing, launch, archival, or cleanup behavior depends on it, engineers will not know whether they are preserving UX state, hiding technical sessions, or caching a derivable read-model fact.
 

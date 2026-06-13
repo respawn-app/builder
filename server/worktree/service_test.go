@@ -309,7 +309,7 @@ func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 		t.Fatalf("branch name = %q, want feature/existing-ref", resp.Worktree.BranchName)
 	}
 	if !resp.Worktree.Managed {
-		t.Fatal("expected builder-managed worktree for existing ref")
+		t.Fatal("expected managed worktree for existing ref")
 	}
 	record, err := env.store.GetWorktreeRecordByID(env.ctx, resp.Worktree.WorktreeID)
 	if err != nil {
@@ -320,7 +320,7 @@ func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	}
 }
 
-func TestSyncWorkspaceClearsStaleBuilderProvenanceWhenRootIsReused(t *testing.T) {
+func TestSyncWorkspaceClearsStaleManagedProvenanceWhenRootIsReused(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/provenance-stale")
 
@@ -333,7 +333,7 @@ func TestSyncWorkspaceClearsStaleBuilderProvenanceWhenRootIsReused(t *testing.T)
 			continue
 		}
 		if worktree.Managed || worktree.CreatedBranch || strings.TrimSpace(worktree.OriginSessionID) != "" {
-			t.Fatalf("expected stale builder provenance cleared for reused root, got %+v", worktree)
+			t.Fatalf("expected stale managed provenance cleared for reused root, got %+v", worktree)
 		}
 		return
 	}

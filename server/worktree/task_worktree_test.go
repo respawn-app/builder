@@ -28,7 +28,7 @@ func TestEnsureTaskWorktreeCreatesShortIDBranchWithoutControllerLease(t *testing
 		t.Fatalf("created flags = created:%t branch:%t, want true/true", resp.Created, resp.CreatedBranch)
 	}
 	if !resp.Worktree.Managed || !resp.Worktree.CreatedBranch {
-		t.Fatalf("worktree provenance = %+v, want builder-managed created branch", resp.Worktree)
+		t.Fatalf("worktree provenance = %+v, want managed created branch", resp.Worktree)
 	}
 	if resp.Worktree.BranchName != task.ShortID {
 		t.Fatalf("branch name = %q, want task short id %q", resp.Worktree.BranchName, task.ShortID)

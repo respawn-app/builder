@@ -125,7 +125,7 @@ func TestHostedWebSearchExecutionFromOutputItem(t *testing.T) {
 			"type":"web_search_call",
 			"id":"ws_1",
 			"status":"completed",
-			"action":{"type":"search","query":"builder cli"}
+			"action":{"type":"search","query":"kent cli"}
 		}`),
 	}
 
@@ -144,7 +144,7 @@ func TestHostedWebSearchExecutionFromOutputItem(t *testing.T) {
 	if err := json.Unmarshal(execution.Call.Input, &input); err != nil {
 		t.Fatalf("decode hosted input: %v", err)
 	}
-	if input["query"] != "builder cli" {
+	if input["query"] != "kent cli" {
 		t.Fatalf("expected hosted query in input, got %+v", input)
 	}
 	if execution.Result.Name != toolspec.ToolWebSearch {
@@ -227,7 +227,7 @@ func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 			OutputItems: []llm.ResponseItem{
 				{
 					Type: llm.ResponseItemTypeOther,
-					Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+					Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"kent cli"}}`),
 				},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
@@ -314,7 +314,7 @@ func TestSubmitUserMessageFinalAnswerWithHostedToolCallMaterializesToolBeforeFin
 			OutputItems: []llm.ResponseItem{
 				{
 					Type: llm.ResponseItemTypeOther,
-					Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+					Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"kent cli"}}`),
 				},
 				{
 					Type:    llm.ResponseItemTypeMessage,

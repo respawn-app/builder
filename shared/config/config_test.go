@@ -37,7 +37,7 @@ func TestPreparePersistenceRootAllowsIsolatedTempHomeUnderGoTest(t *testing.T) {
 	originalHome := processStartHome
 	originalAccountHome := processStartAccountHome
 	processStartHome = t.TempDir()
-	processStartAccountHome = filepath.Join(string(filepath.Separator), "builder-real-home")
+	processStartAccountHome = filepath.Join(string(filepath.Separator), "app-real-home")
 	t.Cleanup(func() {
 		processStartHome = originalHome
 		processStartAccountHome = originalAccountHome

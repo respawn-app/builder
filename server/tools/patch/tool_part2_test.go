@@ -161,7 +161,7 @@ func outsideNonTempDir(t *testing.T) string {
 		bases = append(bases, home)
 	}
 	for _, base := range bases {
-		dir, err := os.MkdirTemp(base, "builder-patch-outside-*")
+		dir, err := os.MkdirTemp(base, "kent-patch-outside-*")
 		if err != nil {
 			continue
 		}

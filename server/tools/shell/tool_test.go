@@ -199,7 +199,7 @@ func TestManagerStartEmbedsOwnerSessionIDInProcessEnv(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	result, err := manager.Start(context.Background(), ExecRequest{
 		Command:        []string{"/bin/sh", "-c", "printf %s \"$" + sessionenv.SessionIDEnv + "\""},
-		DisplayCommand: "print builder session id",
+		DisplayCommand: "print kent session id",
 		OwnerSessionID: "session-env-123",
 		Workdir:        t.TempDir(),
 		YieldTime:      time.Second,
@@ -1066,7 +1066,7 @@ func TestWriteStdinRawSessionAddsPresentationMetadata(t *testing.T) {
 
 	stdinResult := callWriteStdin(t, stdinTool, "raw-tty-2", map[string]any{
 		"session_id":    1000,
-		"chars":         "raw builder\n",
+		"chars":         "raw app\n",
 		"yield_time_ms": 2_000,
 	})
 	if stdinResult.IsError {
@@ -1100,7 +1100,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 
 	stdinResult := callWriteStdin(t, stdinTool, "tty-2", map[string]any{
 		"session_id":    1000,
-		"chars":         "hello builder\n",
+		"chars":         "hello app\n",
 		"yield_time_ms": 800,
 	})
 	if stdinResult.IsError {
@@ -1116,7 +1116,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	if !strings.Contains(stdinText, "Log file:") {
 		t.Fatalf("expected log file once interactive background shell completed, got %q", stdinText)
 	}
-	if !strings.Contains(stdinText, "hello builder") {
+	if !strings.Contains(stdinText, "hello app") {
 		t.Fatalf("expected echoed stdin in output, got %q", stdinText)
 	}
 	waitForManagerCount(t, manager, 0, time.Second)

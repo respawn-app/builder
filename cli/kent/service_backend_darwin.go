@@ -308,7 +308,7 @@ func waitForLaunchdServiceShutdown(ctx context.Context, spec serviceSpec) error 
 			if loaded {
 				detail += "; launchd still reports the service as loaded"
 			}
-			return fmt.Errorf("stopped launchd job, but the old "+brand.Product+" server did not exit before restart: %s. Not bootstrapping a second server because it would fail with launchctl Bootstrap error 5. Re-running with sudo will not fix this; stop the stale builder process or wait for it to exit, then run `builder service restart` again", detail)
+			return fmt.Errorf("stopped launchd job, but the old "+brand.Product+" server did not exit before restart: %s. Not bootstrapping a second server because it would fail with launchctl Bootstrap error 5. Re-running with sudo will not fix this; stop the stale "+brand.Command+" process or wait for it to exit, then run `"+brand.Command+" service restart` again", detail)
 		}
 		timer := time.NewTimer(interval)
 		select {

@@ -2,7 +2,7 @@ package selfcmd
 
 import "testing"
 
-func TestFormatRunCommandPrefixFallsBackToBuilderName(t *testing.T) {
+func TestFormatRunCommandPrefixFallsBackToBinaryName(t *testing.T) {
 	want := fallbackBinaryName + " run"
 	if got := formatRunCommandPrefix(""); got != want {
 		t.Fatalf("run command prefix = %q, want %q", got, want)
@@ -28,7 +28,7 @@ func TestFormatLaunchCommandQuotesExecutablePathWithoutSubcommand(t *testing.T) 
 	got := formatLaunchCommand("/tmp/path with space/kent")
 	want := "\"/tmp/path with space/kent\""
 	if got != want {
-		t.Fatalf("builder command = %q, want %q", got, want)
+		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
 

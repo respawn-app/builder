@@ -616,7 +616,7 @@ func TestAssistantCommentaryCommitPlusDeltaDoesNotSplitOngoingView(t *testing.T)
 		CommittedEntryCount:        1,
 		Message: llm.Message{
 			Role:    llm.RoleAssistant,
-			Content: "Decision: keep Builder tool name patch; expose custom tool with Lark grammar.",
+			Content: "Decision: keep tool name patch; expose custom tool with Lark grammar.",
 			Phase:   llm.MessagePhaseCommentary,
 		},
 	})

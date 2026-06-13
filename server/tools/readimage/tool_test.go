@@ -547,7 +547,7 @@ func outsideNonTempDir(t *testing.T) string {
 		bases = append(bases, home)
 	}
 	for _, base := range bases {
-		dir, err := os.MkdirTemp(base, "builder-readimage-outside-*")
+		dir, err := os.MkdirTemp(base, "kent-readimage-outside-*")
 		if err != nil {
 			continue
 		}

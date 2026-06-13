@@ -307,7 +307,7 @@ func TestSyncRecoversGeneratedRootFileAndTimestampCollision(t *testing.T) {
 	home := t.TempDir()
 	configRoot := filepath.Join(home, configDirName)
 	if err := os.MkdirAll(configRoot, 0o755); err != nil {
-		t.Fatalf("mkdir builder root: %v", err)
+		t.Fatalf("mkdir kent root: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(configRoot, ".generated"), []byte("file"), 0o644); err != nil {
 		t.Fatalf("write generated file: %v", err)
@@ -347,7 +347,7 @@ func TestSyncIgnoresRecoveredRootWarningCheckFailure(t *testing.T) {
 	home := t.TempDir()
 	configRoot := filepath.Join(home, configDirName)
 	if err := os.MkdirAll(configRoot, 0o755); err != nil {
-		t.Fatalf("mkdir builder root: %v", err)
+		t.Fatalf("mkdir kent root: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(configRoot, "recovered"), []byte("not a directory"), 0o644); err != nil {
 		t.Fatalf("write recovered file: %v", err)

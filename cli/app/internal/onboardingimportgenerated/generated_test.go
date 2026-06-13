@@ -10,7 +10,7 @@ func TestParseNameUsesFrontmatterNameAndSanitizesWhitespace(t *testing.T) {
 }
 
 func TestParseNameFallsBackToDirectoryName(t *testing.T) {
-	name, ok := ParseName(" kent-dogfooding ", "---\ndescription: ' use builder itself '\n---\nbody")
+	name, ok := ParseName(" kent-dogfooding ", "---\ndescription: ' use kent itself '\n---\nbody")
 	if !ok || name != "kent-dogfooding" {
 		t.Fatalf("name=%q ok=%t", name, ok)
 	}

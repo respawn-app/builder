@@ -143,10 +143,10 @@ func filePromptSearchDirs(workspaceRoot, globalRoot string) ([]string, error) {
 		globalRoot = resolved
 	}
 
-	localBuilder := filepath.Join(workspaceRoot, configDirName)
+	localConfigRoot := filepath.Join(workspaceRoot, configDirName)
 	return []string{
-		filepath.Join(localBuilder, promptsDirName),
-		filepath.Join(localBuilder, commandsDirName),
+		filepath.Join(localConfigRoot, promptsDirName),
+		filepath.Join(localConfigRoot, commandsDirName),
 		filepath.Join(globalRoot, promptsDirName),
 		filepath.Join(globalRoot, commandsDirName),
 		filepath.Join(globalRoot, generatedDirName, promptsDirName),

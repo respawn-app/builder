@@ -23,13 +23,13 @@ func TestArgsBuildServeCommand(t *testing.T) {
 
 func TestEnvIncludesConfiguredServerSettings(t *testing.T) {
 	env := Env(config.App{
-		PersistenceRoot: "/tmp/builder-persist",
+		PersistenceRoot: "/tmp/test-persist",
 		Settings: config.Settings{
 			ServerHost: "127.0.0.1",
 			ServerPort: 4567,
 		},
 	})
-	if !containsEnv(env, "KENT_PERSISTENCE_ROOT=/tmp/builder-persist") {
+	if !containsEnv(env, "KENT_PERSISTENCE_ROOT=/tmp/test-persist") {
 		t.Fatalf("env missing persistence root: %#v", env)
 	}
 	if !containsEnv(env, "KENT_SERVER_HOST=127.0.0.1") {

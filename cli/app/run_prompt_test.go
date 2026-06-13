@@ -136,7 +136,7 @@ func TestLoadRemoteAttachConfigKeepsExplicitSessionLookupStrict(t *testing.T) {
 	}
 }
 
-func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
+func TestRunPromptFromWorktreeUsesKentSessionWorkspaceContext(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
 	worktree := filepath.Join(home, brand.ConfigDirName, "worktrees", "project", "feature")

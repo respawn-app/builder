@@ -354,7 +354,7 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 
 	router := &backgroundEventRouter{}
 	router.SetActiveSession(storeB.Meta().SessionID, engB)
-	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1000", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1000.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1000", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "kent run", Workdir: root, LogPath: filepath.Join(root, "1000.log")}, Type: shelltool.EventCompleted, Preview: "done"})
 
 	time.Sleep(150 * time.Millisecond)
 	if got := clientB.CallCount(); got != 0 {
@@ -386,7 +386,7 @@ func TestBackgroundEventRouterRoutesCompletionToMatchingActiveOwnerSession(t *te
 	router := &backgroundEventRouter{}
 	router.SetActiveSession(storeA.Meta().SessionID, engA)
 	router.SetActiveSession(storeB.Meta().SessionID, engB)
-	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1002.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "kent run", Workdir: root, LogPath: filepath.Join(root, "1002.log")}, Type: shelltool.EventCompleted, Preview: "done"})
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for clientA.CallCount() == 0 && time.Now().Before(deadline) {
@@ -409,7 +409,7 @@ func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
 
 	router := &backgroundEventRouter{}
 	router.SetActiveSession(store.Meta().SessionID, eng)
-	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1001", OwnerSessionID: store.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1001.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1001", OwnerSessionID: store.Meta().SessionID, State: "completed", Command: "kent run", Workdir: root, LogPath: filepath.Join(root, "1001.log")}, Type: shelltool.EventCompleted, Preview: "done"})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for client.CallCount() == 0 && time.Now().Before(deadline) {
@@ -720,7 +720,7 @@ func outsideNonTempDir(t *testing.T) string {
 		bases = append(bases, home)
 	}
 	for _, base := range bases {
-		dir, err := os.MkdirTemp(base, "builder-app-outside-*")
+		dir, err := os.MkdirTemp(base, "kent-app-outside-*")
 		if err != nil {
 			continue
 		}

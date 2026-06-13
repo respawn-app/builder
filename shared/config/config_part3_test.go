@@ -224,7 +224,7 @@ func TestLoadStorePrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadIgnoresUnknownBuilderEnvVars(t *testing.T) {
+func TestLoadIgnoresUnknownEnvVars(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
 	t.Setenv("KENT_PROVIDER_CAPABILITY_ID", "custom-provider")
 	t.Setenv("KENT_MODEL_SUPPORTS_REASONING_EFFORT", "true")

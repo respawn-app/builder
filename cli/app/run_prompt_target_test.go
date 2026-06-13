@@ -12,14 +12,14 @@ import (
 	"core/shared/config"
 )
 
-func TestValidateRunPromptAgentRoleBlocksNonCallableRoleForBuilderSession(t *testing.T) {
+func TestValidateRunPromptAgentRoleBlocksNonCallableRoleForKentSession(t *testing.T) {
 	settings := config.Settings{Subagents: map[string]config.SubagentRole{
 		"worker": {AgentCallable: false, AgentCallableSet: true, Sources: map[string]string{"model": "file"}},
 	}}
 
 	err := validateRunPromptAgentRole(settings, "worker", true, "")
 	if err == nil {
-		t.Fatal("expected non-callable role to fail for Builder session")
+		t.Fatal("expected non-callable role to fail for Kent session")
 	}
 	if err.Error() != nonCallableSubagentRoleMessage {
 		t.Fatalf("error = %q, want non-callable message", err.Error())
@@ -29,7 +29,7 @@ func TestValidateRunPromptAgentRoleBlocksNonCallableRoleForBuilderSession(t *tes
 	}
 }
 
-func TestValidateRunPromptAgentRoleUnknownRoleListsCallableRolesForBuilderSession(t *testing.T) {
+func TestValidateRunPromptAgentRoleUnknownRoleListsCallableRolesForKentSession(t *testing.T) {
 	settings := config.Settings{
 		Model:         "gpt-5.5",
 		ThinkingLevel: "medium",
@@ -50,11 +50,11 @@ func TestValidateRunPromptAgentRoleUnknownRoleListsCallableRolesForBuilderSessio
 		}
 	}
 	if strings.Contains(text, "noncallable") {
-		t.Fatalf("builder-session available list should omit non-callable role: %q", text)
+		t.Fatalf("kent-session available list should omit non-callable role: %q", text)
 	}
 }
 
-func TestStartRunPromptClientUnknownRoleBuilderSessionErrorUsesCallableAvailableRoles(t *testing.T) {
+func TestStartRunPromptClientUnknownRoleKentSessionErrorUsesCallableAvailableRoles(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
 	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")

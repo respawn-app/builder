@@ -8,7 +8,7 @@
 - Backend/domain/persistence/runtime are primary. Frontend surfaces follow backend API/read-model needs.
 - Workflow API/read-model shapes are mutable before Kent 2.0.
 - CLI is an internal backend-testing and agent-control surface, not the primary user manual QA surface.
-- Real-provider workflow QA requires explicit Nikita approval because it spends provider credits and can fail for provider/model reasons unrelated to orchestration correctness.
+- Real-provider workflow QA requires explicit User approval because it spends provider credits and can fail for provider/model reasons unrelated to orchestration correctness.
 
 ## Domain Model
 
@@ -245,7 +245,7 @@
 - Q: Are racing/first-success parallel branches in scope? A: No; joins wait for all required inputs.
 - Q: Can orchestrator-workers dynamically create workflow nodes/columns? A: No in v1.
 - Q: Should pending workflow questions get a task-question shadow table? A: No; use `ask_question` source of truth or upgrade ask persistence.
-- Q: Does real-provider workflow QA need explicit approval? A: Yes, ask Nikita before spending provider credits.
+- Q: Does real-provider workflow QA need explicit approval? A: Yes, ask the User before spending provider credits.
 - Q: Does the first CLI milestone need JSON output or workflow env vars? A: No.
 - Q: Should `tasks.short_id` be stored or derived from `project_key + task_seq`? A: Keep it stored as durable product data.
 - Q: Should `projects.next_task_seq` stay stored? A: No; replace it with transactional task sequence allocation.
