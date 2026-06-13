@@ -156,7 +156,7 @@ func configureBindingCommandTestServerPort(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
-	t.Setenv("BUILDER_SERVER_PORT", fmt.Sprintf("%d", port))
+	t.Setenv("KENT_SERVER_PORT", fmt.Sprintf("%d", port))
 }
 
 func registerBindingCommandWorkspace(t *testing.T, workspace string) metadata.Binding {
@@ -651,7 +651,7 @@ func TestRetargetSessionWorkspaceFallsBackToLocalLifecycleClientForLoopbackOpenF
 
 func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackMethodNotFound(t *testing.T) {
 	resetBindingCommandRetargetHooks(t)
-	t.Setenv("BUILDER_SERVER_HOST", "192.0.2.10")
+	t.Setenv("KENT_SERVER_HOST", "192.0.2.10")
 	newWorkspace, newCfg := newBindingCommandWorkspaceConfig(t)
 	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
 		return newCfg, &client.Remote{}, nil
@@ -681,7 +681,7 @@ func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackMethodNotFound(t *
 
 func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackOpenFailure(t *testing.T) {
 	resetBindingCommandRetargetHooks(t)
-	t.Setenv("BUILDER_SERVER_HOST", "192.0.2.10")
+	t.Setenv("KENT_SERVER_HOST", "192.0.2.10")
 	newWorkspace := t.TempDir()
 	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
 		return config.App{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect refused")}
@@ -704,8 +704,8 @@ func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackOpenFailure(t *tes
 
 func TestRetargetSessionWorkspaceDoesNotFallbackForExplicitLocalhostMethodNotFound(t *testing.T) {
 	resetBindingCommandRetargetHooks(t)
-	t.Setenv("BUILDER_SERVER_HOST", "localhost")
-	t.Setenv("BUILDER_SERVER_PORT", "65432")
+	t.Setenv("KENT_SERVER_HOST", "localhost")
+	t.Setenv("KENT_SERVER_PORT", "65432")
 	newWorkspace, newCfg := newBindingCommandWorkspaceConfig(t)
 	if got := newCfg.Source.Sources["server_host"]; got != "env" {
 		t.Fatalf("server_host source = %q, want env", got)

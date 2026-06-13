@@ -13,7 +13,7 @@ import (
 
 func TestRetargetSessionWorkspaceDoesNotFallbackForExplicitLoopbackPortOpenFailure(t *testing.T) {
 	resetBindingCommandRetargetHooks(t)
-	t.Setenv("BUILDER_SERVER_PORT", "65432")
+	t.Setenv("KENT_SERVER_PORT", "65432")
 	newWorkspace, newCfg := newBindingCommandWorkspaceConfig(t)
 	if got := newCfg.Settings.ServerHost; got != "127.0.0.1" {
 		t.Fatalf("server host = %q, want default loopback", got)

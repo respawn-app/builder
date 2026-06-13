@@ -183,12 +183,12 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 
 func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 	env := envSliceToMap(t, shellenv.EnrichForSession([]string{
-		"BUILDER_SESSION_ID=stale",
+		"KENT_SESSION_ID=stale",
 		"KEEP=1",
 	}, "session-abc"))
 
 	if env[sessionenv.BuilderSessionID] != "session-abc" {
-		t.Fatalf("BUILDER_SESSION_ID = %q, want session-abc", env[sessionenv.BuilderSessionID])
+		t.Fatalf("KENT_SESSION_ID = %q, want session-abc", env[sessionenv.BuilderSessionID])
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])

@@ -530,10 +530,10 @@ func TestLaunchdReloadExplainsOldServerStillRunningInsteadOfBootstrapCodeFive(t 
 }
 
 func TestLaunchdRestartIfInstalledRepeatedIntegration(t *testing.T) {
-	if os.Getenv("BUILDER_LAUNCHD_INTEGRATION") != "1" {
-		t.Skip("set BUILDER_LAUNCHD_INTEGRATION=1 to run real launchd service restart integration")
+	if os.Getenv("KENT_LAUNCHD_INTEGRATION") != "1" {
+		t.Skip("set KENT_LAUNCHD_INTEGRATION=1 to run real launchd service restart integration")
 	}
-	builderPath := strings.TrimSpace(os.Getenv("BUILDER_LAUNCHD_INTEGRATION_BUILDER"))
+	builderPath := strings.TrimSpace(os.Getenv("KENT_LAUNCHD_INTEGRATION_BUILDER"))
 	if builderPath == "" {
 		var err error
 		builderPath, err = exec.LookPath("builder")
@@ -544,7 +544,7 @@ func TestLaunchdRestartIfInstalledRepeatedIntegration(t *testing.T) {
 	freePort := reserveFreeLocalPort(t)
 	root := t.TempDir()
 	wrapperPath := filepath.Join(root, "builder")
-	wrapper := fmt.Sprintf("#!/bin/sh\nexport BUILDER_SERVER_PORT=%d\nexport BUILDER_PERSISTENCE_ROOT=%s\nexec -a \"$0\" %s \"$@\"\n", freePort, shellQuote(filepath.Join(root, "persist")), shellQuote(builderPath))
+	wrapper := fmt.Sprintf("#!/bin/sh\nexport KENT_SERVER_PORT=%d\nexport KENT_PERSISTENCE_ROOT=%s\nexec -a \"$0\" %s \"$@\"\n", freePort, shellQuote(filepath.Join(root, "persist")), shellQuote(builderPath))
 	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
 		t.Fatalf("write builder wrapper: %v", err)
 	}
@@ -554,8 +554,8 @@ func TestLaunchdRestartIfInstalledRepeatedIntegration(t *testing.T) {
 	}
 	env := append(os.Environ(),
 		"HOME="+home,
-		fmt.Sprintf("BUILDER_SERVER_PORT=%d", freePort),
-		"BUILDER_PERSISTENCE_ROOT="+filepath.Join(root, "persist"),
+		fmt.Sprintf("KENT_SERVER_PORT=%d", freePort),
+		"KENT_PERSISTENCE_ROOT="+filepath.Join(root, "persist"),
 	)
 	runBuilder := func(args ...string) string {
 		t.Helper()

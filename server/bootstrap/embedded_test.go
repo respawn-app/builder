@@ -16,9 +16,9 @@ import (
 func TestBuildAuthSupportUsesDefaultIssuerAndEnvClientID(t *testing.T) {
 	support, err := BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), func(key string) string {
 		switch key {
-		case "BUILDER_OAUTH_CLIENT_ID":
+		case "KENT_OAUTH_CLIENT_ID":
 			return "client-test"
-		case "BUILDER_OAUTH_ISSUER":
+		case "KENT_OAUTH_ISSUER":
 			return "https://attacker.example"
 		default:
 			return ""

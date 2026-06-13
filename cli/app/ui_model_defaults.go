@@ -68,14 +68,14 @@ func newUISessionTransitionFeatureState() uiSessionTransitionFeatureState {
 }
 
 func newUIStatusFeatureState() uiStatusFeatureState {
-	debug := envFlagEnabled("BUILDER_DEBUG")
+	debug := envFlagEnabled("KENT_DEBUG")
 	return uiStatusFeatureState{
 		statusRepository:      appstatus.NewMemoryRepository(),
 		clipboardImagePaster:  newSystemClipboardImagePaster(),
 		clipboardTextCopier:   newSystemClipboardTextCopier(),
-		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugKeys:             envFlagEnabled("KENT_DEBUG_KEYS"),
 		debugMode:             debug,
-		transcriptDiagnostics: envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
+		transcriptDiagnostics: envFlagEnabled("KENT_TRANSCRIPT_DIAGNOSTICS"),
 	}
 }
 

@@ -163,8 +163,8 @@ func openEmbeddedSessionByID(t *testing.T, server *Server, sessionID string) *se
 func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
-	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
+	t.Setenv("KENT_OAUTH_ISSUER", "https://attacker.example")
+	t.Setenv("KENT_OAUTH_CLIENT_ID", "client-test")
 
 	workspace := t.TempDir()
 	registerEmbeddedWorkspace(t, workspace)

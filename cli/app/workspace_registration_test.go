@@ -139,8 +139,8 @@ func configureAppTestServerPort(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	serve.ReserveTestListenReservation(listener)
 	t.Cleanup(func() { serve.ReleaseTestListenReservation(listener.Addr().String()) })
-	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
-	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+	t.Setenv("KENT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("KENT_SERVER_PORT", strconv.Itoa(port))
 }
 
 func mustRegisterAppBinding(t *testing.T, persistenceRoot string, workspaceRoot string) metadata.Binding {

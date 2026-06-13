@@ -236,7 +236,7 @@ func TestLoadTrimsWorkspaceRootBeforeResolving(t *testing.T) {
 
 func TestLoadAppliesWorkspaceConfigBeforeEnvBeforeCLI(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_MODEL", "env-model")
+	t.Setenv("KENT_MODEL", "env-model")
 	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create home config dir: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestLoadAppliesWorkspaceConfigBeforeEnvBeforeCLI(t *testing.T) {
 func TestLoadGlobalSkipsWorkspaceConfigLayer(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_MODEL", "env-model")
+	t.Setenv("KENT_MODEL", "env-model")
 	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create home config dir: %v", err)
 	}
@@ -765,13 +765,13 @@ func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
 		t.Fatalf("expected reviewer.openai_base_url to inherit file main base URL, got %q", cfg.Settings.Reviewer.OpenAIBaseURL)
 	}
 
-	t.Setenv("BUILDER_MODEL", "gpt-main-env")
-	t.Setenv("BUILDER_THINKING_LEVEL", "medium")
-	t.Setenv("BUILDER_OPENAI_BASE_URL", "http://localhost:9090/v1")
-	t.Setenv("BUILDER_REVIEWER_MODEL", "")
-	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_OVERRIDE", "")
-	t.Setenv("BUILDER_REVIEWER_OPENAI_BASE_URL", "")
+	t.Setenv("KENT_MODEL", "gpt-main-env")
+	t.Setenv("KENT_THINKING_LEVEL", "medium")
+	t.Setenv("KENT_OPENAI_BASE_URL", "http://localhost:9090/v1")
+	t.Setenv("KENT_REVIEWER_MODEL", "")
+	t.Setenv("KENT_REVIEWER_THINKING_LEVEL", "")
+	t.Setenv("KENT_REVIEWER_PROVIDER_OVERRIDE", "")
+	t.Setenv("KENT_REVIEWER_OPENAI_BASE_URL", "")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Reviewer.Model != "gpt-main-env" {
 		t.Fatalf("expected reviewer.model to inherit env main model, got %q", cfg.Settings.Reviewer.Model)

@@ -342,10 +342,10 @@ func TestRunSubcommandMapsCommonFlagsToRunPrompt(t *testing.T) {
 }
 
 func TestHelperProcessRootCommand(t *testing.T) {
-	if os.Getenv("BUILDER_ROOT_HELPER_PROCESS") != "1" {
+	if os.Getenv("KENT_ROOT_HELPER_PROCESS") != "1" {
 		return
 	}
-	if os.Getenv("BUILDER_ROOT_HELPER_STUB_SERVE") == "1" {
+	if os.Getenv("KENT_ROOT_HELPER_STUB_SERVE") == "1" {
 		startServeServer = func(_ context.Context, _ serverstartup.Request, _ serverstartup.AuthHandler, _ serverstartup.OnboardingHandler) (serveCommandServer, error) {
 			return &stubServeServer{serveErr: context.Canceled}, nil
 		}

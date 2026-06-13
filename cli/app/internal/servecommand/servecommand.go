@@ -27,13 +27,13 @@ func Args() []string {
 func Env(cfg config.App) []string {
 	env := os.Environ()
 	if strings.TrimSpace(cfg.PersistenceRoot) != "" {
-		env = append(env, "BUILDER_PERSISTENCE_ROOT="+cfg.PersistenceRoot)
+		env = append(env, "KENT_PERSISTENCE_ROOT="+cfg.PersistenceRoot)
 	}
 	if strings.TrimSpace(cfg.Settings.ServerHost) != "" {
-		env = append(env, "BUILDER_SERVER_HOST="+cfg.Settings.ServerHost)
+		env = append(env, "KENT_SERVER_HOST="+cfg.Settings.ServerHost)
 	}
 	if cfg.Settings.ServerPort > 0 {
-		env = append(env, "BUILDER_SERVER_PORT="+strconv.Itoa(cfg.Settings.ServerPort))
+		env = append(env, "KENT_SERVER_PORT="+strconv.Itoa(cfg.Settings.ServerPort))
 	}
 	return env
 }

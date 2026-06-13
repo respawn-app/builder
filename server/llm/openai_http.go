@@ -58,7 +58,7 @@ type HTTPTransport struct {
 
 func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 	window := 200000
-	if raw := strings.TrimSpace(os.Getenv("BUILDER_CONTEXT_WINDOW")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("KENT_CONTEXT_WINDOW")); raw != "" {
 		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
 			window = value
 		}

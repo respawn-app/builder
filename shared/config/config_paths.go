@@ -73,7 +73,7 @@ func preparePersistenceRoot(path string) (string, error) {
 }
 
 func refuseRealPersistenceRootUnderGoTest(absRoot string) error {
-	if os.Getenv("BUILDER_ALLOW_REAL_PERSISTENCE_ROOT_IN_TESTS") == "1" {
+	if os.Getenv("KENT_ALLOW_REAL_PERSISTENCE_ROOT_IN_TESTS") == "1" {
 		return nil
 	}
 	if !testing.Testing() {

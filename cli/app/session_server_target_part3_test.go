@@ -562,8 +562,8 @@ func publishConfiguredRemoteForWorkspace(t *testing.T, workspace string, caps pr
 		server.Close()
 		t.Fatalf("SplitHostPort: %v", err)
 	}
-	t.Setenv("BUILDER_SERVER_HOST", host)
-	t.Setenv("BUILDER_SERVER_PORT", port)
+	t.Setenv("KENT_SERVER_HOST", host)
+	t.Setenv("KENT_SERVER_PORT", port)
 	return func() {
 		server.Close()
 	}

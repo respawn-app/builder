@@ -146,7 +146,7 @@ func TestEnsureReadyRequiresAuthManager(t *testing.T) {
 func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	handler := stubAuthHandler{
 		lookupEnv: func(key string) string {
-			if key == "BUILDER_LOOKUP_TEST" {
+			if key == "KENT_LOOKUP_TEST" {
 				return "lookup-value"
 			}
 			return ""
@@ -184,15 +184,15 @@ func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	if req.LoadOptions.Tools != "shell,patch" {
 		t.Fatalf("tools = %q, want shell,patch", req.LoadOptions.Tools)
 	}
-	if got := req.LookupEnv("BUILDER_LOOKUP_TEST"); got != "lookup-value" {
+	if got := req.LookupEnv("KENT_LOOKUP_TEST"); got != "lookup-value" {
 		t.Fatalf("lookup env returned %q, want lookup-value", got)
 	}
 }
 
 func TestLookupEnvFallsBackToProcessEnvWhenHandlerMissing(t *testing.T) {
-	t.Setenv("BUILDER_LOOKUP_ENV_FALLBACK", "fallback-value")
+	t.Setenv("KENT_LOOKUP_ENV_FALLBACK", "fallback-value")
 	req := buildRequest(Request{}, nil)
-	if got := req.LookupEnv("BUILDER_LOOKUP_ENV_FALLBACK"); got != "fallback-value" {
+	if got := req.LookupEnv("KENT_LOOKUP_ENV_FALLBACK"); got != "fallback-value" {
 		t.Fatalf("lookup env fallback = %q, want fallback-value", got)
 	}
 }

@@ -123,8 +123,8 @@ func configureServeTestServerPort(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	ReserveTestListenReservation(listener)
 	t.Cleanup(func() { ReleaseTestListenReservation(listener.Addr().String()) })
-	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
-	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+	t.Setenv("KENT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("KENT_SERVER_PORT", strconv.Itoa(port))
 }
 
 func TestReserveTestListenReservationDrainerStopsAfterRelease(t *testing.T) {

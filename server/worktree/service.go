@@ -1396,15 +1396,15 @@ func (s *Service) runSetupScript(scriptPath string, sessionID string, payload se
 	cmd.Dir = payload.WorktreeRoot
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Env = append(os.Environ(),
-		"BUILDER_WORKTREE_SOURCE_WORKSPACE_ROOT="+payload.SourceWorkspaceRoot,
-		"BUILDER_WORKTREE_BRANCH_NAME="+payload.BranchName,
-		"BUILDER_WORKTREE_ROOT="+payload.WorktreeRoot,
-		"BUILDER_WORKTREE_SESSION_ID="+payload.SessionID,
-		"BUILDER_WORKTREE_PROJECT_ID="+payload.ProjectID,
-		"BUILDER_WORKTREE_WORKSPACE_ID="+payload.WorkspaceID,
-		"BUILDER_WORKTREE_WORKTREE_ID="+payload.WorktreeID,
-		fmt.Sprintf("BUILDER_WORKTREE_CREATED_BRANCH=%t", payload.CreatedBranch),
-		"BUILDER_WORKTREE_PAYLOAD_JSON="+string(body),
+		"KENT_WORKTREE_SOURCE_WORKSPACE_ROOT="+payload.SourceWorkspaceRoot,
+		"KENT_WORKTREE_BRANCH_NAME="+payload.BranchName,
+		"KENT_WORKTREE_ROOT="+payload.WorktreeRoot,
+		"KENT_WORKTREE_SESSION_ID="+payload.SessionID,
+		"KENT_WORKTREE_PROJECT_ID="+payload.ProjectID,
+		"KENT_WORKTREE_WORKSPACE_ID="+payload.WorkspaceID,
+		"KENT_WORKTREE_WORKTREE_ID="+payload.WorktreeID,
+		fmt.Sprintf("KENT_WORKTREE_CREATED_BRANCH=%t", payload.CreatedBranch),
+		"KENT_WORKTREE_PAYLOAD_JSON="+string(body),
 	)
 	output, err := cmd.CombinedOutput()
 	if err == nil {

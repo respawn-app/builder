@@ -37,8 +37,8 @@ func registerGatewayWorkspace(t *testing.T, workspace string) {
 func configureGatewayTestServerPort(t *testing.T) {
 	t.Helper()
 	port := 56000 + int(gatewayTestPortCounter.Add(1))
-	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
-	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+	t.Setenv("KENT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("KENT_SERVER_PORT", strconv.Itoa(port))
 }
 
 var gatewayTestPortCounter atomic.Uint32

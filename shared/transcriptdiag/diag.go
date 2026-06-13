@@ -16,7 +16,7 @@ func EnabledFromEnv(getenv func(string) string) bool {
 	if getenv == nil {
 		return false
 	}
-	value := strings.TrimSpace(getenv("BUILDER_TRANSCRIPT_DIAGNOSTICS"))
+	value := strings.TrimSpace(getenv("KENT_TRANSCRIPT_DIAGNOSTICS"))
 	if value == "" {
 		return false
 	}

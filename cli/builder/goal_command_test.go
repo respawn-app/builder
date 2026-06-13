@@ -609,13 +609,13 @@ func runGoalCommandSubprocessRaw(t *testing.T, builderPath string, workdir strin
 func goalCommandSubprocessEnv(sessionID string) []string {
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, item := range os.Environ() {
-		if strings.HasPrefix(item, "BUILDER_SESSION_ID=") {
+		if strings.HasPrefix(item, "KENT_SESSION_ID=") {
 			continue
 		}
 		env = append(env, item)
 	}
 	if strings.TrimSpace(sessionID) != "" {
-		env = append(env, "BUILDER_SESSION_ID="+sessionID)
+		env = append(env, "KENT_SESSION_ID="+sessionID)
 	}
 	return env
 }

@@ -12,8 +12,8 @@ import (
 )
 
 func TestManualAltScreenInputCursorRepro(t *testing.T) {
-	if os.Getenv("BUILDER_MANUAL_ALT_INPUT_REPRO") != "1" {
-		t.Skip("set BUILDER_MANUAL_ALT_INPUT_REPRO=1 and run from a real terminal")
+	if os.Getenv("KENT_MANUAL_ALT_INPUT_REPRO") != "1" {
+		t.Skip("set KENT_MANUAL_ALT_INPUT_REPRO=1 and run from a real terminal")
 	}
 	state := newUITerminalCursorState()
 	model := &manualAltScreenInputReproModel{

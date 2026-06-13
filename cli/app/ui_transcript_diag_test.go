@@ -318,7 +318,7 @@ func TestRuntimeCarryQueueLogsAndResumesInOrder(t *testing.T) {
 }
 
 func TestRuntimeClientTranscriptDiagnosticsEnablePaths(t *testing.T) {
-	t.Setenv("BUILDER_TRANSCRIPT_DIAGNOSTICS", "")
+	t.Setenv("KENT_TRANSCRIPT_DIAGNOSTICS", "")
 	client := newUIRuntimeClientWithReads("session-1", transcriptDiagTestSessionViewClient{}, transcriptDiagTestRuntimeControlClient{}).(*sessionRuntimeClient)
 	if client.transcriptDiagnosticsEnabled() {
 		t.Fatal("expected transcript diagnostics disabled by default")
@@ -331,7 +331,7 @@ func TestRuntimeClientTranscriptDiagnosticsEnablePaths(t *testing.T) {
 	if client.transcriptDiagnosticsEnabled() {
 		t.Fatal("expected runtime-client diagnostics disable to take effect when env is unset")
 	}
-	t.Setenv("BUILDER_TRANSCRIPT_DIAGNOSTICS", "1")
+	t.Setenv("KENT_TRANSCRIPT_DIAGNOSTICS", "1")
 	if !client.transcriptDiagnosticsEnabled() {
 		t.Fatal("expected transcript diagnostics env to enable runtime-client diagnostics")
 	}

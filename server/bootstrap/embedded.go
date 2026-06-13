@@ -107,7 +107,7 @@ func BuildAuthSupport(store auth.Store, lookupEnv func(string) string, now func(
 	}
 	oauthOpts := auth.OpenAIOAuthOptions{
 		Issuer:   auth.DefaultOpenAIIssuer,
-		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(lookupEnv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
+		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(lookupEnv("KENT_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
 	}
 	return AuthSupport{
 		OAuthOptions: oauthOpts,
