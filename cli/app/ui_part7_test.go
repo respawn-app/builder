@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/commands"
 	"core/cli/tui"
 	"core/server/llm"
@@ -9,7 +10,6 @@ import (
 	shelltool "core/server/tools/shell"
 	"core/shared/clientui"
 	"core/shared/transcript"
-	"context"
 	"errors"
 	"strings"
 	"testing"

@@ -159,7 +159,7 @@ func TestRootCommandIgnoresBuilderSessionEnvByDefault(t *testing.T) {
 		got = opts
 		return nil
 	}
-	t.Setenv(sessionenv.BuilderSessionID, "session-from-env")
+	t.Setenv(sessionenv.SessionIDEnv, "session-from-env")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -568,7 +568,7 @@ func TestRunSubcommandUsesBuilderSessionEnvAsWorkspaceContext(t *testing.T) {
 		gotOpts = opts
 		return app.RunPromptResult{Result: "done"}, nil
 	}
-	t.Setenv(sessionenv.BuilderSessionID, "session-from-env")
+	t.Setenv(sessionenv.SessionIDEnv, "session-from-env")
 
 	originalStdout := os.Stdout
 	originalStderr := os.Stderr
@@ -687,7 +687,7 @@ func TestRunSubcommandContinueDefaultAgentAliasesMarkExplicitRoleOverride(t *tes
 }
 
 func TestSessionIDSubcommandPrintsBuilderSessionEnv(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, " session-from-env ")
+	t.Setenv(sessionenv.SessionIDEnv, " session-from-env ")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
@@ -703,7 +703,7 @@ func TestSessionIDSubcommandPrintsBuilderSessionEnv(t *testing.T) {
 }
 
 func TestSessionIDSubcommandFailsOutsideBuilderShell(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "")
+	t.Setenv(sessionenv.SessionIDEnv, "")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
@@ -713,7 +713,7 @@ func TestSessionIDSubcommandFailsOutsideBuilderShell(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), sessionenv.BuilderSessionID+" is not set") {
+	if !strings.Contains(stderr.String(), sessionenv.SessionIDEnv+" is not set") {
 		t.Fatalf("stderr = %q, want missing env error", stderr.String())
 	}
 }

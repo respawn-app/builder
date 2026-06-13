@@ -214,7 +214,7 @@ func runSubcommand(args []string) int {
 	}
 	workspaceContextSessionID := ""
 	if sessionID == "" {
-		if envSessionID, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv); ok {
+		if envSessionID, ok := sessionenv.LookupSessionID(os.LookupEnv); ok {
 			workspaceContextSessionID = envSessionID
 		}
 	}
@@ -378,9 +378,9 @@ func sessionIDSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 		sessionFS.Usage()
 		return 2
 	}
-	sessionID, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv)
+	sessionID, ok := sessionenv.LookupSessionID(os.LookupEnv)
 	if !ok {
-		fmt.Fprintf(stderr, "%s is not set; this command only works inside Builder shell commands\n", sessionenv.BuilderSessionID)
+		fmt.Fprintf(stderr, "%s is not set; this command only works inside Builder shell commands\n", sessionenv.SessionIDEnv)
 		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, sessionID)

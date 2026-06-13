@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/commands"
 	"core/cli/tui"
 	"core/server/llm"
@@ -8,7 +9,6 @@ import (
 	"core/server/tools"
 	"core/shared/toolspec"
 	"core/shared/transcript"
-	"context"
 	"errors"
 	"io"
 	"strings"

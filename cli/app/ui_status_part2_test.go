@@ -1,12 +1,12 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/internal/statuscollect"
 	"core/server/auth"
 	"core/server/sessionview"
 	"core/shared/client"
 	"core/shared/clientui"
-	"context"
 	"os"
 	"os/exec"
 	"strings"

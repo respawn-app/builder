@@ -274,7 +274,7 @@ func (b metaContextBuilder) subagentsMetaMessage() (llm.Message, bool) {
 		lines = append(lines, "- `"+role.Name+"`: "+role.Description)
 	}
 	lines = append(lines, "---")
-	lines = append(lines, "Invoke with `"+prompts.BuilderCommand()+" run --agent=<role> \"<prompt>\"`.")
+	lines = append(lines, "Invoke with `"+prompts.LaunchCommand()+" run --agent=<role> \"<prompt>\"`.")
 	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSubagents, Content: strings.Join(lines, "\n")}, true
 }
 

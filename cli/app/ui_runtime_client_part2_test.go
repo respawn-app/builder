@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/server/llm"
 	"core/server/registry"
 	"core/server/runtime"
@@ -9,7 +10,6 @@ import (
 	sharedclient "core/shared/client"
 	"core/shared/clientui"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"reflect"
 	"strings"

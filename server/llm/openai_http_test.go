@@ -1,9 +1,9 @@
 package llm
 
 import (
+	"context"
 	"core/server/auth"
 	"core/shared/toolspec"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"

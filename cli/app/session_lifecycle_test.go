@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/server/llm"
 	"core/server/metadata"
 	"core/server/session"
@@ -11,7 +12,6 @@ import (
 	"core/shared/rollbacktarget"
 	"core/shared/serverapi"
 	"core/shared/toolspec"
-	"context"
 	"errors"
 	"io"
 	"os"

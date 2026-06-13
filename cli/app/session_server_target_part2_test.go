@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/internal/statuscollect"
 	"core/server/auth"
 	"core/server/authstatus"
@@ -13,7 +14,6 @@ import (
 	"core/shared/protocol"
 	"core/shared/serverapi"
 	"core/shared/toolspec"
-	"context"
 	"errors"
 	"io"
 	"os"

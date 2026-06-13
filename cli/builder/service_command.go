@@ -289,7 +289,7 @@ func ensureNoUnmanagedServerConflictForAction(ctx context.Context, backend servi
 const serviceRestartCurrentSessionError = "you may not restart the service now as restarting the service will kill your current session, halting your work. Ask the user to restart the service manually."
 
 func ensureServiceRestartAllowed() error {
-	if _, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv); !ok {
+	if _, ok := sessionenv.LookupSessionID(os.LookupEnv); !ok {
 		return nil
 	}
 	return errors.New(serviceRestartCurrentSessionError)

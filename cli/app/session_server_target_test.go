@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/internal/startupconfig"
 	"core/server/llm"
 	"core/server/metadata"
@@ -12,7 +13,6 @@ import (
 	"core/shared/clientui"
 	"core/shared/config"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"io"
 	"os"

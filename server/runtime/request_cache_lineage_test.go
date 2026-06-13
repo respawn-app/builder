@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"core/server/llm"
 	"core/server/session"
 	"core/server/tools"
@@ -8,7 +9,6 @@ import (
 	"core/shared/config"
 	"core/shared/toolspec"
 	"core/shared/transcript"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"

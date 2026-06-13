@@ -1,12 +1,12 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/internal/worktreeview"
 	"core/cli/tui"
 	sharedclient "core/shared/client"
 	"core/shared/clientui"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"strings"
 	"testing"

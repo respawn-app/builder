@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"core/server/metadata"
 	"core/server/primaryrun"
 	"core/server/registry"
@@ -10,7 +11,6 @@ import (
 	"core/shared/clientui"
 	"core/shared/config"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"fmt"
 	"os"

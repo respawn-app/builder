@@ -8,14 +8,14 @@ import (
 )
 
 func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
-	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderCommand}} run edit={{.EditingToolName}}", SystemPromptTemplateArgs{
+	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.LaunchCommand}} run edit={{.EditingToolName}}", SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
 		EditingToolName:              "edit",
 	}, "")
 	if !strings.Contains(rendered, "calls=123") {
 		t.Fatalf("expected estimated tool calls rendered, got %q", rendered)
 	}
-	expectedCmd := "cmd=" + selfcmd.BuilderCommand() + " run"
+	expectedCmd := "cmd=" + selfcmd.LaunchCommand() + " run"
 	if !strings.Contains(rendered, expectedCmd) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected %q in rendered output, got %q", expectedCmd, rendered)
 	}
@@ -61,7 +61,7 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptSectionPlaceholders(t *tes
 		"Your agentic environment",
 		"Product ambiguity and planning",
 		"Final answer instructions",
-		selfcmd.BuilderCommand(),
+		selfcmd.LaunchCommand(),
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected section prompt to contain %q, got %q", want, rendered)
@@ -147,7 +147,7 @@ func TestRenderWorkflowTaskInstructionsUsesCompletionModeFragment(t *testing.T) 
 	for _, want := range []string{
 		"ticket `BUI-1`",
 		"workflow `workflow-1`",
-		selfcmd.BuilderCommand() + " task show BUI-1",
+		selfcmd.LaunchCommand() + " task show BUI-1",
 		"complete_node",
 		"actionable (Actionable)",
 		"Triage the ticket.",
@@ -167,7 +167,7 @@ func TestRenderGoalNudgePrompt(t *testing.T) {
 	rendered := RenderGoalNudgePrompt("ship /goal mode", "active")
 	for _, want := range []string{
 		"<goal>\nship /goal mode\n</goal>",
-		BuilderCommand() + " goal complete",
+		LaunchCommand() + " goal complete",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected goal nudge to contain %q, got %q", want, rendered)

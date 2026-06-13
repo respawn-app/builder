@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/internal/runtimestate"
 	"core/cli/tui"
 	"core/server/llm"
@@ -11,7 +12,6 @@ import (
 	"core/shared/toolspec"
 	"core/shared/transcript"
 	"core/shared/transcript/toolcodec"
-	"context"
 	"errors"
 	"reflect"
 	"strings"

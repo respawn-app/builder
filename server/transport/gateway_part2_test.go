@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	serverbootstrap "core/server/bootstrap"
 	"core/server/core"
 	"core/server/llm"
@@ -17,7 +18,6 @@ import (
 	"core/shared/serverapi"
 	"core/shared/testgit"
 	"core/shared/toolspec"
-	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"os"

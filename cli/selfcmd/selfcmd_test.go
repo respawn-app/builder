@@ -24,8 +24,8 @@ func TestFormatRunCommandPrefixQuotesExecutablePath(t *testing.T) {
 	}
 }
 
-func TestFormatBuilderCommandQuotesExecutablePathWithoutSubcommand(t *testing.T) {
-	got := formatBuilderCommand("/tmp/path with space/builder")
+func TestFormatLaunchCommandQuotesExecutablePathWithoutSubcommand(t *testing.T) {
+	got := formatLaunchCommand("/tmp/path with space/builder")
 	want := "\"/tmp/path with space/builder\""
 	if got != want {
 		t.Fatalf("builder command = %q, want %q", got, want)

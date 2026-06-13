@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"core/server/metadata"
 	"core/server/primaryrun"
 	"core/server/session"
@@ -8,7 +9,6 @@ import (
 	"core/shared/config"
 	"core/shared/serverapi"
 	"core/shared/testgit"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"

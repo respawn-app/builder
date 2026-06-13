@@ -592,7 +592,7 @@ func TestWorkflowEdgeUpdateClearsParameters(t *testing.T) {
 }
 
 func TestTaskHumanOnlyActionsAreDeniedInsideBuilderSession(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-agent")
+	t.Setenv(sessionenv.SessionIDEnv, "session-agent")
 	previous := workflowCommandRemoteOpener
 	workflowCommandRemoteOpener = func(context.Context, string) (config.App, workflowCommandRemote, error) {
 		t.Fatal("human-only task command opened workflow remote")
@@ -624,7 +624,7 @@ func TestTaskHumanOnlyActionsAreDeniedInsideBuilderSession(t *testing.T) {
 }
 
 func TestTaskSafeActionsRemainAvailableInsideBuilderSession(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-agent")
+	t.Setenv(sessionenv.SessionIDEnv, "session-agent")
 	_, binding, remote := newWorkflowCommandLoopback(t)
 	restore := replaceWorkflowCommandRemoteOpener(t, remote.cfg, remote)
 	defer restore()
@@ -868,7 +868,7 @@ func TestTaskShowHelpIncludesJSONFlag(t *testing.T) {
 }
 
 func TestTaskCommentAuthorForAddUsesUserWithoutBuilderSession(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "")
+	t.Setenv(sessionenv.SessionIDEnv, "")
 	remote := &commentAuthorRemote{}
 	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
 	if got.Kind != "user" || got.ID != "" {
@@ -877,7 +877,7 @@ func TestTaskCommentAuthorForAddUsesUserWithoutBuilderSession(t *testing.T) {
 }
 
 func TestTaskCommentAuthorForAddUsesWorkflowRunRole(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	t.Setenv(sessionenv.SessionIDEnv, "session-workflow")
 	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
 		Runs: []serverapi.WorkflowRun{{SessionID: "session-workflow", Role: "code_review", NodeID: "node-review"}},
 	}}
@@ -888,7 +888,7 @@ func TestTaskCommentAuthorForAddUsesWorkflowRunRole(t *testing.T) {
 }
 
 func TestTaskCommentAuthorForAddUsesWorkflowNodeWhenRoleMissing(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	t.Setenv(sessionenv.SessionIDEnv, "session-workflow")
 	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
 		Placements: []serverapi.WorkflowPlacement{{NodeID: "node-implement", NodeKey: "implement"}},
 		Runs:       []serverapi.WorkflowRun{{SessionID: "session-workflow", NodeID: "node-implement"}},
@@ -900,7 +900,7 @@ func TestTaskCommentAuthorForAddUsesWorkflowNodeWhenRoleMissing(t *testing.T) {
 }
 
 func TestTaskCommentAuthorForAddUsesDeterministicCurrentWorkflowRun(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	t.Setenv(sessionenv.SessionIDEnv, "session-workflow")
 	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
 		Status: serverapi.WorkflowTaskStatus{RunIDs: []string{"run-current"}},
 		Placements: []serverapi.WorkflowPlacement{
@@ -919,7 +919,7 @@ func TestTaskCommentAuthorForAddUsesDeterministicCurrentWorkflowRun(t *testing.T
 }
 
 func TestTaskCommentAuthorForAddUsesLatestWorkflowRunWhenNoneCurrent(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	t.Setenv(sessionenv.SessionIDEnv, "session-workflow")
 	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
 		Placements: []serverapi.WorkflowPlacement{
 			{NodeID: "node-old", NodeKey: "old"},
@@ -937,7 +937,7 @@ func TestTaskCommentAuthorForAddUsesLatestWorkflowRunWhenNoneCurrent(t *testing.
 }
 
 func TestTaskCommentAuthorForAddUsesSessionFallbackForNonWorkflowAgent(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-other")
+	t.Setenv(sessionenv.SessionIDEnv, "session-other")
 	remote := &commentAuthorRemote{sessionName: "triage"}
 	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
 	if got.Kind != "agent" || got.ID != "Session triage agent" {

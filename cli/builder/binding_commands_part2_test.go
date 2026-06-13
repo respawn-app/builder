@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"core/shared/client"
 	"core/shared/config"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"net"
 	"testing"

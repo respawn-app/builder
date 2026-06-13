@@ -606,7 +606,7 @@ func TestBuildSkillTogglesCanDisableGeneratedSkillWithoutImport(t *testing.T) {
 	}
 	toggles := buildSkillToggles(state, map[string]bool{
 		"generated:kent-dogfooding": true,
-		"generated:creating-skills":    false,
+		"generated:creating-skills": false,
 	})
 	disabled, ok := toggles["creating-skills"]
 	if len(toggles) != 1 || !ok || disabled {
@@ -659,7 +659,7 @@ func TestReviewSummaryIncludesGeneratedSkillSelectionWithoutImport(t *testing.T)
 		}},
 		skillSelection: map[string]bool{
 			"generated:kent-dogfooding": true,
-			"generated:creating-skills":    false,
+			"generated:creating-skills": false,
 		},
 	}
 	lines := reviewSummaryLines(state)
@@ -694,7 +694,7 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 		}},
 		skillSelection: map[string]bool{
 			"generated:kent-dogfooding": false,
-			"generated:creating-skills":    true,
+			"generated:creating-skills": true,
 		},
 	}
 	state.settings.SkillToggles = buildSkillToggles(&state, state.skillSelection)

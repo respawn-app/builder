@@ -1,8 +1,8 @@
 package llm
 
 import (
-	"core/shared/toolspec"
 	"context"
+	"core/shared/toolspec"
 	"encoding/json"
 	"github.com/openai/openai-go/v3/responses"
 	"net/http"

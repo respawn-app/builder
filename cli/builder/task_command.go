@@ -618,7 +618,7 @@ func taskCommentAuthorForAdd(ctx context.Context, remote workflowCommandRemote, 
 	if explicit {
 		return taskCommentAuthor{Kind: strings.TrimSpace(explicitAuthor)}
 	}
-	sessionID, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv)
+	sessionID, ok := sessionenv.LookupSessionID(os.LookupEnv)
 	if !ok {
 		return taskCommentAuthor{Kind: "user"}
 	}
@@ -851,7 +851,7 @@ func taskCommentDeleteSubcommand(args []string, stdout io.Writer, stderr io.Writ
 }
 
 func denyAgentHumanOnlyTaskAction(stderr io.Writer) bool {
-	if _, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv); !ok {
+	if _, ok := sessionenv.LookupSessionID(os.LookupEnv); !ok {
 		return false
 	}
 	fmt.Fprintln(stderr, prompts.WorkflowHumanOnlyTaskActionDeniedPrompt)

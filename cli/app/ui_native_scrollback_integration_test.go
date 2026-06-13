@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"core/cli/tui"
 	"core/server/llm"
 	"core/server/tools"
@@ -11,8 +13,6 @@ import (
 	"core/shared/toolspec"
 	"core/shared/transcript"
 	"core/shared/transcript/toolcodec"
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"

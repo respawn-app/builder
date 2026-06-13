@@ -284,7 +284,7 @@ func goalClearSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 }
 
 func resolveGoalCommandSession(sessionFlag string) (sessionID string, agent bool, err error) {
-	if envSessionID, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv); ok {
+	if envSessionID, ok := sessionenv.LookupSessionID(os.LookupEnv); ok {
 		return envSessionID, true, nil
 	}
 	trimmed := strings.TrimSpace(sessionFlag)

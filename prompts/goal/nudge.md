@@ -19,5 +19,5 @@ Completion discipline:
 - If the goal is complete, report completion through the CLI from a shell command:
 
 ```sh
-{{.BuilderCommand}} goal complete
+{{.LaunchCommand}} goal complete
 ```

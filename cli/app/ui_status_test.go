@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	appstatus "core/cli/app/internal/status"
 	"core/cli/app/internal/statuscollect"
 	"core/cli/tui"
@@ -9,7 +10,6 @@ import (
 	"core/shared/brand"
 	"core/shared/clientui"
 	"core/shared/config"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"

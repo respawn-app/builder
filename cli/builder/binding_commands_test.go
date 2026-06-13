@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"core/server/auth"
 	"core/server/authflow"
 	"core/server/metadata"
@@ -11,8 +13,6 @@ import (
 	"core/shared/config"
 	"core/shared/protocol"
 	"core/shared/serverapi"
-	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"net"

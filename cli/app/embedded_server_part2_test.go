@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/server/primaryrun"
 	askquestion "core/server/tools/askquestion"
 	shelltool "core/server/tools/shell"
@@ -8,7 +9,6 @@ import (
 	"core/shared/config"
 	"core/shared/serverapi"
 	"core/shared/testopenai"
-	"context"
 	"errors"
 	"io"
 	"net/http"

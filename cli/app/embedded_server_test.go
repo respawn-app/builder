@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/app/internal/statuscollect"
 	"core/server/auth"
 	"core/server/authbootstrap"
@@ -19,7 +20,6 @@ import (
 	"core/shared/config"
 	"core/shared/rpccontract"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"io"
 	"strings"

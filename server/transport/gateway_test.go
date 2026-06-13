@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"core/server/auth"
 	serverbootstrap "core/server/bootstrap"
 	"core/server/core"
@@ -14,7 +15,6 @@ import (
 	"core/shared/rpccontract"
 	"core/shared/rpcwire"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"fmt"
 	"golang.org/x/net/websocket"

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/server/llm"
 	"core/server/metadata"
 	"core/server/session"
@@ -8,7 +9,6 @@ import (
 	"core/shared/config"
 	"core/shared/serverapi"
 	"core/shared/testopenai"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"

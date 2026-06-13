@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"core/prompts"
 	"core/server/llm"
 	"core/server/session"
@@ -8,7 +9,6 @@ import (
 	triggerhandofftool "core/server/tools/triggerhandoff"
 	"core/shared/toolspec"
 	"core/shared/transcript"
-	"context"
 	"encoding/json"
 	"errors"
 	"strings"

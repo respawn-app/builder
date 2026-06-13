@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"core/server/tools"
 	"core/server/tools/shell/postprocess"
 	"core/server/tools/shell/shellenv"
@@ -8,7 +9,6 @@ import (
 	"core/shared/config"
 	"core/shared/sessionenv"
 	"core/shared/toolspec"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,8 +187,8 @@ func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 		"KEEP=1",
 	}, "session-abc"))
 
-	if env[sessionenv.BuilderSessionID] != "session-abc" {
-		t.Fatalf("KENT_SESSION_ID = %q, want session-abc", env[sessionenv.BuilderSessionID])
+	if env[sessionenv.SessionIDEnv] != "session-abc" {
+		t.Fatalf("KENT_SESSION_ID = %q, want session-abc", env[sessionenv.SessionIDEnv])
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
@@ -198,7 +198,7 @@ func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 func TestManagerStartEmbedsOwnerSessionIDInProcessEnv(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	result, err := manager.Start(context.Background(), ExecRequest{
-		Command:        []string{"/bin/sh", "-c", "printf %s \"$" + sessionenv.BuilderSessionID + "\""},
+		Command:        []string{"/bin/sh", "-c", "printf %s \"$" + sessionenv.SessionIDEnv + "\""},
 		DisplayCommand: "print builder session id",
 		OwnerSessionID: "session-env-123",
 		Workdir:        t.TempDir(),

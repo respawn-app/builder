@@ -16,13 +16,13 @@ type SystemPromptTemplateArgs struct {
 }
 
 type systemPromptRuntimeTemplateData struct {
-	BuilderCommand               string
+	LaunchCommand                string
 	EstimatedToolCallsForContext int
 	EditingToolName              string
 }
 
 type defaultSystemPromptTemplateData struct {
-	BuilderCommand                               string
+	LaunchCommand                                string
 	EstimatedToolCallsForContext                 int
 	EditingToolName                              string
 	DefaultSystemPromptPersonality               string
@@ -33,7 +33,7 @@ type defaultSystemPromptTemplateData struct {
 }
 
 type systemPromptTemplateData struct {
-	BuilderCommand                               string
+	LaunchCommand                                string
 	EstimatedToolCallsForContext                 int
 	EditingToolName                              string
 	DefaultSystemPrompt                          string
@@ -176,8 +176,8 @@ func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
 	return rendered
 }
 
-func BuilderCommand() string {
-	return selfcmd.BuilderCommand()
+func LaunchCommand() string {
+	return selfcmd.LaunchCommand()
 }
 
 func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
@@ -189,19 +189,19 @@ func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
 
 // goalPromptData is the template data shared by every goal prompt. Goal
 // prompts render through the same text/template engine and command variable
-// ({{.BuilderCommand}}) as the system prompt, so the launch command is wired
+// ({{.LaunchCommand}}) as the system prompt, so the launch command is wired
 // in one place instead of a per-prompt placeholder.
 type goalPromptData struct {
-	BuilderCommand string
-	Objective      string
-	Status         string
+	LaunchCommand string
+	Objective     string
+	Status        string
 }
 
 func renderGoalPrompt(name, text, objective, status string) string {
 	rendered, err := renderNamedTemplate(name, text, goalPromptData{
-		BuilderCommand: BuilderCommand(),
-		Objective:      strings.TrimSpace(objective),
-		Status:         strings.TrimSpace(status),
+		LaunchCommand: LaunchCommand(),
+		Objective:     strings.TrimSpace(objective),
+		Status:        strings.TrimSpace(status),
 	})
 	if err != nil {
 		panic(err)
@@ -258,32 +258,32 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 func RenderWorkflowTaskInstructions(args WorkflowNodeContextArgs, nodeCompletionInstructions string) (string, error) {
 	type workflowTaskInstructionsTemplateData struct {
 		WorkflowNodeContextArgs
-		BuilderCommand             string
+		LaunchCommand              string
 		NodeCompletionInstructions string
 	}
 	return renderNamedTemplate("workflow task instructions", WorkflowTaskInstructionsPrompt, workflowTaskInstructionsTemplateData{
 		WorkflowNodeContextArgs:    args,
-		BuilderCommand:             selfcmd.BuilderCommand(),
+		LaunchCommand:              selfcmd.LaunchCommand(),
 		NodeCompletionInstructions: strings.TrimSpace(nodeCompletionInstructions),
 	})
 }
 
 func RenderWorkflowToolCompletionInstructions(workflowShortId string) (string, error) {
 	return renderNamedTemplate("workflow tool completion instructions", WorkflowToolCompletionInstructionsPrompt, struct {
-		BuilderCommand  string
+		LaunchCommand   string
 		WorkflowShortId string
 	}{
-		BuilderCommand:  selfcmd.BuilderCommand(),
+		LaunchCommand:   selfcmd.LaunchCommand(),
 		WorkflowShortId: strings.TrimSpace(workflowShortId),
 	})
 }
 
 func RenderWorkflowStructuredCompletionInstructions(workflowShortId string) (string, error) {
 	return renderNamedTemplate("workflow structured completion instructions", WorkflowStructuredCompletionInstructionsPrompt, struct {
-		BuilderCommand  string
+		LaunchCommand   string
 		WorkflowShortId string
 	}{
-		BuilderCommand:  selfcmd.BuilderCommand(),
+		LaunchCommand:   selfcmd.LaunchCommand(),
 		WorkflowShortId: strings.TrimSpace(workflowShortId),
 	})
 }
@@ -317,7 +317,7 @@ type systemPromptSections struct {
 
 func renderSystemPromptSections(args SystemPromptTemplateArgs) (systemPromptSections, error) {
 	runtimeTemplateData := systemPromptRuntimeTemplateData{
-		BuilderCommand:               selfcmd.BuilderCommand(),
+		LaunchCommand:                selfcmd.LaunchCommand(),
 		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
 		EditingToolName:              strings.TrimSpace(args.EditingToolName),
 	}
@@ -356,7 +356,7 @@ func renderDefaultSystemPromptTemplateWithSections(text string, args SystemPromp
 		return "", nil
 	}
 	return renderNamedTemplate("system prompt", trimmed, defaultSystemPromptTemplateData{
-		BuilderCommand:                               selfcmd.BuilderCommand(),
+		LaunchCommand:                                selfcmd.LaunchCommand(),
 		EstimatedToolCallsForContext:                 args.EstimatedToolCallsForContext,
 		EditingToolName:                              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPromptPersonality:               strings.TrimSpace(sections.personality),
@@ -373,7 +373,7 @@ func renderSystemPromptTemplateWithSections(text string, args SystemPromptTempla
 		return "", nil
 	}
 	return renderNamedTemplate("system prompt", trimmed, systemPromptTemplateData{
-		BuilderCommand:                               selfcmd.BuilderCommand(),
+		LaunchCommand:                                selfcmd.LaunchCommand(),
 		EstimatedToolCallsForContext:                 args.EstimatedToolCallsForContext,
 		EditingToolName:                              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPrompt:                          strings.TrimSpace(defaultSystemPrompt),

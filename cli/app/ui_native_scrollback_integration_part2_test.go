@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"core/cli/tui"
 	"core/server/llm"
 	"core/server/runtime"
@@ -8,8 +10,6 @@ import (
 	sharedclient "core/shared/client"
 	"core/shared/clientui"
 	"core/shared/toolspec"
-	"bytes"
-	"context"
 	"errors"
 	"strings"
 	"testing"

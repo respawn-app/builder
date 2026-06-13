@@ -71,10 +71,10 @@ func EnrichForSession(base []string, sessionID string) []string {
 	}
 
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
-		if _, exists := env[sessionenv.BuilderSessionID]; !exists {
-			order = append(order, sessionenv.BuilderSessionID)
+		if _, exists := env[sessionenv.SessionIDEnv]; !exists {
+			order = append(order, sessionenv.SessionIDEnv)
 		}
-		env[sessionenv.BuilderSessionID] = sessionID
+		env[sessionenv.SessionIDEnv] = sessionID
 	}
 
 	if _, exists := env["RIPGREP_CONFIG_PATH"]; !exists {

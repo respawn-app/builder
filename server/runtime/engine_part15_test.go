@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"core/prompts"
 	"core/server/llm"
 	"core/server/session"
@@ -9,7 +10,6 @@ import (
 	"core/shared/config"
 	"core/shared/toolspec"
 	"core/shared/transcript"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"

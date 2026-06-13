@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"core/cli/app/internal/daemonlaunch"
 	"core/cli/app/internal/remoteattach"
 	"core/server/auth"
@@ -20,8 +22,6 @@ import (
 	"core/shared/serverapi"
 	"core/shared/sessionenv"
 	"core/shared/testopenai"
-	"bytes"
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -117,8 +117,8 @@ func TestLoadRemoteAttachConfigRejectsStaleWorkspaceContextSession(t *testing.T)
 	if err == nil {
 		t.Fatal("expected stale workspace context session to fail")
 	}
-	if !strings.Contains(err.Error(), sessionenv.BuilderSessionID+" points to missing Kent session") {
-		t.Fatalf("error = %q, want %s context", err, sessionenv.BuilderSessionID)
+	if !strings.Contains(err.Error(), sessionenv.SessionIDEnv+" points to missing Kent session") {
+		t.Fatalf("error = %q, want %s context", err, sessionenv.SessionIDEnv)
 	}
 }
 
@@ -189,8 +189,8 @@ func TestRunPromptRejectsStaleWorkspaceContextSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected stale workspace context session to fail")
 	}
-	if !strings.Contains(err.Error(), sessionenv.BuilderSessionID+" points to missing Kent session") {
-		t.Fatalf("error = %q, want %s context", err, sessionenv.BuilderSessionID)
+	if !strings.Contains(err.Error(), sessionenv.SessionIDEnv+" points to missing Kent session") {
+		t.Fatalf("error = %q, want %s context", err, sessionenv.SessionIDEnv)
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("expected no llm calls, got %d", hits.Load())

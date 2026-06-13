@@ -6,13 +6,13 @@ import (
 	"core/shared/brand"
 )
 
-const BuilderSessionID = brand.SessionIDEnv
+const SessionIDEnv = brand.SessionIDEnv
 
-func LookupBuilderSessionID(lookup func(string) (string, bool)) (string, bool) {
+func LookupSessionID(lookup func(string) (string, bool)) (string, bool) {
 	if lookup == nil {
 		return "", false
 	}
-	value, ok := lookup(BuilderSessionID)
+	value, ok := lookup(SessionIDEnv)
 	if !ok {
 		return "", false
 	}

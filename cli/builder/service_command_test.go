@@ -19,7 +19,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	_ = os.Unsetenv(sessionenv.BuilderSessionID)
+	_ = os.Unsetenv(sessionenv.SessionIDEnv)
 	os.Exit(m.Run())
 }
 
@@ -311,7 +311,7 @@ func TestServiceInstallAllowsHealthyServerOwnedByLoadedService(t *testing.T) {
 }
 
 func TestServiceRestartAllowsHealthyServerOwnedByLoadedServiceBeforePIDIsVisible(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "")
+	t.Setenv(sessionenv.SessionIDEnv, "")
 	server := newServiceHealthTestServer(t, `{"status":"ok","pid":123}`)
 	backend := &stubServiceBackend{status: serviceStatus{
 		Installed: true,
@@ -334,7 +334,7 @@ func TestServiceRestartAllowsHealthyServerOwnedByLoadedServiceBeforePIDIsVisible
 }
 
 func TestServiceRestartRejectsBuilderShellSession(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-123")
+	t.Setenv(sessionenv.SessionIDEnv, "session-123")
 	server := newServiceHealthTestServer(t, `{"status":"ok","pid":123}`)
 	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
 	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
@@ -357,7 +357,7 @@ func TestServiceRestartRejectsBuilderShellSession(t *testing.T) {
 }
 
 func TestServiceRestartIfInstalledRejectsBuilderShellSession(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-123")
+	t.Setenv(sessionenv.SessionIDEnv, "session-123")
 	server := newServiceHealthTestServer(t, `{"status":"ok","pid":123}`)
 	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
 	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
@@ -380,7 +380,7 @@ func TestServiceRestartIfInstalledRejectsBuilderShellSession(t *testing.T) {
 }
 
 func TestServiceRestartIfInstalledSkipsCurrentShellSessionGuardWhenServiceMissing(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-123")
+	t.Setenv(sessionenv.SessionIDEnv, "session-123")
 	backend := &stubServiceBackend{status: serviceStatus{Installed: false}}
 	withServiceCommandTestBackend(t, backend)
 
@@ -423,7 +423,7 @@ func TestServiceRestartHelpMentionsBuilderShellGuard(t *testing.T) {
 }
 
 func TestServiceRestartRejectsCurrentShellSessionBeforeHealthProbe(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "session-123")
+	t.Setenv(sessionenv.SessionIDEnv, "session-123")
 	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
 	withServiceCommandTestBackend(t, backend)
 
@@ -445,7 +445,7 @@ func TestServiceRestartRejectsCurrentShellSessionBeforeHealthProbe(t *testing.T)
 }
 
 func TestServiceRestartAllowsHealthyBuilderServerRecoveryWhenLoadedServiceIsNotRunning(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "")
+	t.Setenv(sessionenv.SessionIDEnv, "")
 	server := newServiceHealthTestServer(t, `{"status":"ok","pid":123}`)
 	backend := &stubServiceBackend{status: serviceStatus{
 		Installed: true,
@@ -468,7 +468,7 @@ func TestServiceRestartAllowsHealthyBuilderServerRecoveryWhenLoadedServiceIsNotR
 }
 
 func TestServiceRestartAllowsUnloadedInstalledServiceToRecoverHealthyBuilderServer(t *testing.T) {
-	t.Setenv(sessionenv.BuilderSessionID, "")
+	t.Setenv(sessionenv.SessionIDEnv, "")
 	server := newServiceHealthTestServer(t, `{"status":"ok","pid":123}`)
 	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: false, Running: false}}
 	withServiceCommandTestBackendEndpoint(t, backend, server.URL)

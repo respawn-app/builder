@@ -1,8 +1,8 @@
 package patch
 
 import (
-	patchformat "core/shared/transcript/patchformat"
 	"context"
+	patchformat "core/shared/transcript/patchformat"
 	"errors"
 	"os"
 	"path/filepath"

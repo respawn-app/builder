@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/cli/tui"
 	"core/server/llm"
 	"core/server/registry"
@@ -12,7 +13,6 @@ import (
 	"core/shared/clientui"
 	"core/shared/serverapi"
 	"core/shared/toolspec"
-	"context"
 	"encoding/json"
 	"errors"
 	"strings"

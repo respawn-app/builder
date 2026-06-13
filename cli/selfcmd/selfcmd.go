@@ -12,15 +12,15 @@ import (
 
 const fallbackBinaryName = brand.Command
 
-func BuilderCommand() string {
-	return formatBuilderCommand(currentExecutablePath())
+func LaunchCommand() string {
+	return formatLaunchCommand(currentExecutablePath())
 }
 
 func ContinueRunCommand(sessionID string) string {
 	return formatContinueRunCommand(currentExecutablePath(), sessionID)
 }
 
-func formatBuilderCommand(executablePath string) string {
+func formatLaunchCommand(executablePath string) string {
 	executablePath = strings.TrimSpace(executablePath)
 	if executablePath == "" {
 		return fallbackBinaryName
@@ -32,7 +32,7 @@ func formatBuilderCommand(executablePath string) string {
 }
 
 func formatRunCommandPrefix(executablePath string) string {
-	return formatBuilderCommand(executablePath) + " run"
+	return formatLaunchCommand(executablePath) + " run"
 }
 
 func formatContinueRunCommand(executablePath, sessionID string) string {

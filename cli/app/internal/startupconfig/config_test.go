@@ -38,7 +38,7 @@ func TestResolveRunPromptConfigWrapsMissingImplicitWorkspaceContextSession(t *te
 	if !errors.Is(err, sessioncontract.ErrSessionNotFound) {
 		t.Fatalf("error = %v, want ErrSessionNotFound", err)
 	}
-	if !strings.Contains(err.Error(), sessionenv.BuilderSessionID+" points to missing Kent session") {
+	if !strings.Contains(err.Error(), sessionenv.SessionIDEnv+" points to missing Kent session") {
 		t.Fatalf("error = %q, want workspace context guidance", err)
 	}
 }

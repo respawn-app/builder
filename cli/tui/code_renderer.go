@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"core/shared/theme"
 	"bytes"
+	"core/shared/theme"
 	"fmt"
 	"runtime"
 	"strconv"

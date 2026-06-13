@@ -1,2 +1,2 @@
-You may use `{{.BuilderCommand}} goal set <objective>` only when no active or paused goal exists.
-Use `{{.BuilderCommand}} goal complete` if you can testify that the goal was done fully, or `{{.BuilderCommand}} goal show` to see the current goal, and do not try to circumvent the goal or this error anymore, or you will be shut down. If you're unable to complete the goal, use ask_question to ask the user for help.
+You may use `{{.LaunchCommand}} goal set <objective>` only when no active or paused goal exists.
+Use `{{.LaunchCommand}} goal complete` if you can testify that the goal was done fully, or `{{.LaunchCommand}} goal show` to see the current goal, and do not try to circumvent the goal or this error anymore, or you will be shut down. If you're unable to complete the goal, use ask_question to ask the user for help.

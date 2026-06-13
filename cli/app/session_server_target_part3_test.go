@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"core/server/serve"
 	serverstartup "core/server/startup"
 	askquestion "core/server/tools/askquestion"
@@ -9,7 +10,6 @@ import (
 	"core/shared/clientui"
 	"core/shared/protocol"
 	"core/shared/serverapi"
-	"context"
 	"io"
 	"net"
 	"net/http/httptest"

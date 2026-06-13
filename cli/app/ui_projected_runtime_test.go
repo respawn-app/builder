@@ -1,11 +1,11 @@
 package app
 
 import (
+	"context"
 	"core/cli/tui"
 	"core/server/llm"
 	"core/shared/clientui"
 	"core/shared/serverapi"
-	"context"
 	"errors"
 	"strings"
 	"testing"

@@ -1,10 +1,10 @@
 package metadata
 
 import (
+	"context"
 	"core/server/session"
 	"core/shared/config"
 	"core/shared/serverapi"
-	"context"
 	"database/sql"
 	"errors"
 	"os"
