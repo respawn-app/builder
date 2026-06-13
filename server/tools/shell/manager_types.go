@@ -60,6 +60,7 @@ type Snapshot struct {
 	OutputAvailable         bool
 	OutputRetainedFromBytes int64
 	OutputRetainedToBytes   int64
+	RawOutputRequested      bool
 	RawOutput               bool
 	Running                 bool
 	StdinOpen               bool
@@ -82,16 +83,18 @@ type ExecRequest struct {
 }
 
 type ExecResult struct {
-	SessionID         string
-	WallTime          time.Duration
-	Warning           string
-	ToolError         string
-	Output            string
-	OutputPath        string
-	ExitCode          *int
-	Running           bool
-	Backgrounded      bool
-	MovedToBackground bool
+	SessionID          string
+	WallTime           time.Duration
+	Warning            string
+	ToolError          string
+	Output             string
+	OutputPath         string
+	ExitCode           *int
+	Running            bool
+	Backgrounded       bool
+	MovedToBackground  bool
+	RawOutputRequested bool
+	Truncated          bool
 }
 
 type BackgroundNoticeSummary struct {
@@ -215,6 +218,7 @@ func (p *processEntry) snapshotLocked() Snapshot {
 		OutputAvailable:         p.logPath != "",
 		OutputRetainedFromBytes: 0,
 		OutputRetainedToBytes:   p.outputBytes,
+		RawOutputRequested:      p.raw,
 		RawOutput:               p.preserveOutput,
 		Running:                 p.running,
 		StdinOpen:               p.stdinOpen,

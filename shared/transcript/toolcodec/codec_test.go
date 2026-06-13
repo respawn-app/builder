@@ -45,3 +45,19 @@ func TestEncodeDecodeToolCallMetaRoundTripsShellDialect(t *testing.T) {
 		t.Fatalf("expected shell dialect to round-trip, got %+v", meta.RenderHint)
 	}
 }
+
+func TestEncodeDecodeToolCallMetaRoundTripsShellOutputStatus(t *testing.T) {
+	raw := EncodeToolCallMeta(transcript.ToolCallMeta{
+		ToolName:           "exec_command",
+		IsShell:            true,
+		RawOutputRequested: true,
+		OutputTruncated:    true,
+	})
+	meta, ok := DecodeToolCallMeta(raw)
+	if !ok {
+		t.Fatal("expected tool metadata to decode successfully")
+	}
+	if !meta.RawOutputRequested || !meta.OutputTruncated {
+		t.Fatalf("expected shell output status to round-trip, got %+v", meta)
+	}
+}

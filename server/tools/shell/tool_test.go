@@ -1016,9 +1016,64 @@ func TestExecCommandForegroundTruncationUsesForegroundBanner(t *testing.T) {
 	if strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected immediate completion, got %q", text)
 	}
+	if result.Presentation == nil || !result.Presentation.OutputTruncated {
+		t.Fatalf("expected foreground truncation presentation metadata, got %+v", result.Presentation)
+	}
 	if manager.Count() != 0 {
 		t.Fatalf("manager count = %d, want 0", manager.Count())
 	}
+}
+
+func TestExecCommandRawOutputAddsPresentationMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	result := callExecCommand(t, execTool, "raw-presentation-1", map[string]any{
+		"cmd":           "printf raw",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"raw":           true,
+		"yield_time_ms": 2_000,
+	})
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if result.Presentation == nil || !result.Presentation.RawOutputRequested || result.Presentation.OutputTruncated {
+		t.Fatalf("expected raw output presentation metadata without truncation, got %+v", result.Presentation)
+	}
+}
+
+func TestWriteStdinRawSessionAddsPresentationMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	stdinTool := NewWriteStdinTool(16_000, manager)
+
+	result := callExecCommand(t, execTool, "raw-tty-1", map[string]any{
+		"cmd":           "read line; printf '\\033[31m%s\\033[0m' \"$line\"",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"raw":           true,
+		"tty":           true,
+		"yield_time_ms": 250,
+	})
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+
+	stdinResult := callWriteStdin(t, stdinTool, "raw-tty-2", map[string]any{
+		"session_id":    1000,
+		"chars":         "raw builder\n",
+		"yield_time_ms": 2_000,
+	})
+	if stdinResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
+	}
+	if stdinResult.Presentation == nil || !stdinResult.Presentation.RawOutputRequested || stdinResult.Presentation.OutputTruncated {
+		t.Fatalf("expected raw write_stdin presentation metadata without truncation, got %+v", stdinResult.Presentation)
+	}
+	waitForManagerCount(t, manager, 0, time.Second)
 }
 
 func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
@@ -1103,6 +1158,41 @@ func TestWriteStdinUsesBackgroundTruncationBannerOnCompletion(t *testing.T) {
 	}
 	if !strings.Contains(stdinText, "Log file:") {
 		t.Fatalf("expected completed background shell response to include log file, got %q", stdinText)
+	}
+	if stdinResult.Presentation == nil || !stdinResult.Presentation.OutputTruncated {
+		t.Fatalf("expected write_stdin truncation presentation metadata, got %+v", stdinResult.Presentation)
+	}
+	waitForManagerCount(t, manager, 0, 3*time.Second)
+}
+
+func TestWriteStdinPreservesBackgroundSummaryTruncationMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	stdinTool := NewWriteStdinTool(16_000, manager)
+
+	result := callExecCommand(t, execTool, "tty-summary-trunc-1", map[string]any{
+		"cmd":           "read line; head -c 2200000 /dev/zero | tr '\\0' x",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"tty":           true,
+		"yield_time_ms": 250,
+	})
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+
+	stdinResult := callWriteStdin(t, stdinTool, "tty-summary-trunc-2", map[string]any{
+		"session_id":        1000,
+		"chars":             "go\n",
+		"yield_time_ms":     5_000,
+		"max_output_tokens": 10,
+	})
+	if stdinResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
+	}
+	if stdinResult.Presentation == nil || !stdinResult.Presentation.OutputTruncated {
+		t.Fatalf("expected source truncation presentation metadata, got %+v", stdinResult.Presentation)
 	}
 	waitForManagerCount(t, manager, 0, 3*time.Second)
 }

@@ -41,6 +41,8 @@ func isEmptyToolCallMeta(meta transcript.ToolCallMeta) bool {
 		strings.TrimSpace(meta.Question) == "" &&
 		len(meta.Suggestions) == 0 &&
 		meta.RecommendedOptionIndex == 0 &&
+		!meta.RawOutputRequested &&
+		!meta.OutputTruncated &&
 		meta.RenderHint == nil &&
 		meta.PatchRender == nil
 }

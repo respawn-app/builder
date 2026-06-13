@@ -62,6 +62,8 @@ type ToolCallMeta struct {
 	Suggestions            []string
 	RecommendedOptionIndex int
 	OmitSuccessfulResult   bool
+	RawOutputRequested     bool
+	OutputTruncated        bool
 }
 
 func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {

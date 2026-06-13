@@ -215,9 +215,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		return ExecResult{}, err
 	}
 	result := ExecResult{
-		SessionID:  id,
-		WallTime:   time.Since(start),
-		OutputPath: logPath,
+		SessionID:          id,
+		WallTime:           time.Since(start),
+		OutputPath:         logPath,
+		RawOutputRequested: req.Raw,
 	}
 	snapshot, backgrounded := entry.transitionToBackground()
 	if !backgrounded {
@@ -228,9 +229,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		if err != nil {
 			return ExecResult{}, err
 		}
-		display, _, _ := truncateWithTemplate(processed.Output, maxOutputChars, truncationBannerTemplate)
+		display, truncated, _ := truncateWithTemplate(processed.Output, maxOutputChars, truncationBannerTemplate)
 		result.ExitCode = postprocess.CloneIntPtr(snapshot.ExitCode)
 		result.Output = display
+		result.Truncated = truncated
 		result.Warning = processed.Warning
 		result.ToolError = processed.UnrecoverableError
 		m.releaseEntry(id)
@@ -241,11 +243,12 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if err != nil {
 		return ExecResult{}, err
 	}
-	display, _, _ := truncateWithTemplate(processed.Output, maxOutputChars, backgroundTruncationBannerTemplate)
+	display, truncated, _ := truncateWithTemplate(processed.Output, maxOutputChars, backgroundTruncationBannerTemplate)
 	result.Running = true
 	result.Backgrounded = true
 	result.MovedToBackground = true
 	result.Output = display
+	result.Truncated = truncated
 	result.Warning = processed.Warning
 	result.ToolError = processed.UnrecoverableError
 	m.emitEvent(Event{Type: EventBackgrounded, Snapshot: snapshot})
@@ -304,6 +307,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 	snapshot := entry.snapshot()
 	consumedCompletion := false
 	warning := ""
+	sourceTruncated := false
 	var processed postprocess.Result
 	if snapshot.Backgrounded && snapshot.ExitCode != nil && !entry.completionNoticeConsumed() {
 		fullOutput, readErr := readOutputFileLimited(snapshot.LogPath, maxFullLogPostprocessBytes)
@@ -314,10 +318,12 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 			}
 			consumedCompletion = true
 		} else {
-			preview, _, _, previewErr := readBackgroundSummaryFromFile(snapshot.LogPath, maxOutputChars, BackgroundOutputDefault, !snapshot.RawOutput)
+			var previewTruncated bool
+			preview, _, previewTruncated, previewErr := readBackgroundSummaryFromFile(snapshot.LogPath, maxOutputChars, BackgroundOutputDefault, !snapshot.RawOutput)
 			if previewErr == nil {
 				processed = postprocess.Result{Output: preview}
 				consumedCompletion = true
+				sourceTruncated = previewTruncated
 				warning = postprocess.JoinWarnings(warning, fmt.Sprintf("full output log skipped: %v", readErr))
 			} else {
 				warning = postprocess.JoinWarnings(warning, fmt.Sprintf("failed to read full output log: %v", readErr))
@@ -330,20 +336,22 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 			return ExecResult{}, err
 		}
 	}
-	display, _, _ := truncateWithTemplate(processed.Output, maxOutputChars, backgroundTruncationBannerTemplate)
+	display, displayTruncated, _ := truncateWithTemplate(processed.Output, maxOutputChars, backgroundTruncationBannerTemplate)
 	if snapshot.Backgrounded && snapshot.ExitCode != nil && consumedCompletion {
 		entry.markCompletionNoticeConsumed()
 	}
 	return ExecResult{
-		SessionID:    id,
-		WallTime:     time.Since(start),
-		Warning:      postprocess.JoinWarnings(warning, processed.Warning),
-		ToolError:    processed.UnrecoverableError,
-		Output:       display,
-		OutputPath:   snapshot.LogPath,
-		Running:      snapshot.Running,
-		Backgrounded: snapshot.Backgrounded,
-		ExitCode:     postprocess.CloneIntPtr(snapshot.ExitCode),
+		SessionID:          id,
+		WallTime:           time.Since(start),
+		Warning:            postprocess.JoinWarnings(warning, processed.Warning),
+		ToolError:          processed.UnrecoverableError,
+		Output:             display,
+		OutputPath:         snapshot.LogPath,
+		Running:            snapshot.Running,
+		Backgrounded:       snapshot.Backgrounded,
+		ExitCode:           postprocess.CloneIntPtr(snapshot.ExitCode),
+		RawOutputRequested: snapshot.RawOutputRequested,
+		Truncated:          sourceTruncated || displayTruncated,
 	}, nil
 }
 
