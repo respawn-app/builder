@@ -382,7 +382,7 @@ func authMethodOptions(includeEnvAPIKey bool, allowSkip bool) []startupPickerOpt
 
 func newAuthMethodPickerModel(theme string, notice startupPickerNotice, includeEnvAPIKey bool, allowSkip bool) *startupPickerModel {
 	model := newStartupPickerModel(authPickerHeaderMarkdown, "Pick auth options", theme, notice, authMethodOptions(includeEnvAPIKey, allowSkip))
-	model.banner = builderStartupBannerANSI
+	model.banner = startupBannerANSI
 	return model
 }
 

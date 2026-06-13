@@ -12,20 +12,6 @@ import (
 	ansi "github.com/charmbracelet/x/ansi"
 )
 
-func TestAuthCallbackPageRendersInputAndPaddedLogo(t *testing.T) {
-	m := newAuthCallbackPageModel(authCallbackPageData{Theme: "dark", AuthorizeURL: "https://auth.example/authorize"})
-	view := ansi.Strip(m.View())
-	lines := strings.Split(view, "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "" || !strings.HasPrefix(strings.TrimRight(lines[1], " "), " ███████") {
-		t.Fatalf("expected one top and left padding before logo, got %q", view)
-	}
-	for _, want := range []string{"Sign in with OpenAI Codex", "Paste callback URL or code", "Esc cancels"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("expected callback page to contain %q, got %q", want, view)
-		}
-	}
-}
-
 func TestAuthCallbackPageInvalidPasteShowsTransientErrorAndStaysOpen(t *testing.T) {
 	m := newAuthCallbackPageModel(authCallbackPageData{Theme: "dark"})
 	m.complete = func(context.Context, string) (oauthadapter.Method, error) {

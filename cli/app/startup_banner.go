@@ -9,8 +9,8 @@ import (
 
 const startupBannerHorizontalPadding = 1
 
-//go:embed assets/builder-big-money-nw-block-full-builder-gradient.ansi
-var builderStartupBannerANSI string
+//go:embed assets/banner.ansi
+var startupBannerANSI string
 
 func renderStartupBanner(raw string) string {
 	banner := strings.TrimRight(raw, "\n")
