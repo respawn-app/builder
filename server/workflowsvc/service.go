@@ -3,8 +3,10 @@ package workflowsvc
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"builder/server/requestmemo"
@@ -182,7 +184,7 @@ func (s *Service) ListWorkflows(ctx context.Context, req serverapi.WorkflowListR
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowListResponse{}, err
 	}
-	rows, err := s.store.ListWorkflows(ctx, workflowstore.ListWorkflowsRequest{PageSize: req.PageSize, PageToken: req.PageToken, Query: req.Query})
+	rows, err := s.store.ListWorkflows(ctx, workflowstore.ListWorkflowsRequest{PageSize: req.PageSize, PageToken: req.PageToken, Query: req.Query, ExactName: req.ExactName})
 	if err != nil {
 		return serverapi.WorkflowListResponse{}, err
 	}
@@ -608,6 +610,10 @@ func (s *Service) ApproveWorkflowTask(ctx context.Context, req serverapi.Workflo
 	if transitionID == "" {
 		transitionID = strings.TrimSpace(req.TransitionID)
 	}
+	taskID, projectID, workflowID, err := s.taskIdentityForTransition(ctx, transitionID)
+	if err != nil {
+		return serverapi.WorkflowTaskApproveResponse{}, err
+	}
 	approved, err := s.approve(ctx, workflow.TransitionID(transitionID))
 	if err != nil {
 		return serverapi.WorkflowTaskApproveResponse{}, err
@@ -615,10 +621,8 @@ func (s *Service) ApproveWorkflowTask(ctx context.Context, req serverapi.Workflo
 	if s.schedulerWake != nil {
 		s.schedulerWake.Notify()
 	}
-	if taskID, projectID, workflowID, detailErr := s.taskIdentityForTransition(ctx, transitionID); detailErr == nil {
-		s.publishWorkflowEvent(ctx, projectID, workflowID, "task", "approved", taskID, transitionID)
-	}
-	return serverapi.WorkflowTaskApproveResponse{TransitionID: string(approved.TransitionID), State: approved.State, PlacementIDs: placementIDs(approved.PlacementIDs), RunIDs: runIDs(approved.RunIDs)}, nil
+	s.publishWorkflowEvent(ctx, projectID, workflowID, "task", "approved", taskID, transitionID)
+	return serverapi.WorkflowTaskApproveResponse{TransitionID: string(approved.TransitionID), TaskID: taskID, State: approved.State, PlacementIDs: placementIDs(approved.PlacementIDs), RunIDs: runIDs(approved.RunIDs)}, nil
 }
 
 func (s *Service) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskMoveRequest) (serverapi.WorkflowTaskMoveResponse, error) {
@@ -772,15 +776,55 @@ func (s *Service) ListWorkflowTaskComments(ctx context.Context, req serverapi.Wo
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowTaskCommentListResponse{}, err
 	}
-	comments, err := s.store.ListComments(ctx, workflow.TaskID(req.TaskID))
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = 100
+	}
+	cursor, err := parseCommentPageToken(req.PageToken)
 	if err != nil {
 		return serverapi.WorkflowTaskCommentListResponse{}, err
+	}
+	comments, err := s.store.ListCommentsPage(ctx, workflow.TaskID(req.TaskID), cursor, pageSize+1)
+	if err != nil {
+		return serverapi.WorkflowTaskCommentListResponse{}, err
+	}
+	nextPageToken := ""
+	if len(comments) > pageSize {
+		comments = comments[:pageSize]
+		nextPageToken = commentPageToken(comments[len(comments)-1])
 	}
 	out := make([]serverapi.WorkflowTaskComment, 0, len(comments))
 	for _, comment := range comments {
 		out = append(out, commentRecord(comment))
 	}
-	return serverapi.WorkflowTaskCommentListResponse{Comments: out}, nil
+	return serverapi.WorkflowTaskCommentListResponse{Comments: out, NextPageToken: nextPageToken}, nil
+}
+
+// parseCommentPageToken decodes a stable keyset cursor (created_at|base64(id)),
+// mirroring the task-activity page token so concurrent comment inserts/deletes
+// can't shift an in-flight infinite-scroll page.
+func parseCommentPageToken(token string) (workflowstore.CommentPageCursor, error) {
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" {
+		return workflowstore.CommentPageCursor{}, nil
+	}
+	timestampPart, encodedID, ok := strings.Cut(trimmed, "|")
+	if !ok {
+		return workflowstore.CommentPageCursor{}, errors.New("page_token is invalid")
+	}
+	createdAt, err := strconv.ParseInt(timestampPart, 10, 64)
+	if err != nil || createdAt < 0 {
+		return workflowstore.CommentPageCursor{}, errors.New("page_token is invalid")
+	}
+	decodedID, err := base64.RawURLEncoding.DecodeString(encodedID)
+	if err != nil || strings.TrimSpace(string(decodedID)) == "" {
+		return workflowstore.CommentPageCursor{}, errors.New("page_token is invalid")
+	}
+	return workflowstore.CommentPageCursor{CreatedAtUnixMs: createdAt, ID: string(decodedID), HasValue: true}, nil
+}
+
+func commentPageToken(comment workflowstore.CommentRecord) string {
+	return strconv.FormatInt(comment.CreatedAt, 10) + "|" + base64.RawURLEncoding.EncodeToString([]byte(comment.ID))
 }
 
 func (s *Service) ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentReplaceRequest) error {

@@ -4,18 +4,24 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"builder/prompts"
 	"builder/server/metadata"
+	"builder/server/session"
 	"builder/server/workflow"
 	"builder/server/workflowstore"
 	"builder/server/workflowsvc"
 	"builder/server/workflowview"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/sessionenv"
@@ -26,6 +32,7 @@ type workflowCommandLoopbackRemote struct {
 	cfg                   config.App
 	binding               metadata.Binding
 	projectBindingsByRoot map[string]serverapi.ProjectBinding
+	metadataStore         *metadata.Store
 	store                 *workflowstore.Store
 }
 
@@ -116,24 +123,49 @@ func TestWorkflowAndTaskCommandsUseWorkflowAPI(t *testing.T) {
 	}
 
 	taskOut, _ := runWorkflowRootCommandOK(t, "task", "create", "--title", "Task", "--body", "Body", "--workflow", workflowID, "--project", binding.ProjectID)
-	taskID := labeledOutputValue(t, taskOut, "task_id")
-	shortID := labeledOutputValue(t, taskOut, "short_id")
-	if taskID == "" || shortID == "" {
-		t.Fatalf("task output = %q, want task and short ids", taskOut)
+	shortID := taskDetailHeadingShortID(t, taskOut)
+	if !strings.Contains(taskOut, shortID+": Task\n") || !strings.Contains(taskOut, "Body:\n```md\nBody\n```\n") || !strings.Contains(taskOut, "Status: open\n") {
+		t.Fatalf("task create output = %q, want task show output", taskOut)
 	}
+	taskResp, err := remote.GetWorkflowTask(context.Background(), serverapi.WorkflowTaskGetRequest{ProjectID: binding.ProjectID, ShortID: shortID})
+	if err != nil {
+		t.Fatalf("GetWorkflowTask after create: %v", err)
+	}
+	taskID := taskResp.Task.Summary.ID
 
 	taskListOut, _ := runWorkflowRootCommandOK(t, "task", "list", "--project", binding.ProjectID)
-	if !strings.Contains(taskListOut, shortID) || !strings.Contains(taskListOut, taskID) {
-		t.Fatalf("task list output = %q, want ids", taskListOut)
+	if !strings.Contains(taskListOut, shortID+": Task.") || !strings.Contains(taskListOut, "Status: open") {
+		t.Fatalf("task list output = %q, want short id and open backlog status", taskListOut)
+	}
+	taskListJSONOut, _ := runWorkflowRootCommandOK(t, "task", "list", "--project", binding.ProjectID, "--json")
+	if !strings.Contains(taskListJSONOut, shortID) || !strings.Contains(taskListJSONOut, taskID) {
+		t.Fatalf("task list json output = %q, want ids", taskListJSONOut)
 	}
 
 	taskShowOut, _ := runWorkflowRootCommandOK(t, "task", "show", "--project", binding.ProjectID, shortID)
-	if !strings.Contains(taskShowOut, "placements") || !strings.Contains(taskShowOut, taskID) {
-		t.Fatalf("task show output = %q, want placement section", taskShowOut)
+	if !strings.Contains(taskShowOut, shortID+": Task\n") || !strings.Contains(taskShowOut, "Body:\n```md\nBody\n```\n") || !strings.Contains(taskShowOut, "Status: open\n") {
+		t.Fatalf("task show output = %q, want summary block", taskShowOut)
+	}
+	taskShowJSONOut, _ := runWorkflowRootCommandOK(t, "task", "show", "--project", binding.ProjectID, "--json", shortID)
+	var taskShowJSON taskShowOutput
+	if err := json.Unmarshal([]byte(taskShowJSONOut), &taskShowJSON); err != nil {
+		t.Fatalf("task show --json output = %q, want JSON: %v", taskShowJSONOut, err)
+	}
+	if taskShowJSON.Summary.ID != taskID || taskShowJSON.Summary.ShortID != shortID || taskShowJSON.Body != "Body" || taskShowJSON.PlacementCount == 0 {
+		t.Fatalf("task show --json output = %+v, want bounded task detail summary", taskShowJSON)
+	}
+	var taskShowJSONFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(taskShowJSONOut), &taskShowJSONFields); err != nil {
+		t.Fatalf("task show --json output = %q, want JSON object: %v", taskShowJSONOut, err)
+	}
+	for _, omitted := range []string{"attention", "placements", "runs", "transitions", "comments"} {
+		if _, ok := taskShowJSONFields[omitted]; ok {
+			t.Fatalf("task show --json output = %q, did not expect unbounded %q array", taskShowJSONOut, omitted)
+		}
 	}
 	taskShowOut, _ = runWorkflowRootCommandOK(t, "task", "show", "--project", "missing-project", taskID)
-	if !strings.Contains(taskShowOut, taskID) {
-		t.Fatalf("task show by full id output = %q, want task id", taskShowOut)
+	if !strings.Contains(taskShowOut, shortID+": Task\n") {
+		t.Fatalf("task show by full id output = %q, want task short id", taskShowOut)
 	}
 
 	commentOut, _ := runWorkflowRootCommandOK(t, "task", "comment", "add", "--project", binding.ProjectID, "--body", "note", shortID)
@@ -143,31 +175,35 @@ func TestWorkflowAndTaskCommandsUseWorkflowAPI(t *testing.T) {
 	}
 	runWorkflowRootCommandOK(t, "task", "comment", "replace", "--body", "edited", commentID)
 	commentListOut, _ := runWorkflowRootCommandOK(t, "task", "comment", "list", "--project", binding.ProjectID, shortID)
-	if !strings.Contains(commentListOut, commentID) || !strings.Contains(commentListOut, "edited") {
-		t.Fatalf("comment list output = %q, want edited comment", commentListOut)
+	if !strings.Contains(commentListOut, "Comments (1):\nUser at ") || !strings.Contains(commentListOut, "edited") {
+		t.Fatalf("comment list output = %q, want rendered comment", commentListOut)
 	}
 	runWorkflowRootCommandOK(t, "task", "comment", "delete", commentID)
 
-	startOut, _ := runWorkflowRootCommandOK(t, "task", "start", "--project", binding.ProjectID, shortID)
-	runID := labeledOutputValue(t, startOut, "run_id")
-	if runID == "" {
-		t.Fatalf("start output = %q, want run id", startOut)
+	startResp, err := remote.StartWorkflowTask(context.Background(), serverapi.WorkflowTaskStartRequest{TaskID: taskID})
+	if err != nil {
+		t.Fatalf("StartWorkflowTask for resume command: %v", err)
 	}
+	runID := startResp.RunID
 	claimed, err := remote.store.ClaimRun(context.Background(), workflow.RunID(runID), 0)
 	if err != nil {
 		t.Fatalf("ClaimRun for resume command: %v", err)
+	}
+	resumeSessionID := createWorkflowCommandTestSession(t, cfg, binding, remote.metadataStore)
+	if err := remote.store.AttachRunSession(context.Background(), workflow.RunID(runID), claimed.Generation, resumeSessionID); err != nil {
+		t.Fatalf("AttachRunSession for resume command: %v", err)
 	}
 	if err := remote.store.InterruptRunGeneration(context.Background(), workflow.RunID(runID), claimed.Generation, "manual", "{}"); err != nil {
 		t.Fatalf("InterruptRunGeneration for resume command: %v", err)
 	}
 	resumeOut, _ := runWorkflowRootCommandOK(t, "task", "resume", "--project", binding.ProjectID, shortID)
-	if labeledOutputValue(t, resumeOut, "run_id") != runID {
-		t.Fatalf("resume output = %q, want run id %s", resumeOut, runID)
+	if !strings.Contains(resumeOut, "Resumed task "+shortID+" in session "+resumeSessionID+".\n") || !strings.Contains(resumeOut, "Current node: implement\n") {
+		t.Fatalf("resume output = %q, want readable resume message", resumeOut)
 	}
 
 	cancelOut, _ := runWorkflowRootCommandOK(t, "task", "cancel", "--project", binding.ProjectID, "--reason", "test", shortID)
-	if !strings.Contains(cancelOut, taskID) {
-		t.Fatalf("cancel output = %q, want task id", cancelOut)
+	if cancelOut != "Canceled task "+shortID+".\n" {
+		t.Fatalf("cancel output = %q, want readable cancel message", cancelOut)
 	}
 
 	if _, resumeErr, resumeCode := runWorkflowRootCommand("task", "resume"); resumeCode != 2 || !strings.Contains(resumeErr, "requires <short-id-or-task-id>") {
@@ -618,10 +654,7 @@ func TestTaskSafeActionsRemainAvailableInsideBuilderSession(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task create exit=%d stderr=%q", code, taskErr)
 	}
-	shortID := labeledOutputValue(t, taskOut, "short_id")
-	if shortID == "" {
-		t.Fatalf("task create output = %q", taskOut)
-	}
+	shortID := taskDetailHeadingShortID(t, taskOut)
 	if _, listErr, code := runWorkflowRootCommand("task", "list", "--project", binding.ProjectID); code != 0 {
 		t.Fatalf("task list exit=%d stderr=%q", code, listErr)
 	}
@@ -662,7 +695,7 @@ func (r *pagedTaskListRemote) GetWorkflowBoard(_ context.Context, req serverapi.
 	return serverapi.WorkflowBoardResponse{Board: r.pages[req.PageToken]}, nil
 }
 
-func TestTaskListFetchesPaginatedBoardCardsWithoutDuplicates(t *testing.T) {
+func TestTaskListUsesDefaultPageSizeAndPrintsNextPageToken(t *testing.T) {
 	cfg := config.App{WorkspaceRoot: t.TempDir()}
 	remote := &pagedTaskListRemote{
 		board: serverapi.WorkflowBoard{
@@ -689,14 +722,391 @@ func TestTaskListFetchesPaginatedBoardCardsWithoutDuplicates(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task list exit=%d stderr=%q", code, stderr)
 	}
-	for _, shortID := range []string{"BLD-1", "BLD-2"} {
-		if got := strings.Count(stdout, shortID+"\t"); got != 1 {
-			t.Fatalf("task list output = %q, want %s exactly once, got %d", stdout, shortID, got)
+	if strings.Count(stdout, "BLD-1:") != 1 || strings.Contains(stdout, "BLD-2:") {
+		t.Fatalf("task list output = %q, want only first page cards", stdout)
+	}
+	if strings.Contains(stdout, "short_id\t") {
+		t.Fatalf("task list output = %q, want human-readable blocks without TSV header", stdout)
+	}
+	if !strings.Contains(stdout, "BLD-1: A.\nStatus: open\n") {
+		t.Fatalf("task list output = %q, want readable open status block", stdout)
+	}
+	if !strings.Contains(stderr, "Next page token: `next`") {
+		t.Fatalf("task list stderr = %q, want next page token", stderr)
+	}
+	if len(remote.requests) != 1 || remote.requests[0].PageSize != 100 || remote.requests[0].PageToken != "" {
+		t.Fatalf("board requests = %+v, want one default-sized first page request", remote.requests)
+	}
+}
+
+func TestTaskListUsesRequestedPageSizeAndToken(t *testing.T) {
+	cfg := config.App{WorkspaceRoot: t.TempDir()}
+	remote := &pagedTaskListRemote{
+		board: serverapi.WorkflowBoard{
+			ProjectID:        "project-1",
+			SelectedWorkflow: serverapi.WorkflowPickerItem{WorkflowID: "workflow-1"},
+			Cards:            []serverapi.WorkflowBoardTaskCard{testTaskCard("task-a", "BLD-1", "A")},
+			NextPageToken:    "next",
+		},
+		pages: map[string]serverapi.WorkflowBoard{
+			"next": {
+				ProjectID:        "project-1",
+				SelectedWorkflow: serverapi.WorkflowPickerItem{WorkflowID: "workflow-1"},
+				Cards:            []serverapi.WorkflowBoardTaskCard{testTaskCard("task-b", "BLD-2", "B")},
+				DonePreview:      []serverapi.WorkflowBoardTaskCard{testDoneTaskCard("task-c", "BLD-3", "C")},
+			},
+		},
+	}
+	restore := replaceWorkflowCommandRemoteOpener(t, cfg, remote)
+	defer restore()
+
+	stdout, stderr, code := runWorkflowRootCommand("task", "list", "--project", "project-1", "--page-size", "1", "--page-token", "next")
+	if code != 0 {
+		t.Fatalf("task list exit=%d stderr=%q", code, stderr)
+	}
+	// The requested open page holds BLD-2; BLD-1 is on the earlier page. Because
+	// the open stream is exhausted (no next token), the bounded done preview is
+	// surfaced so done tasks stay reachable even though open cards filled the page.
+	if strings.Contains(stdout, "BLD-1:") || strings.Count(stdout, "BLD-2:") != 1 || strings.Count(stdout, "BLD-3:") != 1 {
+		t.Fatalf("task list output = %q, want the open page plus the surfaced done preview", stdout)
+	}
+	if !strings.Contains(stdout, "BLD-2: B.\nStatus: open\n") {
+		t.Fatalf("task list output = %q, want readable open status block", stdout)
+	}
+	if !strings.Contains(stdout, "BLD-3: C.\nStatus: done\n") {
+		t.Fatalf("task list output = %q, want surfaced done task", stdout)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("task list stderr = %q, want no next page token", stderr)
+	}
+	if len(remote.requests) != 1 || remote.requests[0].PageSize != 1 || remote.requests[0].PageToken != "next" {
+		t.Fatalf("board requests = %+v, want requested page size and token", remote.requests)
+	}
+}
+
+func TestTaskListJSONOutputsStructuredPage(t *testing.T) {
+	cfg := config.App{WorkspaceRoot: t.TempDir()}
+	remote := &pagedTaskListRemote{
+		board: serverapi.WorkflowBoard{
+			ProjectID:        "project-1",
+			SelectedWorkflow: serverapi.WorkflowPickerItem{WorkflowID: "workflow-1"},
+			Cards: []serverapi.WorkflowBoardTaskCard{{
+				TaskID:        "task-a",
+				ShortID:       "BLD-1",
+				WorkflowID:    "workflow-1",
+				Title:         "A",
+				ActiveNodeIDs: []string{"node-1"},
+				Status:        serverapi.WorkflowTaskStatus{Kind: "running", RunIDs: []string{"run-1"}},
+			}},
+			NextPageToken: "next",
+		},
+	}
+	restore := replaceWorkflowCommandRemoteOpener(t, cfg, remote)
+	defer restore()
+
+	stdout, stderr, code := runWorkflowRootCommand("task", "list", "--project", "project-1", "--json")
+	if code != 0 {
+		t.Fatalf("task list --json exit=%d stderr=%q", code, stderr)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("task list --json stderr = %q, want empty stderr on success", stderr)
+	}
+	var output taskListOutput
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+		t.Fatalf("task list --json output = %q, want JSON: %v", stdout, err)
+	}
+	if output.ProjectID != "project-1" || output.NextPageToken != "next" {
+		t.Fatalf("task list --json output = %+v, want project and next page token", output)
+	}
+	if len(output.Tasks) != 1 || output.Tasks[0].TaskID != "task-a" || output.Tasks[0].Status != "running" {
+		t.Fatalf("task list --json tasks = %+v, want running task-a", output.Tasks)
+	}
+}
+
+func TestTaskListStatusMapping(t *testing.T) {
+	tests := []struct {
+		name string
+		task serverapi.WorkflowTaskSummary
+		want string
+	}{
+		{name: "open", task: serverapi.WorkflowTaskSummary{}, want: "open"},
+		{name: "running", task: serverapi.WorkflowTaskSummary{ActiveNodeIDs: []string{"node-1"}}, want: "running"},
+		{name: "done", task: serverapi.WorkflowTaskSummary{Done: true, ActiveNodeIDs: []string{"node-1"}}, want: "done"},
+		{name: "canceled", task: serverapi.WorkflowTaskSummary{CanceledAt: 1, Done: true, ActiveNodeIDs: []string{"node-1"}}, want: "canceled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := taskListStatus(tt.task); got != tt.want {
+				t.Fatalf("taskListStatus(%+v) = %q, want %q", tt.task, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskListHelpIncludesPaginationAndJSONFlags(t *testing.T) {
+	_, stderr, code := runWorkflowRootCommand("task", "list", "--help")
+	if code != 0 {
+		t.Fatalf("task list --help exit=%d stderr=%q", code, stderr)
+	}
+	for _, want := range []string{"builder task list [--project <project>] [--page-size <n>] [--page-token <token>] [--json]", "-json", "-page-size", "-page-token"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("task list --help stderr = %q, want %q", stderr, want)
 		}
 	}
-	if len(remote.requests) != 2 || remote.requests[1].PageToken != "next" {
-		t.Fatalf("board requests = %+v, want initial fetch plus next page", remote.requests)
+}
+
+func TestTaskShowHelpIncludesJSONFlag(t *testing.T) {
+	_, stderr, code := runWorkflowRootCommand("task", "show", "--help")
+	if code != 0 {
+		t.Fatalf("task show --help exit=%d stderr=%q", code, stderr)
 	}
+	for _, want := range []string{"builder task show <short-id-or-task-id> [--json]", "-json"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("task show --help stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
+func TestTaskCommentAuthorForAddUsesUserWithoutBuilderSession(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "")
+	remote := &commentAuthorRemote{}
+	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
+	if got.Kind != "user" || got.ID != "" {
+		t.Fatalf("taskCommentAuthorForAdd = %+v, want user without author id", got)
+	}
+}
+
+func TestTaskCommentAuthorForAddUsesWorkflowRunRole(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
+		Runs: []serverapi.WorkflowRun{{SessionID: "session-workflow", Role: "code_review", NodeID: "node-review"}},
+	}}
+	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
+	if got.Kind != "agent" || got.ID != "code_review" {
+		t.Fatalf("taskCommentAuthorForAdd = %+v, want workflow role agent", got)
+	}
+}
+
+func TestTaskCommentAuthorForAddUsesWorkflowNodeWhenRoleMissing(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
+		Placements: []serverapi.WorkflowPlacement{{NodeID: "node-implement", NodeKey: "implement"}},
+		Runs:       []serverapi.WorkflowRun{{SessionID: "session-workflow", NodeID: "node-implement"}},
+	}}
+	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
+	if got.Kind != "agent" || got.ID != "Node implement agent" {
+		t.Fatalf("taskCommentAuthorForAdd = %+v, want workflow node agent", got)
+	}
+}
+
+func TestTaskCommentAuthorForAddUsesDeterministicCurrentWorkflowRun(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
+		Status: serverapi.WorkflowTaskStatus{RunIDs: []string{"run-current"}},
+		Placements: []serverapi.WorkflowPlacement{
+			{NodeID: "node-old", NodeKey: "old"},
+			{NodeID: "node-current", NodeKey: "current"},
+		},
+		Runs: []serverapi.WorkflowRun{
+			{ID: "run-old", SessionID: "session-workflow", NodeID: "node-old", StartedAtUnixMs: 20},
+			{ID: "run-current", SessionID: "session-workflow", NodeID: "node-current", StartedAtUnixMs: 10},
+		},
+	}}
+	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
+	if got.Kind != "agent" || got.ID != "Node current agent" {
+		t.Fatalf("taskCommentAuthorForAdd = %+v, want current workflow run agent", got)
+	}
+}
+
+func TestTaskCommentAuthorForAddUsesLatestWorkflowRunWhenNoneCurrent(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-workflow")
+	remote := &commentAuthorRemote{task: serverapi.WorkflowTaskDetail{
+		Placements: []serverapi.WorkflowPlacement{
+			{NodeID: "node-old", NodeKey: "old"},
+			{NodeID: "node-new", NodeKey: "new"},
+		},
+		Runs: []serverapi.WorkflowRun{
+			{ID: "run-old", SessionID: "session-workflow", NodeID: "node-old", StartedAtUnixMs: 10},
+			{ID: "run-new", SessionID: "session-workflow", NodeID: "node-new", StartedAtUnixMs: 20},
+		},
+	}}
+	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
+	if got.Kind != "agent" || got.ID != "Node new agent" {
+		t.Fatalf("taskCommentAuthorForAdd = %+v, want latest workflow run agent", got)
+	}
+}
+
+func TestTaskCommentAuthorForAddUsesSessionFallbackForNonWorkflowAgent(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-other")
+	remote := &commentAuthorRemote{sessionName: "triage"}
+	got := taskCommentAuthorForAdd(context.Background(), remote, "task-1", "", false)
+	if got.Kind != "agent" || got.ID != "Session triage agent" {
+		t.Fatalf("taskCommentAuthorForAdd = %+v, want session fallback agent", got)
+	}
+}
+
+func TestTaskCommentListUsesReadablePaginatedOutput(t *testing.T) {
+	cfg := config.App{WorkspaceRoot: t.TempDir()}
+	remote := &commentListRemote{
+		taskID: "task-1",
+		comments: []serverapi.WorkflowTaskComment{
+			{ID: "comment-old", TaskID: "task-1", Author: "user", Body: "old", CreatedAtUnixMs: 1735689600000},
+			{ID: "comment-new", TaskID: "task-1", Author: "agent", AuthorID: "reviewer", Body: "new", CreatedAtUnixMs: 1735776000000},
+			{ID: "comment-extra", TaskID: "task-1", Author: "user", Body: "extra", CreatedAtUnixMs: 1735862400000},
+		},
+	}
+	restore := replaceWorkflowCommandRemoteOpener(t, cfg, remote)
+	defer restore()
+
+	stdout, stderr, code := runWorkflowRootCommand("task", "comment", "list", "task-1", "--page-size", "2")
+	if code != 0 {
+		t.Fatalf("task comment list exit=%d stderr=%q", code, stderr)
+	}
+	want := "Comments (2):\nUser at 2025-01-03T00:00:00Z UTC:\nextra\n---\nreviewer at 2025-01-02T00:00:00Z UTC:\nnew\n"
+	if stdout != want {
+		t.Fatalf("task comment list output = %q, want %q", stdout, want)
+	}
+	if !strings.Contains(stderr, "Next page token: `2`") {
+		t.Fatalf("task comment list stderr = %q, want next page token", stderr)
+	}
+	if len(remote.listRequests) != 1 || remote.listRequests[0].TaskID != "task-1" || remote.listRequests[0].PageSize != 2 || remote.listRequests[0].PageToken != "" {
+		t.Fatalf("comment list requests = %+v, want first page request", remote.listRequests)
+	}
+}
+
+func TestTaskCommentListUsesPageToken(t *testing.T) {
+	cfg := config.App{WorkspaceRoot: t.TempDir()}
+	remote := &commentListRemote{
+		taskID: "task-1",
+		comments: []serverapi.WorkflowTaskComment{
+			{ID: "comment-old", TaskID: "task-1", Author: "user", Body: "old", CreatedAtUnixMs: 1735689600000},
+			{ID: "comment-new", TaskID: "task-1", Author: "agent", AuthorID: "reviewer", Body: "new", CreatedAtUnixMs: 1735776000000},
+			{ID: "comment-extra", TaskID: "task-1", Author: "user", Body: "extra", CreatedAtUnixMs: 1735862400000},
+		},
+	}
+	restore := replaceWorkflowCommandRemoteOpener(t, cfg, remote)
+	defer restore()
+
+	stdout, stderr, code := runWorkflowRootCommand("task", "comment", "list", "task-1", "--page-size", "2", "--page-token", "2")
+	if code != 0 {
+		t.Fatalf("task comment list exit=%d stderr=%q", code, stderr)
+	}
+	want := "Comments (1):\nUser at 2025-01-01T00:00:00Z UTC:\nold\n"
+	if stdout != want {
+		t.Fatalf("task comment list output = %q, want %q", stdout, want)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("task comment list stderr = %q, want empty", stderr)
+	}
+	if len(remote.listRequests) != 1 || remote.listRequests[0].PageSize != 2 || remote.listRequests[0].PageToken != "2" {
+		t.Fatalf("comment list requests = %+v, want second page request", remote.listRequests)
+	}
+}
+
+func TestResolveWorkflowTaskIDUsesDirectShortIDLookup(t *testing.T) {
+	remote := &directTaskResolveRemote{}
+	taskID, err := resolveWorkflowTaskID(context.Background(), config.App{WorkspaceRoot: t.TempDir()}, remote, "project-1", "BLD-123")
+	if err != nil {
+		t.Fatalf("resolveWorkflowTaskID: %v", err)
+	}
+	if taskID != "task-123" {
+		t.Fatalf("resolveWorkflowTaskID = %q, want task-123", taskID)
+	}
+	if len(remote.taskRequests) != 1 || remote.taskRequests[0].ProjectID != "project-1" || remote.taskRequests[0].ShortID != "BLD-123" {
+		t.Fatalf("task requests = %+v, want direct project short-id lookup", remote.taskRequests)
+	}
+	if remote.boardRequests != 0 {
+		t.Fatalf("board requests = %d, want none for short-id resolution", remote.boardRequests)
+	}
+}
+
+type directTaskResolveRemote struct {
+	client.WorkflowClient
+	taskRequests  []serverapi.WorkflowTaskGetRequest
+	boardRequests int
+}
+
+func (r *directTaskResolveRemote) Close() error { return nil }
+
+func (r *directTaskResolveRemote) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected project path resolution")
+}
+
+func (r *directTaskResolveRemote) GetWorkflowTask(_ context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {
+	r.taskRequests = append(r.taskRequests, req)
+	return serverapi.WorkflowTaskGetResponse{Task: serverapi.WorkflowTaskDetail{Summary: serverapi.WorkflowTaskSummary{ID: "task-123", ProjectID: req.ProjectID, ShortID: req.ShortID}}}, nil
+}
+
+func (r *directTaskResolveRemote) GetWorkflowBoard(context.Context, serverapi.WorkflowBoardRequest) (serverapi.WorkflowBoardResponse, error) {
+	r.boardRequests++
+	return serverapi.WorkflowBoardResponse{}, errors.New("unexpected board fetch")
+}
+
+type commentListRemote struct {
+	client.WorkflowClient
+	taskID       string
+	comments     []serverapi.WorkflowTaskComment
+	listRequests []serverapi.WorkflowTaskCommentListRequest
+}
+
+func (r *commentListRemote) Close() error { return nil }
+
+func (r *commentListRemote) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, nil
+}
+
+func (r *commentListRemote) GetWorkflowTask(_ context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {
+	return serverapi.WorkflowTaskGetResponse{Task: serverapi.WorkflowTaskDetail{Summary: serverapi.WorkflowTaskSummary{ID: r.taskID, ShortID: "TASK-1"}}}, nil
+}
+
+func (r *commentListRemote) ListWorkflowTaskComments(_ context.Context, req serverapi.WorkflowTaskCommentListRequest) (serverapi.WorkflowTaskCommentListResponse, error) {
+	r.listRequests = append(r.listRequests, req)
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = taskCommentListDefaultPageSize
+	}
+	offset := 0
+	if strings.TrimSpace(req.PageToken) != "" {
+		parsed, err := strconv.Atoi(req.PageToken)
+		if err != nil {
+			return serverapi.WorkflowTaskCommentListResponse{}, err
+		}
+		offset = parsed
+	}
+	sortedComments := sortedTaskCommentsByCreatedAt(r.comments)
+	if offset >= len(sortedComments) {
+		return serverapi.WorkflowTaskCommentListResponse{}, nil
+	}
+	end := offset + pageSize
+	nextPageToken := ""
+	if end < len(sortedComments) {
+		nextPageToken = strconv.Itoa(end)
+	} else {
+		end = len(sortedComments)
+	}
+	return serverapi.WorkflowTaskCommentListResponse{Comments: sortedComments[offset:end], NextPageToken: nextPageToken}, nil
+}
+
+type commentAuthorRemote struct {
+	client.WorkflowClient
+	task        serverapi.WorkflowTaskDetail
+	sessionName string
+}
+
+func (r *commentAuthorRemote) Close() error { return nil }
+
+func (r *commentAuthorRemote) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, nil
+}
+
+func (r *commentAuthorRemote) GetWorkflowTask(context.Context, serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {
+	return serverapi.WorkflowTaskGetResponse{Task: r.task}, nil
+}
+
+func (r *commentAuthorRemote) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	return serverapi.SessionMainViewResponse{MainView: clientui.RuntimeMainView{
+		Session: clientui.RuntimeSessionView{SessionName: r.sessionName},
+	}}, nil
 }
 
 func TestTaskShowFindsSameProjectTaskOutsideSelectedWorkflow(t *testing.T) {
@@ -716,16 +1126,15 @@ func TestTaskShowFindsSameProjectTaskOutsideSelectedWorkflow(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task create exit=%d stderr=%q", code, taskErr)
 	}
-	taskID := labeledOutputValue(t, taskOut, "task_id")
-	shortID := labeledOutputValue(t, taskOut, "short_id")
+	shortID := taskDetailHeadingShortID(t, taskOut)
 	showOut, showErr, code := runWorkflowRootCommand("task", "show", "--project", binding.ProjectID, shortID)
 	if code != 0 {
 		t.Fatalf("task show exit=%d stderr=%q", code, showErr)
 	}
-	if !strings.Contains(showOut, "task_id\t"+taskID) {
-		t.Fatalf("task show output = %q, want task id %s", showOut, taskID)
+	if !strings.Contains(showOut, shortID+": Other Task\n") {
+		t.Fatalf("task show output = %q, want task short id %s", showOut, shortID)
 	}
-	if strings.Contains(showOut, "[Note:") {
+	if strings.Contains(showOut, "Note:") {
 		t.Fatalf("task show output = %q, did not expect cross-project note", showOut)
 	}
 }
@@ -755,15 +1164,14 @@ func TestTaskShowUsesRegisteredTaskWorktreeRootAsCurrentProject(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task create exit=%d stderr=%q", code, taskErr)
 	}
-	taskID := labeledOutputValue(t, taskOut, "task_id")
-	shortID := labeledOutputValue(t, taskOut, "short_id")
+	shortID := taskDetailHeadingShortID(t, taskOut)
 
 	showOut, showErr, code := runWorkflowRootCommand("task", "show", shortID)
 	if code != 0 {
 		t.Fatalf("task show from worktree root exit=%d stderr=%q", code, showErr)
 	}
-	if !strings.Contains(showOut, "task_id\t"+taskID) {
-		t.Fatalf("task show output = %q, want task id %s", showOut, taskID)
+	if !strings.Contains(showOut, shortID+": Worktree Task\n") {
+		t.Fatalf("task show output = %q, want task short id %s", showOut, shortID)
 	}
 }
 
@@ -777,10 +1185,13 @@ func TestTaskShowWarnsWhenShortIDBelongsToAnotherKnownProject(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task show exit=%d stderr=%q", code, stderr)
 	}
-	if !strings.HasPrefix(stdout, "[Note: This task belongs to another project OTH]\n") {
-		t.Fatalf("task show output = %q, want cross-project note first", stdout)
+	if strings.Contains(stdout, "Note:") {
+		t.Fatalf("task show output = %q, did not expect cross-project note in stdout", stdout)
 	}
-	if !strings.Contains(stdout, "task_id\ttask-other") {
+	if !strings.Contains(stderr, "Note: This task belongs to another project OTH") {
+		t.Fatalf("task show stderr = %q, want cross-project note", stderr)
+	}
+	if !strings.Contains(stdout, "OTH-1: Other Task\n") {
 		t.Fatalf("task show output = %q, want other task", stdout)
 	}
 }
@@ -795,7 +1206,7 @@ func TestTaskShowFallsBackAfterRemoteScopedShortIDNotFound(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task show exit=%d stderr=%q", code, stderr)
 	}
-	if !strings.Contains(stdout, "task_id\ttask-other") {
+	if !strings.Contains(stdout, "OTH-1: Other Task\n") {
 		t.Fatalf("task show output = %q, want global fallback task", stdout)
 	}
 	if remote.unscopedCalls != 1 {
@@ -901,23 +1312,295 @@ func testTaskCard(taskID string, shortID string, title string) serverapi.Workflo
 	}
 }
 
+func TestTaskListStatusFromCardStatus(t *testing.T) {
+	cases := map[string]string{
+		"backlog":          "open",
+		"active":           "open",
+		"":                 "open",
+		"running":          "running",
+		"interrupted":      "running",
+		"waiting_question": "running",
+		"waiting_approval": "running",
+		"done":             "done",
+		"canceled":         "canceled",
+	}
+	for kind, want := range cases {
+		if got := taskListStatusFromCardStatus(serverapi.WorkflowTaskStatus{Kind: kind}); got != want {
+			t.Fatalf("taskListStatusFromCardStatus(%q) = %q, want %q", kind, got, want)
+		}
+	}
+}
+
+func testDoneTaskCard(taskID string, shortID string, title string) serverapi.WorkflowBoardTaskCard {
+	return serverapi.WorkflowBoardTaskCard{
+		TaskID:     taskID,
+		ShortID:    shortID,
+		Title:      title,
+		WorkflowID: "workflow-1",
+		Status:     serverapi.WorkflowTaskStatus{Kind: "done"},
+	}
+}
+
 func TestWriteTaskDetailIncludesParallelBranchIDs(t *testing.T) {
 	var stdout bytes.Buffer
 	writeTaskDetail(&stdout, serverapi.WorkflowTaskDetail{
-		Summary: serverapi.WorkflowTaskSummary{ID: "task-1", ShortID: "WOR-1", WorkflowID: "workflow-1", Title: "Task"},
-		Placements: []serverapi.WorkflowPlacement{{
-			ID:                        "placement-1",
-			TaskID:                    "task-1",
-			NodeID:                    "node-impl-a",
-			State:                     "active",
-			ParallelBatchTransitionID: "transition-split",
-			ParallelBranchEdgeID:      "edge-split-a",
-		}},
+		Summary: serverapi.WorkflowTaskSummary{
+			ID:              "task-1",
+			ShortID:         "WOR-1",
+			WorkflowID:      "workflow-1",
+			Title:           "Task",
+			CreatedAtUnixMs: 1735689600000,
+		},
+		Project:         serverapi.ProjectBoardProject{ProjectID: "project-1", DisplayName: "Project"},
+		Workflow:        serverapi.WorkflowPickerItem{WorkflowID: "workflow-1", DisplayName: "Workflow"},
+		Body:            "Do the work.",
+		SourceWorkspace: serverapi.ProjectWorkspaceSummary{RootPath: "/workspace"},
+		ManagedWorktree: &serverapi.WorktreeView{CanonicalRoot: "/workspace-task"},
+		SourceURL:       "https://example.test/source",
+		Status:          serverapi.WorkflowTaskStatus{Kind: "backlog"},
+		Runs: []serverapi.WorkflowRun{
+			{ID: "run-1"},
+			{ID: "run-2"},
+		},
 	})
 
 	output := stdout.String()
-	if !strings.Contains(output, "placement-1\tnode-impl-a\tactive\ttransition-split\tedge-split-a") {
-		t.Fatalf("task detail output = %q, want parallel batch and branch ids", output)
+	for _, want := range []string{
+		"WOR-1: Task\n",
+		"Body:\n```md\nDo the work.\n```\n",
+		"Status: open\n",
+		"Project: \"Project\" (project-1)\n",
+		"Workflow: \"Workflow\" (workflow-1)\n",
+		"Created at 2025-01-01T00:00:00Z UTC\n",
+		"Total agent runs: 2\n",
+		"Main workspace: /workspace\n",
+		"Worktree: /workspace-task\n",
+		"Imported from: https://example.test/source\n",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("task detail output = %q, want %q", output, want)
+		}
+	}
+	if strings.Contains(output, "placements") || strings.Contains(output, "transitions") {
+		t.Fatalf("task detail output = %q, did not expect internal placement/transition dump", output)
+	}
+}
+
+func TestWriteTaskDetailComments(t *testing.T) {
+	var stdout bytes.Buffer
+	writeTaskDetail(&stdout, serverapi.WorkflowTaskDetail{
+		Summary:  serverapi.WorkflowTaskSummary{ShortID: "WOR-1", Title: "Task", CreatedAtUnixMs: 1735689600000},
+		Project:  serverapi.ProjectBoardProject{ProjectID: "project-1", DisplayName: "Project"},
+		Workflow: serverapi.WorkflowPickerItem{WorkflowID: "workflow-1", DisplayName: "Workflow"},
+		Comments: []serverapi.WorkflowTaskComment{
+			{ID: "comment-old", Author: "user", Body: "old", CreatedAtUnixMs: 1735689600000},
+			{ID: "comment-new", Author: "agent", AuthorID: "reviewer", Body: "new", CreatedAtUnixMs: 1735776000000},
+		},
+	})
+
+	output := stdout.String()
+	want := "Comments (2):\nreviewer at 2025-01-02T00:00:00Z UTC:\nnew\n---\nUser at 2025-01-01T00:00:00Z UTC:\nold\n"
+	if !strings.Contains(output, want) {
+		t.Fatalf("task detail output = %q, want sorted comments block %q", output, want)
+	}
+}
+
+func TestWriteTaskDetailCommentOverflowPointsToCommentCommand(t *testing.T) {
+	comments := make([]serverapi.WorkflowTaskComment, 10)
+	for i := range comments {
+		comments[i] = serverapi.WorkflowTaskComment{ID: fmt.Sprintf("comment-%d", i), Author: "user", Body: "comment", CreatedAtUnixMs: 1735689600000 + int64(i)}
+	}
+	var stdout bytes.Buffer
+	writeTaskDetail(&stdout, serverapi.WorkflowTaskDetail{
+		Summary:  serverapi.WorkflowTaskSummary{ShortID: "WOR-1", Title: "Task", CreatedAtUnixMs: 1735689600000},
+		Project:  serverapi.ProjectBoardProject{ProjectID: "project-1", DisplayName: "Project"},
+		Workflow: serverapi.WorkflowPickerItem{WorkflowID: "workflow-1", DisplayName: "Workflow"},
+		Comments: comments,
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "Comments under this task: 10. `builder task comment list WOR-1` to show them.\n") {
+		t.Fatalf("task detail output = %q, want comment overflow pointer", output)
+	}
+	if strings.Contains(output, "Comments (10):") {
+		t.Fatalf("task detail output = %q, did not expect inline overflow comments", output)
+	}
+}
+
+func TestTaskMutationOutputRenderers(t *testing.T) {
+	task := serverapi.WorkflowTaskDetail{
+		Summary:  serverapi.WorkflowTaskSummary{ID: "task-1", ShortID: "BLD-1", Title: "Task"},
+		Workflow: serverapi.WorkflowPickerItem{WorkflowID: "workflow-1", DisplayName: "Workflow"},
+		Placements: []serverapi.WorkflowPlacement{
+			{ID: "placement-1", NodeID: "node-1", NodeKey: "implement"},
+			{ID: "placement-2", NodeID: "node-2", NodeKey: "review"},
+		},
+		Runs: []serverapi.WorkflowRun{
+			{ID: "run-1", PlacementID: "placement-1", NodeID: "node-1", SessionID: "session-1"},
+			{ID: "run-2", PlacementID: "placement-2", NodeID: "node-2", SessionID: "session-2"},
+		},
+		Transitions: []serverapi.WorkflowTaskTransition{
+			{
+				ID:            "transition-1",
+				SourceNodeKey: "implement",
+				TransitionID:  "done",
+				Edges: []serverapi.WorkflowTransitionEdge{
+					{EdgeKey: "done", TargetNodeKey: "review", State: "applied"},
+				},
+			},
+		},
+	}
+
+	var start bytes.Buffer
+	writeTaskStartResult(&start, task, serverapi.WorkflowTaskStartResponse{RunID: "run-1", PlacementID: "placement-1", TransitionID: "transition-start"})
+	if got, want := start.String(), "Started task BLD-1 in session session-1 using workflow \"Workflow\" (workflow-1).\nFirst node: implement\n"; got != want {
+		t.Fatalf("start output = %q, want %q", got, want)
+	}
+
+	var resume bytes.Buffer
+	writeTaskResumeResult(&resume, task, serverapi.WorkflowTaskResumeResponse{RunID: "run-1", PlacementID: "placement-1", NodeID: "node-1", SessionID: "session-1"})
+	if got, want := resume.String(), "Resumed task BLD-1 in session session-1.\nCurrent node: implement\n"; got != want {
+		t.Fatalf("resume output = %q, want %q", got, want)
+	}
+
+	var approve bytes.Buffer
+	writeTaskTransitionResult(&approve, "Approved transition of", task, "transition-1", []string{"run-2"})
+	if got, want := approve.String(), "Approved transition of BLD-1 from `implement` to `done`.\nBecause of this, started node review in session session-2.\n"; got != want {
+		t.Fatalf("approve output = %q, want %q", got, want)
+	}
+
+	var move bytes.Buffer
+	writeTaskTransitionResult(&move, "Moved task", task, "transition-1", nil)
+	if got, want := move.String(), "Moved task BLD-1 from `implement` to `done`.\n"; got != want {
+		t.Fatalf("move output = %q, want %q", got, want)
+	}
+}
+
+func TestTaskStartSessionPollingTimeoutReportsStartedTask(t *testing.T) {
+	remote := &taskSessionPollingRemote{task: serverapi.WorkflowTaskDetail{
+		Summary: serverapi.WorkflowTaskSummary{ID: "task-1", ShortID: "BLD-1", Title: "Task"},
+		Runs:    []serverapi.WorkflowRun{{ID: "run-1"}},
+	}}
+	_, err := waitForWorkflowTaskRunSession(context.Background(), remote, "task-1", "run-1", 10*time.Millisecond, time.Millisecond)
+	if err == nil {
+		t.Fatalf("waitForWorkflowTaskRunSession succeeded, want timeout")
+	}
+	if got := err.Error(); !strings.Contains(got, "started task BLD-1 with run run-1") || !strings.Contains(got, "session id was not assigned within") {
+		t.Fatalf("timeout error = %q, want started task context and timeout detail", got)
+	}
+}
+
+func TestTaskStartCommandPollsForSessionAndPrintsReadableOutput(t *testing.T) {
+	restorePolling := replaceTaskStartSessionPolling(t, 50*time.Millisecond, time.Millisecond)
+	defer restorePolling()
+	cfg := config.App{WorkspaceRoot: t.TempDir()}
+	remote := &taskStartPollingRemote{
+		projectID:   "project-1",
+		taskID:      "task-1",
+		shortID:     "BLD-1",
+		workflowID:  "workflow-1",
+		workflow:    "Workflow",
+		placementID: "placement-1",
+		runID:       "run-1",
+		sessionID:   "session-1",
+		nodeID:      "node-1",
+		nodeKey:     "implement",
+	}
+	restoreRemote := replaceWorkflowCommandRemoteOpener(t, cfg, remote)
+	defer restoreRemote()
+
+	stdout, stderr, code := runWorkflowRootCommand("task", "start", "--project", "project-1", "BLD-1")
+	if code != 0 {
+		t.Fatalf("task start exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	want := "Started task BLD-1 in session session-1 using workflow \"Workflow\" (workflow-1).\nFirst node: implement\n"
+	if stdout != want {
+		t.Fatalf("task start stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("task start stderr = %q, want empty", stderr)
+	}
+	if remote.taskIDDetailCalls < 2 {
+		t.Fatalf("task detail calls = %d, want polling before session assignment", remote.taskIDDetailCalls)
+	}
+}
+
+func replaceTaskStartSessionPolling(t *testing.T, timeout time.Duration, interval time.Duration) func() {
+	t.Helper()
+	originalTimeout := taskStartSessionPollTimeout
+	originalInterval := taskStartSessionPollInterval
+	taskStartSessionPollTimeout = timeout
+	taskStartSessionPollInterval = interval
+	return func() {
+		taskStartSessionPollTimeout = originalTimeout
+		taskStartSessionPollInterval = originalInterval
+	}
+}
+
+type taskSessionPollingRemote struct {
+	client.WorkflowClient
+	task serverapi.WorkflowTaskDetail
+}
+
+func (r *taskSessionPollingRemote) Close() error { return nil }
+
+func (r *taskSessionPollingRemote) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, nil
+}
+
+func (r *taskSessionPollingRemote) GetWorkflowTask(context.Context, serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {
+	return serverapi.WorkflowTaskGetResponse{Task: r.task}, nil
+}
+
+type taskStartPollingRemote struct {
+	client.WorkflowClient
+	projectID         string
+	taskID            string
+	shortID           string
+	workflowID        string
+	workflow          string
+	placementID       string
+	runID             string
+	sessionID         string
+	nodeID            string
+	nodeKey           string
+	taskIDDetailCalls int
+}
+
+func (r *taskStartPollingRemote) Close() error { return nil }
+
+func (r *taskStartPollingRemote) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{Binding: &serverapi.ProjectBinding{ProjectID: r.projectID}}, nil
+}
+
+func (r *taskStartPollingRemote) GetWorkflowTask(_ context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {
+	if req.ProjectID == r.projectID && req.ShortID == r.shortID {
+		return serverapi.WorkflowTaskGetResponse{Task: r.taskDetail("")}, nil
+	}
+	if req.TaskID == r.taskID {
+		r.taskIDDetailCalls++
+		if r.taskIDDetailCalls == 1 {
+			return serverapi.WorkflowTaskGetResponse{Task: r.taskDetail("")}, nil
+		}
+		return serverapi.WorkflowTaskGetResponse{Task: r.taskDetail(r.sessionID)}, nil
+	}
+	return serverapi.WorkflowTaskGetResponse{}, sql.ErrNoRows
+}
+
+func (r *taskStartPollingRemote) StartWorkflowTask(context.Context, serverapi.WorkflowTaskStartRequest) (serverapi.WorkflowTaskStartResponse, error) {
+	return serverapi.WorkflowTaskStartResponse{TransitionID: "transition-1", PlacementID: r.placementID, RunID: r.runID}, nil
+}
+
+func (r *taskStartPollingRemote) taskDetail(sessionID string) serverapi.WorkflowTaskDetail {
+	return serverapi.WorkflowTaskDetail{
+		Summary:  serverapi.WorkflowTaskSummary{ID: r.taskID, ShortID: r.shortID, WorkflowID: r.workflowID, ProjectID: r.projectID, Title: "Task"},
+		Workflow: serverapi.WorkflowPickerItem{WorkflowID: r.workflowID, DisplayName: r.workflow},
+		Placements: []serverapi.WorkflowPlacement{
+			{ID: r.placementID, TaskID: r.taskID, NodeID: r.nodeID, NodeKey: r.nodeKey},
+		},
+		Runs: []serverapi.WorkflowRun{
+			{ID: r.runID, TaskID: r.taskID, PlacementID: r.placementID, NodeID: r.nodeID, SessionID: sessionID},
+		},
 	}
 }
 
@@ -937,7 +1620,7 @@ func TestWorkflowCommandValidationErrorsAreActionable(t *testing.T) {
 	}
 }
 
-func TestWorkflowTaskCommandsDoNotAdvertiseJSONContract(t *testing.T) {
+func TestWorkflowHelpDoesNotAdvertiseJSONContract(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if code := workflowSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
@@ -945,14 +1628,6 @@ func TestWorkflowTaskCommandsDoNotAdvertiseJSONContract(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "--json") || strings.Contains(stdout.String(), "--json") {
 		t.Fatalf("workflow help advertised json contract stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := taskSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("task help exit=%d stderr=%q", code, stderr.String())
-	}
-	if strings.Contains(stderr.String(), "--json") || strings.Contains(stdout.String(), "--json") {
-		t.Fatalf("task help advertised json contract stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -990,8 +1665,25 @@ func newWorkflowCommandLoopback(t *testing.T) (config.App, metadata.Binding, *wo
 	if err != nil {
 		t.Fatalf("workflowsvc.New: %v", err)
 	}
-	remote := &workflowCommandLoopbackRemote{WorkflowClient: client.NewLoopbackWorkflowClient(service), cfg: cfg, binding: binding, store: store}
+	remote := &workflowCommandLoopbackRemote{WorkflowClient: client.NewLoopbackWorkflowClient(service), cfg: cfg, binding: binding, metadataStore: metadataStore, store: store}
 	return cfg, binding, remote
+}
+
+func createWorkflowCommandTestSession(t *testing.T, cfg config.App, binding metadata.Binding, metadataStore *metadata.Store) string {
+	t.Helper()
+	store, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := store.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	return store.Meta().SessionID
 }
 
 func replaceWorkflowCommandRemoteOpener(t *testing.T, cfg config.App, remote workflowCommandRemote) func() {
@@ -1033,6 +1725,16 @@ func labeledOutputValue(t *testing.T, output string, label string) string {
 	return ""
 }
 
+func taskDetailHeadingShortID(t *testing.T, output string) string {
+	t.Helper()
+	firstLine, _, _ := strings.Cut(output, "\n")
+	shortID, _, ok := strings.Cut(firstLine, ": ")
+	if !ok || strings.TrimSpace(shortID) == "" {
+		t.Fatalf("task detail heading not found in output %q", output)
+	}
+	return shortID
+}
+
 func workflowCommandStoredEdgeByID(t *testing.T, ctx context.Context, store *workflowstore.Store, workflowID string, edgeID string) workflow.Edge {
 	t.Helper()
 	def, _, err := store.GetDefinition(ctx, workflow.WorkflowID(workflowID))
@@ -1065,7 +1767,7 @@ func workflowCommandEdgeRecord(edge workflow.Edge) workflowstore.EdgeRecord {
 	}
 }
 
-func TestWorkflowListAndResolutionFetchAllWorkflowPages(t *testing.T) {
+func TestWorkflowListPaginatesAndResolutionDoesNotDrainPages(t *testing.T) {
 	cfg := config.App{WorkspaceRoot: t.TempDir()}
 	remote := &pagedWorkflowListRemote{
 		delayAfterFirstPage: true,
@@ -1093,14 +1795,14 @@ func TestWorkflowListAndResolutionFetchAllWorkflowPages(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("workflow list exit=%d stderr=%q", code, stderr)
 	}
-	if !strings.Contains(stdout, "workflow-1\tFirst\t1") || !strings.Contains(stdout, "workflow-2\tSecond\t2") {
-		t.Fatalf("workflow list output = %q, want records from both pages", stdout)
+	if !strings.Contains(stdout, "workflow-1\tFirst\t1") || strings.Contains(stdout, "workflow-2\tSecond\t2") {
+		t.Fatalf("workflow list output = %q, want only first page records", stdout)
 	}
-	if len(remote.requests) != 2 || remote.requests[0].PageToken != "" || remote.requests[1].PageToken != "next" {
-		t.Fatalf("workflow list requests = %+v, want initial request plus next page", remote.requests)
+	if !strings.Contains(stderr, "Next page token: `next`") {
+		t.Fatalf("workflow list stderr = %q, want next page token", stderr)
 	}
-	if len(remote.deadlines) != 2 || !remote.deadlines[1].After(remote.deadlines[0]) {
-		t.Fatalf("workflow list deadlines = %+v, want fresh per-page RPC deadlines", remote.deadlines)
+	if len(remote.requests) != 1 || remote.requests[0].PageToken != "" || remote.requests[0].PageSize != serverapi.WorkflowListMaxPageSize {
+		t.Fatalf("workflow list requests = %+v, want single default-sized first page", remote.requests)
 	}
 
 	remote.requests = nil
@@ -1112,11 +1814,11 @@ func TestWorkflowListAndResolutionFetchAllWorkflowPages(t *testing.T) {
 	if resolved != "workflow-2" {
 		t.Fatalf("resolveWorkflowID = %q, want workflow-2", resolved)
 	}
-	if len(remote.requests) != 2 || remote.requests[1].PageToken != "next" {
-		t.Fatalf("resolve requests = %+v, want all workflow pages", remote.requests)
+	if len(remote.requests) != 1 || remote.requests[0].ExactName != "Second" || remote.requests[0].PageSize != 2 || remote.requests[0].PageToken != "" {
+		t.Fatalf("resolve requests = %+v, want bounded exact-name lookup", remote.requests)
 	}
-	if len(remote.deadlines) != 3 || !remote.deadlines[1].After(remote.deadlines[0]) {
-		t.Fatalf("resolve deadlines = %+v, want fresh per-page list deadlines and get deadline", remote.deadlines)
+	if len(remote.deadlines) != 3 {
+		t.Fatalf("resolve deadlines = %+v, want id get plus exact-name list plus name get deadlines", remote.deadlines)
 	}
 }
 
@@ -1144,6 +1846,20 @@ func (r *pagedWorkflowListRemote) ListWorkflows(ctx context.Context, req servera
 	if r.delayAfterFirstPage && callIndex == 0 {
 		time.Sleep(5 * time.Millisecond)
 	}
+	if strings.TrimSpace(req.ExactName) != "" {
+		matches := []serverapi.WorkflowRecord{}
+		for _, page := range r.pages {
+			for _, record := range page.Workflows {
+				if record.Name == req.ExactName {
+					matches = append(matches, record)
+				}
+			}
+		}
+		if len(matches) > req.PageSize {
+			return serverapi.WorkflowListResponse{Workflows: matches[:req.PageSize], NextPageToken: "more"}, nil
+		}
+		return serverapi.WorkflowListResponse{Workflows: matches}, nil
+	}
 	return r.pages[req.PageToken], nil
 }
 
@@ -1151,7 +1867,11 @@ func (r *pagedWorkflowListRemote) GetWorkflow(ctx context.Context, req serverapi
 	if deadline, ok := ctx.Deadline(); ok {
 		r.deadlines = append(r.deadlines, deadline)
 	}
-	return serverapi.WorkflowGetResponse{Definition: r.definitions[req.WorkflowID]}, nil
+	def, ok := r.definitions[req.WorkflowID]
+	if !ok {
+		return serverapi.WorkflowGetResponse{}, sql.ErrNoRows
+	}
+	return serverapi.WorkflowGetResponse{Definition: def}, nil
 }
 
 func TestWorkflowProjectPathResolutionRejectsUnboundPath(t *testing.T) {

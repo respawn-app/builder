@@ -356,6 +356,7 @@ type WorkflowListRequest struct {
 	PageSize  int    `json:"page_size,omitempty"`
 	PageToken string `json:"page_token,omitempty"`
 	Query     string `json:"query,omitempty"`
+	ExactName string `json:"exact_name,omitempty"`
 }
 
 type WorkflowListResponse struct {
@@ -675,6 +676,7 @@ type WorkflowTaskApproveRequest struct {
 
 type WorkflowTaskApproveResponse struct {
 	TransitionID string   `json:"transition_id"`
+	TaskID       string   `json:"task_id"`
 	State        string   `json:"state"`
 	PlacementIDs []string `json:"placement_ids,omitempty"`
 	RunIDs       []string `json:"run_ids,omitempty"`
@@ -778,11 +780,14 @@ type WorkflowTaskCommentAddResponse struct {
 }
 
 type WorkflowTaskCommentListRequest struct {
-	TaskID string `json:"task_id"`
+	TaskID    string `json:"task_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 type WorkflowTaskCommentListResponse struct {
-	Comments []WorkflowTaskComment `json:"comments"`
+	Comments      []WorkflowTaskComment `json:"comments"`
+	NextPageToken string                `json:"next_page_token,omitempty"`
 }
 
 type WorkflowTaskCommentReplaceRequest struct {
@@ -1536,6 +1541,9 @@ func (r WorkflowAttentionListRequest) Validate() error {
 	if r.PageSize < 0 {
 		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "page_size", Message: "page_size must be non-negative"}
 	}
+	if strings.TrimSpace(r.PageToken) != r.PageToken {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_token", "page_token must not have leading or trailing whitespace")
+	}
 	return nil
 }
 
@@ -1568,11 +1576,39 @@ func (r WorkflowTaskQuestionAnswerRequest) Validate() error {
 }
 
 func (r WorkflowTaskCommentAddRequest) Validate() error {
-	return validateRequiredFields(requiredField("task_id", r.TaskID), requiredField("body", r.Body), requiredField("author", r.Author))
+	if err := validateRequiredFields(requiredField("task_id", r.TaskID), requiredField("body", r.Body), requiredField("author", r.Author)); err != nil {
+		return err
+	}
+	return validateWorkflowTaskCommentAuthorKind(r.Author)
 }
 
+func validateWorkflowTaskCommentAuthorKind(author string) error {
+	switch strings.TrimSpace(author) {
+	case "user", "agent":
+		return nil
+	default:
+		return workflowRequestError(WorkflowRequestErrorInvalidValue, "author", "author must be user or agent")
+	}
+}
+
+// WorkflowTaskCommentListMaxPageSize bounds a single comment page so a
+// client-supplied page_size cannot drive an oversized storage query/response.
+const WorkflowTaskCommentListMaxPageSize = 100
+
 func (r WorkflowTaskCommentListRequest) Validate() error {
-	return validateRequired("task_id", r.TaskID)
+	if err := validateRequired("task_id", r.TaskID); err != nil {
+		return err
+	}
+	if r.PageSize < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", "page_size must be non-negative")
+	}
+	if r.PageSize > WorkflowTaskCommentListMaxPageSize {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", fmt.Sprintf("page_size must be <= %d", WorkflowTaskCommentListMaxPageSize))
+	}
+	if strings.TrimSpace(r.PageToken) != r.PageToken {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_token", "page_token must not have leading or trailing whitespace")
+	}
+	return nil
 }
 
 func (r WorkflowTaskCommentReplaceRequest) Validate() error {

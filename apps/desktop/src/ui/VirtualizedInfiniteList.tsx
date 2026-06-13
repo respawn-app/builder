@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { cx } from "./classes";
 import { Spinner } from "./Spinner";
+import { resolveLoadMore } from "./virtualizedInfiniteListLoadMore";
 
 export type VirtualizedInfiniteListProps<TItem> = Readonly<{
   items: readonly TItem[];
@@ -13,8 +14,12 @@ export type VirtualizedInfiniteListProps<TItem> = Readonly<{
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   loadingLabel: string;
+  loadMoreKey?: string | undefined;
   onLoadMore: () => void;
   estimateSize: () => number;
+  ariaLabel?: string | undefined;
+  rowSpacing?: "default" | "compact" | undefined;
+  testId?: string | undefined;
   paddingEnd?: number | undefined;
   paddingStart?: number | undefined;
   className?: string | undefined;
@@ -29,14 +34,19 @@ export function VirtualizedInfiniteList<TItem>({
   hasNextPage,
   isFetchingNextPage,
   loadingLabel,
+  loadMoreKey,
   onLoadMore,
   estimateSize,
+  ariaLabel,
+  rowSpacing = "default",
+  testId,
   paddingEnd = 0,
   paddingStart = 0,
   className,
 }: VirtualizedInfiniteListProps<TItem>) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastLoadMoreItemsLengthRef = useRef(-1);
+  const lastLoadMoreKeyRef = useRef("");
+  const wasFetchingNextPageRef = useRef(false);
   const headerCount = header === undefined ? 0 : 1;
   const emptyCount = items.length === 0 && empty !== undefined ? 1 : 0;
   const placeholderCount = hasNextPage ? 1 : 0;
@@ -79,24 +89,27 @@ export function VirtualizedInfiniteList<TItem>({
   useEffect(() => {
     const lastItem = virtualItems.at(-1);
     const lastDataIndex = headerCount + items.length - 1;
-    if (
-      lastItem !== undefined &&
-      lastItem.index >= lastDataIndex &&
-      hasNextPage &&
-      !isFetchingNextPage &&
-      lastLoadMoreItemsLengthRef.current !== items.length
-    ) {
-      lastLoadMoreItemsLengthRef.current = items.length;
+    const decision = resolveLoadMore({
+      atBottom: lastItem !== undefined && lastItem.index >= lastDataIndex,
+      hasNextPage,
+      isFetchingNextPage,
+      lastLoadMoreKey: lastLoadMoreKeyRef.current,
+      loadMoreKey: loadMoreKey ?? items.length.toString(),
+      wasFetchingNextPage: wasFetchingNextPageRef.current,
+    });
+    wasFetchingNextPageRef.current = isFetchingNextPage;
+    lastLoadMoreKeyRef.current = decision.lastLoadMoreKey;
+    if (decision.shouldLoad) {
       onLoadMore();
     }
-  }, [hasNextPage, headerCount, isFetchingNextPage, items.length, onLoadMore, virtualItems]);
+  }, [hasNextPage, headerCount, isFetchingNextPage, items.length, loadMoreKey, onLoadMore, virtualItems]);
 
   if (count > 0 && virtualItems.length === 0) {
     return (
-      <div className={className} ref={scrollRef} role="list">
+      <div aria-label={ariaLabel} className={className} data-testid={testId} ref={scrollRef} role="list">
         {Array.from({ length: count }, (_value, index) => (
           <div
-            className="py-[var(--space-2)] first:pt-0 last:pb-0"
+            className={virtualRowClassName({ count, index, rowSpacing, virtualized: false })}
             key={fallbackRowKey({ emptyCount, getItemKey, headerCount, index, items })}
             role="listitem"
             style={fallbackRowStyle({ count, index, paddingEnd, paddingStart })}
@@ -109,15 +122,14 @@ export function VirtualizedInfiniteList<TItem>({
   }
 
   return (
-    <div className={className} ref={scrollRef} role="list">
+    <div aria-label={ariaLabel} className={className} data-testid={testId} ref={scrollRef} role="list">
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize().toString()}px` }}>
         {virtualItems.map((virtualItem) => {
           return (
             <div
               className={cx(
-                "absolute top-0 left-0 w-full py-[var(--space-2)]",
-                virtualItem.index === 0 && "pt-0",
-                virtualItem.index === count - 1 && "pb-0",
+                "absolute top-0 left-0 w-full",
+                virtualRowClassName({ count, index: virtualItem.index, rowSpacing, virtualized: true }),
               )}
               data-index={virtualItem.index}
               key={virtualItem.key}
@@ -152,6 +164,27 @@ function fallbackRowStyle({
     paddingBottom: index === count - 1 ? paddingEnd : undefined,
     paddingTop: index === 0 ? paddingStart : undefined,
   };
+}
+
+function virtualRowClassName({
+  count,
+  index,
+  rowSpacing,
+  virtualized,
+}: Readonly<{
+  count: number;
+  index: number;
+  rowSpacing: "default" | "compact";
+  virtualized: boolean;
+}>): string {
+  if (rowSpacing === "compact") {
+    return cx("pb-[var(--space-2)]", index === count - 1 && "pb-0");
+  }
+  return cx(
+    virtualized ? "py-[var(--space-2)]" : "py-[var(--space-2)] first:pt-0 last:pb-0",
+    virtualized && index === 0 && "pt-0",
+    virtualized && index === count - 1 && "pb-0",
+  );
 }
 
 function fallbackRowKey<TItem>({

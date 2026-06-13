@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"builder/server/auth"
+	"builder/server/authpolicy"
 	"builder/server/workflow"
 	"builder/shared/buildinfo"
 	"builder/shared/config"
@@ -23,19 +24,22 @@ func NewService(authManager *auth.Manager, cfg config.App) *Service {
 
 func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerReadinessRequest) (serverapi.ServerReadinessResponse, error) {
 	authReady := false
-	authRequired := true
 	settings := config.Settings{}
-	if s != nil && s.authManager != nil {
+	if s != nil {
+		settings = s.settings
+	}
+	authRequired := authpolicy.RequiresStartupAuth(settings)
+	// Only the OpenAI startup gate consults the auth store. When startup auth is
+	// not required (custom/non-OpenAI provider), readiness must not depend on the
+	// auth store at all, so a corrupt or inaccessible auth file can't block it.
+	if authRequired && s != nil && s.authManager != nil {
 		state, err := s.authManager.Load(ctx)
 		if err != nil {
 			return serverapi.ServerReadinessResponse{}, err
 		}
 		authReady = auth.EvaluateStartupGate(state).Ready
 	}
-	if s != nil {
-		settings = s.settings
-	}
-	ready := authReady
+	ready := authReady || !authRequired
 	response := serverapi.ServerReadinessResponse{
 		Ready:           ready,
 		ServerVersion:   buildinfo.Version,

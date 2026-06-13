@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 
 	"builder/server/metadata/sqlitegen"
@@ -15,12 +16,18 @@ func (s *Store) AddComment(ctx context.Context, taskID workflow.TaskID, body str
 	if trimmed == "" {
 		return CommentRecord{}, errors.New("comment body is required")
 	}
+	trimmedAuthorKind := strings.TrimSpace(authorKind)
+	switch trimmedAuthorKind {
+	case "user", "agent":
+	default:
+		return CommentRecord{}, fmt.Errorf("comment author kind must be user or agent")
+	}
 	now := s.now().UnixMilli()
 	id := prefixedID("comment")
-	if err := s.queries.InsertTaskComment(ctx, sqlitegen.InsertTaskCommentParams{ID: id, TaskID: string(taskID), Body: trimmed, AuthorKind: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
+	if err := s.queries.InsertTaskComment(ctx, sqlitegen.InsertTaskCommentParams{ID: id, TaskID: string(taskID), Body: trimmed, AuthorKind: trimmedAuthorKind, AuthorID: strings.TrimSpace(authorID), CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
 		return CommentRecord{}, err
 	}
-	return CommentRecord{ID: id, TaskID: taskID, Body: trimmed, Author: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), CreatedAt: now, UpdatedAt: now}, nil
+	return CommentRecord{ID: id, TaskID: taskID, Body: trimmed, Author: trimmedAuthorKind, AuthorID: strings.TrimSpace(authorID), CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func (s *Store) ReplaceComment(ctx context.Context, commentID string, body string) error {
@@ -58,7 +65,46 @@ func (s *Store) TaskIdentityForComment(ctx context.Context, commentID string) (t
 }
 
 func (s *Store) ListComments(ctx context.Context, taskID workflow.TaskID) ([]CommentRecord, error) {
-	rows, err := s.queries.ListTaskComments(ctx, string(taskID))
+	return s.listComments(ctx, taskID, 0, -1)
+}
+
+// CommentPageCursor is a stable keyset position into a task's comment history,
+// ordered by (created_at_unix_ms DESC, id DESC). Using a keyset instead of an
+// offset keeps infinite-scroll pages stable when comments are added or removed
+// while the reader pages through them.
+type CommentPageCursor struct {
+	CreatedAtUnixMs int64
+	ID              string
+	HasValue        bool
+}
+
+func (s *Store) ListCommentsPage(ctx context.Context, taskID workflow.TaskID, cursor CommentPageCursor, limit int) ([]CommentRecord, error) {
+	if limit < 1 {
+		return nil, errors.New("comment limit must be positive")
+	}
+	hasCursor := int64(0)
+	if cursor.HasValue {
+		hasCursor = 1
+	}
+	rows, err := s.queries.ListTaskCommentsPage(ctx, sqlitegen.ListTaskCommentsPageParams{
+		TaskID:                string(taskID),
+		HasCursor:             hasCursor,
+		CursorCreatedAtUnixMs: cursor.CreatedAtUnixMs,
+		CursorID:              cursor.ID,
+		LimitRows:             int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CommentRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, CommentRecord{ID: row.ID, TaskID: workflow.TaskID(row.TaskID), Body: row.Body, Author: row.AuthorKind, AuthorID: row.AuthorID, CreatedAt: row.CreatedAtUnixMs, UpdatedAt: row.UpdatedAtUnixMs})
+	}
+	return out, nil
+}
+
+func (s *Store) listComments(ctx context.Context, taskID workflow.TaskID, offset int, limit int) ([]CommentRecord, error) {
+	rows, err := s.queries.ListTaskComments(ctx, sqlitegen.ListTaskCommentsParams{TaskID: string(taskID), OffsetRows: int64(offset), LimitRows: int64(limit)})
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import type {
   AttentionPage,
   BindingPlan,
   BoardNodeCardsPage,
+  CommentPage,
   PendingAsk,
   ProjectWorkflowLink,
   ProjectBinding,
@@ -53,6 +54,7 @@ import {
   attentionPageSchema,
   boardNodeCardsPageSchema,
   commentAddResponseSchema,
+  commentPageSchema,
   pendingAskListSchema,
   projectWorkflowLinksSchema,
   taskCreateResponseSchema,
@@ -74,6 +76,8 @@ import {
   workflowValidationSchema,
 } from "./schemas/workflow";
 import type { RpcEventHandler, RpcSubscription, RpcTransport } from "./transport";
+
+export const guiTaskCommentAuthor = "user";
 
 export class BuilderApiClient {
   readonly transport: RpcTransport;
@@ -530,11 +534,27 @@ export class BuilderApiClient {
     );
   }
 
+  async listTaskComments(taskID: string, pageToken: string): Promise<CommentPage> {
+    return parse(
+      "workflow.task.comment.list",
+      commentPageSchema,
+      await this.transport.call("workflow.task.comment.list", {
+        task_id: taskID,
+        page_size: 40,
+        page_token: pageToken,
+      }),
+    );
+  }
+
   async addComment(taskID: string, body: string): Promise<TaskComment> {
     return parse(
       "workflow.task.comment.add",
       commentAddResponseSchema,
-      await this.transport.call("workflow.task.comment.add", { task_id: taskID, body, author: "GUI" }),
+      await this.transport.call("workflow.task.comment.add", {
+        task_id: taskID,
+        body,
+        author: guiTaskCommentAuthor,
+      }),
     ).comment;
   }
 

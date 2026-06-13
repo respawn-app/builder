@@ -101,15 +101,18 @@ func TestWorkflowCreateUpdateReadAndGraphPersistence(t *testing.T) {
 	}
 }
 
-func TestWorkflowListPaginatesWithStableNameOrderAndQuery(t *testing.T) {
+func TestWorkflowListPaginatesWithMostRecentOrderAndFilters(t *testing.T) {
 	ctx, store, _ := newTestStoreContext(t)
 	created := map[string]workflow.WorkflowID{}
-	for _, name := range []string{"Gamma", "Alpha", "Beta", "Beta Searchable"} {
+	for index, name := range []string{"Gamma", "Alpha", "Beta", "Beta Searchable"} {
 		record, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: name, Description: "desc " + name})
 		if err != nil {
 			t.Fatalf("CreateWorkflow %q: %v", name, err)
 		}
 		created[name] = record.ID
+		if _, err := store.db.ExecContext(ctx, `UPDATE workflows SET updated_at_unix_ms = ? WHERE id = ?`, int64(index+1), string(record.ID)); err != nil {
+			t.Fatalf("force workflow timestamp: %v", err)
+		}
 	}
 
 	page1, err := store.ListWorkflows(ctx, ListWorkflowsRequest{PageSize: 2})
@@ -119,7 +122,7 @@ func TestWorkflowListPaginatesWithStableNameOrderAndQuery(t *testing.T) {
 	if len(page1.Workflows) != 2 || page1.NextPageToken == "" {
 		t.Fatalf("page1 = %+v, want two workflows and next token", page1)
 	}
-	if page1.Workflows[0].ID != created["Alpha"] || page1.Workflows[1].ID != created["Beta"] {
+	if page1.Workflows[0].ID != created["Beta Searchable"] || page1.Workflows[1].ID != created["Beta"] {
 		t.Fatalf("page1 order = %+v", page1.Workflows)
 	}
 	page2, err := store.ListWorkflows(ctx, ListWorkflowsRequest{PageSize: 2, PageToken: page1.NextPageToken})
@@ -129,7 +132,7 @@ func TestWorkflowListPaginatesWithStableNameOrderAndQuery(t *testing.T) {
 	if len(page2.Workflows) != 2 || page2.NextPageToken != "" {
 		t.Fatalf("page2 = %+v, want final two workflows", page2)
 	}
-	if page2.Workflows[0].ID != created["Beta Searchable"] || page2.Workflows[1].ID != created["Gamma"] {
+	if page2.Workflows[0].ID != created["Alpha"] || page2.Workflows[1].ID != created["Gamma"] {
 		t.Fatalf("page2 order = %+v", page2.Workflows)
 	}
 	filtered, err := store.ListWorkflows(ctx, ListWorkflowsRequest{PageSize: 10, Query: "search"})
@@ -138,6 +141,41 @@ func TestWorkflowListPaginatesWithStableNameOrderAndQuery(t *testing.T) {
 	}
 	if len(filtered.Workflows) != 1 || filtered.Workflows[0].ID != created["Beta Searchable"] {
 		t.Fatalf("filtered = %+v", filtered.Workflows)
+	}
+	exact, err := store.ListWorkflows(ctx, ListWorkflowsRequest{PageSize: 10, ExactName: "Beta"})
+	if err != nil {
+		t.Fatalf("ListWorkflows exact: %v", err)
+	}
+	if len(exact.Workflows) != 1 || exact.Workflows[0].ID != created["Beta"] {
+		t.Fatalf("exact = %+v", exact.Workflows)
+	}
+
+	// A filter and a page cursor must compose: the filter applies inside the
+	// workflow_list CTE while the cursor applies to the outer query, so paging
+	// through a filtered result set must stay valid and ordered.
+	filteredPage1, err := store.ListWorkflows(ctx, ListWorkflowsRequest{PageSize: 1, Query: "Beta"})
+	if err != nil {
+		t.Fatalf("ListWorkflows filtered page1: %v", err)
+	}
+	if len(filteredPage1.Workflows) != 1 || filteredPage1.NextPageToken == "" {
+		t.Fatalf("filtered page1 = %+v, want one workflow and next token", filteredPage1)
+	}
+	if filteredPage1.Workflows[0].ID != created["Beta Searchable"] {
+		t.Fatalf("filtered page1 order = %+v", filteredPage1.Workflows)
+	}
+	filteredPage2, err := store.ListWorkflows(ctx, ListWorkflowsRequest{
+		PageSize:  1,
+		Query:     "Beta",
+		PageToken: filteredPage1.NextPageToken,
+	})
+	if err != nil {
+		t.Fatalf("ListWorkflows filtered page2: %v", err)
+	}
+	if len(filteredPage2.Workflows) != 1 || filteredPage2.NextPageToken != "" {
+		t.Fatalf("filtered page2 = %+v, want final filtered workflow", filteredPage2)
+	}
+	if filteredPage2.Workflows[0].ID != created["Beta"] {
+		t.Fatalf("filtered page2 order = %+v", filteredPage2.Workflows)
 	}
 }
 
@@ -325,6 +363,9 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddComment: %v", err)
 	}
+	if _, err := store.AddComment(ctx, task.ID, "system note", "system", ""); err == nil || !strings.Contains(err.Error(), "author kind") {
+		t.Fatalf("system AddComment error = %v, want author kind validation", err)
+	}
 	if err := store.ReplaceComment(ctx, comment.ID, "updated"); err != nil {
 		t.Fatalf("ReplaceComment: %v", err)
 	}
@@ -382,6 +423,57 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	}
 	if !activeDone || activeNonTerminal {
 		t.Fatalf("placements after cancel = %+v, want only active Done placement", placements)
+	}
+}
+
+func TestListCommentsPageKeysetStaysStableWhenNewerCommentInserted(t *testing.T) {
+	ctx, store, binding := newTestStoreContext(t)
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Comments"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	first, err := store.AddComment(ctx, task.ID, "first", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment first: %v", err)
+	}
+	second, err := store.AddComment(ctx, task.ID, "second", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment second: %v", err)
+	}
+	setCommentCreatedAt(t, ctx, store, first.ID, 1000)
+	setCommentCreatedAt(t, ctx, store, second.ID, 2000)
+
+	page1, err := store.ListCommentsPage(ctx, task.ID, CommentPageCursor{}, 1)
+	if err != nil {
+		t.Fatalf("ListCommentsPage page1: %v", err)
+	}
+	if len(page1) != 1 || page1[0].ID != second.ID {
+		t.Fatalf("page1 = %+v, want newest comment %q", page1, second.ID)
+	}
+
+	// A newer comment arriving between page reads must not shift the cursor:
+	// an offset would now return the already-seen comment, a keyset must not.
+	third, err := store.AddComment(ctx, task.ID, "third", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment third: %v", err)
+	}
+	setCommentCreatedAt(t, ctx, store, third.ID, 3000)
+
+	cursor := CommentPageCursor{CreatedAtUnixMs: page1[0].CreatedAt, ID: page1[0].ID, HasValue: true}
+	page2, err := store.ListCommentsPage(ctx, task.ID, cursor, 1)
+	if err != nil {
+		t.Fatalf("ListCommentsPage page2: %v", err)
+	}
+	if len(page2) != 1 || page2[0].ID != first.ID {
+		t.Fatalf("page2 = %+v, want next-older comment %q with no duplicate/skip", page2, first.ID)
+	}
+}
+
+func setCommentCreatedAt(t *testing.T, ctx context.Context, store *Store, commentID string, createdAtUnixMs int64) {
+	t.Helper()
+	if _, err := store.db.ExecContext(ctx, `UPDATE task_comments SET created_at_unix_ms = ? WHERE id = ?`, createdAtUnixMs, commentID); err != nil {
+		t.Fatalf("force comment timestamp: %v", err)
 	}
 }
 

@@ -317,6 +317,27 @@ func TestBoardSelectsWorkflowAndReturnsPickerAndGroups(t *testing.T) {
 	if len(selectedPage.Cards) != 1 || selectedPage.Cards[0].TaskID != string(selectedTask.ID) || selectedPage.Cards[0].TaskID == string(defaultTask.ID) {
 		t.Fatalf("cards = %+v, want only selected workflow task %s", selectedPage.Cards, selectedTask.ID)
 	}
+	secondSelectedTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: selected.ID, Title: "Second selected task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask second selected: %v", err)
+	}
+	firstSelectedBoardPage, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID, WorkflowID: string(selected.ID), PageSize: 1}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard selected first page: %v", err)
+	}
+	if len(firstSelectedBoardPage.Cards) != 1 || firstSelectedBoardPage.NextPageToken == "" {
+		t.Fatalf("selected first board page = %+v next=%q, want one card with next page", firstSelectedBoardPage.Cards, firstSelectedBoardPage.NextPageToken)
+	}
+	secondSelectedBoardPage, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID, PageSize: 1, PageToken: firstSelectedBoardPage.NextPageToken}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard selected second page without workflow id: %v", err)
+	}
+	if secondSelectedBoardPage.SelectedWorkflow.WorkflowID != string(selected.ID) {
+		t.Fatalf("selected second page workflow = %+v, want token workflow %s", secondSelectedBoardPage.SelectedWorkflow, selected.ID)
+	}
+	if len(secondSelectedBoardPage.Cards) != 1 || secondSelectedBoardPage.Cards[0].TaskID == firstSelectedBoardPage.Cards[0].TaskID || secondSelectedBoardPage.Cards[0].TaskID == string(defaultTask.ID) || secondSelectedBoardPage.Cards[0].TaskID != string(selectedTask.ID) && secondSelectedBoardPage.Cards[0].TaskID != string(secondSelectedTask.ID) {
+		t.Fatalf("selected second board page = %+v, want next selected workflow card", secondSelectedBoardPage.Cards)
+	}
 	if len(board.Groups) != 1 || board.Groups[0].Key != "impl" || len(board.Groups[0].NodeIDs) != 1 || board.Groups[0].NodeIDs[0] != string(agentID) {
 		t.Fatalf("groups = %+v, want implementation group with agent", board.Groups)
 	}
@@ -410,6 +431,21 @@ func TestBoardColumnTaskCountsUseFullSelectedWorkflow(t *testing.T) {
 	}
 	if len(board.Cards) != 1 || board.NextPageToken == "" {
 		t.Fatalf("legacy board page = %+v next=%q, want one card with next page", board.Cards, board.NextPageToken)
+	}
+	firstBoardTaskID := board.Cards[0].TaskID
+	insertedTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Title: "Inserted after first page", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask inserted: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE tasks SET updated_at_unix_ms = 999 WHERE id = ?`, string(insertedTask.ID)); err != nil {
+		t.Fatalf("force inserted task timestamp: %v", err)
+	}
+	secondBoard, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID, PageSize: 1, PageToken: board.NextPageToken}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard second page: %v", err)
+	}
+	if len(secondBoard.Cards) != 1 || secondBoard.Cards[0].TaskID == firstBoardTaskID || secondBoard.Cards[0].TaskID == string(insertedTask.ID) {
+		t.Fatalf("second board page = %+v, want cursor-stable next original card after first %s", secondBoard.Cards, firstBoardTaskID)
 	}
 	backlogCount := 0
 	for _, column := range board.Columns {
@@ -1268,12 +1304,81 @@ func TestAttentionListProjectsApprovalQuestionAndInterruptedRun(t *testing.T) {
 	if !strings.Contains(kinds["interrupted_run"].Message, "role missing") {
 		t.Fatalf("interrupted attention message = %q, want detail error", kinds["interrupted_run"].Message)
 	}
+	firstPage, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: binding.ProjectID, PageSize: 1}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListAttention first page: %v", err)
+	}
+	if len(firstPage.Items) != 1 || firstPage.NextPageToken == "" {
+		t.Fatalf("first attention page = %+v, want one item and next token", firstPage)
+	}
+	secondPage, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: binding.ProjectID, PageSize: 1, PageToken: firstPage.NextPageToken}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListAttention second page: %v", err)
+	}
+	if len(secondPage.Items) != 1 || secondPage.Items[0].ID == firstPage.Items[0].ID {
+		t.Fatalf("second attention page = %+v first=%+v, want distinct next item", secondPage, firstPage)
+	}
 	taskResp, err := view.ListTaskAttention(ctx, serverapi.WorkflowTaskAttentionListRequest{TaskID: string(questionTask.ID)}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {
 		t.Fatalf("ListTaskAttention: %v", err)
 	}
 	if len(taskResp.Items) != 1 || taskResp.Items[0].Kind != "question" || taskResp.Items[0].TaskID != string(questionTask.ID) {
 		t.Fatalf("task attention items = %+v", taskResp.Items)
+	}
+}
+
+func TestAttentionListFillsPagePastDroppedCandidatesAndScopesTokenToProject(t *testing.T) {
+	ctx, store, workflowStore, binding := newWorkflowViewTestContextStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	approvalWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, approvalWorkflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow approval: %v", err)
+	}
+	requireDoneTransitionApproval(t, ctx, store, approvalWorkflowID)
+	approvalTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Approval", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask approval: %v", err)
+	}
+	approvalStarted, err := workflowStore.StartTask(ctx, approvalTask.ID)
+	if err != nil {
+		t.Fatalf("StartTask approval: %v", err)
+	}
+	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: approvalStarted.RunID, TransitionID: "done"}); err != nil {
+		t.Fatalf("CompleteRun approval: %v", err)
+	}
+
+	// Two extra valid linked workflows produce validation_blocker candidates that
+	// get dropped (they validate cleanly). Force them newest so they sort ahead
+	// of the approval, spanning the first candidate fetch window.
+	for i, title := range []string{"Clean A", "Clean B"} {
+		cleanWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+		if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, cleanWorkflowID, false); err != nil {
+			t.Fatalf("LinkWorkflow %s: %v", title, err)
+		}
+		if _, err := store.DB().ExecContext(ctx, `UPDATE workflows SET updated_at_unix_ms = ? WHERE id = ?`, int64(1_000_000_000_000+i), string(cleanWorkflowID)); err != nil {
+			t.Fatalf("force clean workflow timestamp: %v", err)
+		}
+	}
+
+	// With pageSize 1 the dropped candidates fill the first fetch; the page must
+	// still surface the real approval item instead of coming back empty.
+	page, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: binding.ProjectID, PageSize: 1}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Kind != "approval" {
+		t.Fatalf("attention page = %+v, want the approval item past dropped candidates", page.Items)
+	}
+	if page.NextPageToken == "" {
+		t.Fatal("expected a next page token while candidates remain")
+	}
+
+	// A token minted for this project must be rejected for a different project.
+	if _, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: "project-other", PageSize: 1, PageToken: page.NextPageToken}, workflow.StaticRoleResolver{"coder": true}); err == nil {
+		t.Fatal("expected attention page token to be rejected for a different project")
 	}
 }
 

@@ -25,8 +25,8 @@
 - GUI-authored node groups are execution-shaped parallel groups. A saved node group contains branch nodes and one join; its fan-out is represented by one fan-out transition.
 - One-node node groups may exist only as unsaved invalid drafts while the operator is building the parallel group.
 - Agent nodes show name plus assignee role. Non-agent/no-role nodes have blank role line.
-- Node kind color communicates kind: start primary/blue, agent neutral/gray, join secondary/yellow, terminal success/green.
-- Each visible transition branch color communicates its context-preservation mode: `new_session` primary/blue, `continue_session` neutral/gray, and `compact_and_continue_session` secondary/yellow.
+- Node kind color communicates kind: start primary/blue, agent neutral/gray, join secondary/orange, terminal success/green.
+- Each visible transition branch color communicates its context-preservation mode: `new_session` primary/blue, `continue_session` neutral/gray, and `compact_and_continue_session` secondary/orange.
 - Validation-error red is reserved for invalid graph entities and overrides normal semantic colors.
 - Transition labels show the transition label or key. Fan-out branch labels show the branch key.
 - Node groups render visually as labeled branch islands. The owned Join renders outside the island to the right, vertically centered with the island, while remaining owned by the node group. Branch-to-Join routes are normalized into root canvas coordinates before rendering. Empty node groups are not a saved workflow concept.
@@ -57,9 +57,9 @@
 - Parameter fields contain a stable key and `Model-facing description`. Parameters are string-only and required when declared.
 - Parameter keys cannot be `transition` or `commentary`.
 - Fan-out branch parameters are unioned into one source result contract. Matching branch parameter keys share one produced value only when their trimmed descriptions are identical; the merged parameter uses that trimmed description. Different descriptions for the same key are validation errors.
-- Prompt editing for transitions shows invocation-parameter placeholder chips below the prompt field. Clicking a chip inserts `.Params.<parameter_key>` at the prompt cursor, or at the end when the prompt field is not focused.
+- Prompt editing for transitions shows invocation-parameter placeholder chips below the prompt field. Clicking a first-order parameter chip inserts `.Params.<parameter_key>` at the prompt cursor, or at the end when the prompt field is not focused. The informational `{{.Params.<transition_key>.<parameter>}}` chip opens helper text for previous-transition parameter references and does not insert template text.
 - Transition prompt built-in field placeholders are exactly `.TaskId`, `.TaskShortId`, `.TaskTitle`, `.TaskBody`, `.NodeId`, `.NodeKey`, and `.NodeDisplayName`. Unsupported top-level prompt field references are validation errors.
-- Prompts can reference previous transition parameters with `.Params.<transition_key>.<parameter_key>`. Previous-transition references are typed manually and validate only against guaranteed-prior transitions. A transition is guaranteed-prior when every path from Start to the prompt-owning branch source passes through the referenced transition. Inside a parallel batch, previous-transition lookup is scoped to the same batch.
+- Prompts can reference previous transition parameters with `.Params.<transition_key>.<parameter_key>`, for example `{{.Params.planning.plan_file_location}}`. Previous-transition references validate only against guaranteed-prior transitions. A transition is guaranteed-prior when every path from Start to the prompt-owning branch source passes through the referenced transition, so branching outputs are usable only when the producing transition output is guaranteed to exist. Inside a parallel batch, previous-transition lookup is scoped to the same batch.
 - `.Nodes.<node_key>.<field>` prompt references are not a user-authored workflow editor concept.
 - Transition prompts into agent nodes are required for task start/execution. Drafts may be saved with empty agent-target prompts. Transitions into non-agent nodes cannot have prompts.
 - Start transitions can have prompts for their first agent target and cannot declare parameters. Start transition prompts can use built-in prompt fields but show no parameter chips.

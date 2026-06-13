@@ -1,34 +1,13 @@
-import { useId, useMemo, useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { useState } from "react";
 
-import type { TaskDetail, TaskRun } from "../../api";
-import { errorMessage } from "../../api/errors";
+import type { TaskDetail } from "../../api";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
-import { useAppServices } from "../../app/useAppServices";
-import {
-  Badge,
-  Button,
-  Island,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  showStatusToast,
-} from "../../ui";
-import { fieldInputClassName } from "../../ui/Field";
-import { cx } from "../../ui/classes";
-import { fieldLabelClassName } from "../../ui/fieldStyles";
 import { useUpdateTask } from "../tasks/useTaskMutations";
-import { ActivityFeed, Comments } from "./TaskDetailActivity";
-import { TaskInbox } from "./TaskDetailInbox";
-import { TaskTabs, type DetailTab } from "./TaskDetailTabs";
-import { taskStatusTone } from "./taskStatusTone";
+import { TaskDetailList } from "./TaskDetailList";
+import type { QuestionSelectionState } from "./TaskDetailQuestionState";
+import type { TaskDraft } from "./TaskDetailRows";
 import { useTaskMutations } from "./useTaskDetailData";
-import type { useTaskActivity } from "./useTaskDetailData";
-
-type TaskDraft = Readonly<{
-  title: string;
-  body: string;
-}>;
+import type { useTaskActivity, useTaskComments } from "./useTaskDetailData";
 
 type TaskDraftState = Readonly<{
   sourceKey: string;
@@ -37,6 +16,7 @@ type TaskDraftState = Readonly<{
 
 export function TaskDetailContent({
   activity,
+  comments,
   detail,
   initialFocus,
   onMutated,
@@ -44,28 +24,40 @@ export function TaskDetailContent({
   resumeRunId,
 }: Readonly<{
   activity: ReturnType<typeof useTaskActivity>;
+  comments: ReturnType<typeof useTaskComments>;
   detail: TaskDetail;
   initialFocus?: "firstQuestion" | undefined;
   onMutated?: (() => void) | undefined;
   openLink: (url: string) => void;
   resumeRunId: string;
 }>) {
-  const { t } = useTranslation();
-  const [tab, setTab] = useState<DetailTab>("comments");
   const draftSourceKey = taskDraftSourceKey(detail);
   const [draftState, setDraftState] = useState<TaskDraftState>(() => ({
     sourceKey: draftSourceKey,
     draft: taskDraft(detail),
   }));
-  const draft = draftState.sourceKey === draftSourceKey ? draftState.draft : taskDraft(detail);
-  const setDraft = (nextDraft: TaskDraft): void => {
-    setDraftState({ sourceKey: draftSourceKey, draft: nextDraft });
-  };
+  const [editingComment, setEditingComment] = useState<Readonly<{ id: string; body: string }> | null>(null);
+  const [newCommentBody, setNewCommentBody] = useState("");
+  const [selectedTab, setSelectedTab] = useState<"comments" | "activity">("comments");
+  const [questionSelections, setQuestionSelections] = useState<ReadonlyMap<string, QuestionSelectionState>>(
+    () => new Map(),
+  );
+  // When the surface switches to a different task, drop the previous task's
+  // in-progress comment edit, new-comment draft, and question selections so they
+  // don't bleed into the newly loaded task. Reset during render (the React
+  // "adjust state on prop change" pattern) rather than in an effect. The
+  // title/body draft resets via its own sourceKey above.
+  const [loadedTaskID, setLoadedTaskID] = useState(detail.id);
+  if (loadedTaskID !== detail.id) {
+    setLoadedTaskID(detail.id);
+    setEditingComment(null);
+    setNewCommentBody("");
+    setQuestionSelections(new Map());
+  }
   const update = useUpdateTask(detail.id);
   const mutations = useTaskMutations(detail.id, onMutated);
   const connection = useConnectionSnapshot();
-  const disabled = connection.phase !== "connected";
-  const activityItems = activity.data?.pages.flatMap((page) => page.items) ?? [];
+  const draft = draftState.sourceKey === draftSourceKey ? draftState.draft : taskDraft(detail);
 
   async function saveDraft(nextDraft: TaskDraft = draft): Promise<void> {
     await update.mutateAsync({
@@ -77,73 +69,33 @@ export function TaskDetailContent({
   }
 
   return (
-    <div
-      className="task-detail-island-stack grid min-h-full content-start gap-[var(--space-2)] pb-[var(--space-2)]"
-      data-testid="task-detail-island-stack"
-    >
-      <TaskHeaderIsland
-        detail={detail}
-        disabled={disabled || update.isPending}
-        draft={draft}
-        onDraftChange={setDraft}
-        onSave={saveDraft}
-      />
-      <div
-        className="task-detail-body-split grid items-stretch gap-[var(--space-2)]"
-        data-testid="task-detail-body-split"
-      >
-        <DescriptionIsland
-          disabled={disabled || update.isPending}
-          draft={draft}
-          error={update.error}
-          onDraftChange={setDraft}
-        />
-        <PropertiesIsland
-          detail={detail}
-          disabled={disabled}
-          mutations={mutations}
-          resumeRunId={resumeRunId}
-        />
-      </div>
-      {detail.attention.length > 0 ? (
-        <TaskInbox
-          currentVersion={detail.workflowVersion}
-          detail={detail}
-          disabled={disabled}
-          focusFirstQuestion={initialFocus === "firstQuestion"}
-          mutations={mutations}
-        />
-      ) : null}
-      <Island
-        aria-label={tab === "comments" ? t("task.comments") : t("task.activity")}
-        className="grid gap-[var(--space-3)]"
-      >
-        <TaskTabs
-          activityCount={activityItems.length}
-          commentCount={detail.comments.length}
-          selected={tab}
-          onSelect={setTab}
-        />
-        {tab === "comments" ? (
-          <Comments
-            comments={detail.comments}
-            disabled={disabled}
-            mutations={mutations}
-            openLink={openLink}
-          />
-        ) : null}
-        {tab === "activity" ? (
-          <ActivityFeed
-            hasNextPage={activity.hasNextPage}
-            isFetchingNextPage={activity.isFetchingNextPage}
-            items={activityItems}
-            onLoadMore={() => {
-              void activity.fetchNextPage();
-            }}
-          />
-        ) : null}
-      </Island>
-    </div>
+    <TaskDetailList
+      activity={activity}
+      comments={comments}
+      detail={detail}
+      disabled={connection.phase !== "connected"}
+      draft={draft}
+      editingComment={editingComment}
+      initialFocus={initialFocus}
+      mutations={mutations}
+      newCommentBody={newCommentBody}
+      onDraftChange={(nextDraft) => {
+        setDraftState({ sourceKey: draftSourceKey, draft: nextDraft });
+      }}
+      onNewCommentBodyChange={setNewCommentBody}
+      onEditingCommentChange={setEditingComment}
+      onQuestionSelectionChange={(askID, selection) => {
+        setQuestionSelections((previous) => new Map(previous).set(askID, selection));
+      }}
+      onSaveDraft={saveDraft}
+      openLink={openLink}
+      questionSelections={questionSelections}
+      resumeRunId={resumeRunId}
+      selectedTab={selectedTab}
+      setTab={setSelectedTab}
+      updateError={update.error}
+      updatePending={update.isPending}
+    />
   );
 }
 
@@ -153,268 +105,4 @@ function taskDraft(detail: TaskDetail): TaskDraft {
 
 function taskDraftSourceKey(detail: TaskDetail): string {
   return `${detail.id}:${detail.updatedAt.toString()}`;
-}
-
-function TaskHeaderIsland({
-  detail,
-  disabled,
-  draft,
-  onDraftChange,
-  onSave,
-}: Readonly<{
-  detail: TaskDetail;
-  disabled: boolean;
-  draft: TaskDraft;
-  onDraftChange: (draft: TaskDraft) => void;
-  onSave: (draft?: TaskDraft) => Promise<void>;
-}>) {
-  const { t } = useTranslation();
-  const title = draft.title;
-  const dirty = draft.title !== detail.title || draft.body !== detail.body;
-
-  function nextTitle(value: string): TaskDraft {
-    return { ...draft, title: value.replaceAll("\n", " ") };
-  }
-
-  return (
-    <Island
-      className="grid gap-[var(--space-2)] px-[var(--space-4)] py-[var(--space-2)]"
-      data-testid="task-detail-title-island"
-      unpadded
-    >
-      <form
-        className="flex min-w-0 items-center gap-[var(--space-3)]"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onSave();
-        }}
-      >
-        <input
-          aria-label={t("task.name")}
-          className="app-region-no-drag min-w-0 flex-1 rounded-[var(--radius-m)] border border-transparent bg-transparent px-0 py-[var(--space-1)] text-[1.125rem] font-bold text-[var(--color-on-island)] outline-none focus:border-[var(--color-outline)] focus:bg-[var(--color-island-1)] focus:px-[var(--space-3)]"
-          disabled={disabled}
-          onChange={(event) => {
-            onDraftChange(nextTitle(event.target.value));
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          type="text"
-          value={title}
-        />
-        {dirty ? (
-          <Button
-            className="shrink-0"
-            data-testid="task-detail-save"
-            disabled={disabled || title.trim().length === 0}
-            type="submit"
-            variant="primary"
-          >
-            {t("task.save")}
-          </Button>
-        ) : null}
-        <span className="shrink-0 font-mono text-sm uppercase text-[var(--color-muted)]">
-          {detail.shortID}
-        </span>
-      </form>
-    </Island>
-  );
-}
-
-function DescriptionIsland({
-  disabled,
-  draft,
-  error,
-  onDraftChange,
-}: Readonly<{
-  disabled: boolean;
-  draft: TaskDraft;
-  error: unknown;
-  onDraftChange: (draft: TaskDraft) => void;
-}>) {
-  const { t } = useTranslation();
-  const descriptionId = useId();
-  const descriptionErrorId = `${descriptionId}-error`;
-  const descriptionError = error == null ? "" : errorMessage(error);
-  return (
-    <Island
-      aria-label={t("task.description")}
-      className="grid min-w-0 grid-rows-[auto_auto_auto] gap-[var(--space-3)]"
-      data-testid="task-detail-description-island"
-    >
-      <label className={fieldLabelClassName} htmlFor={descriptionId}>
-        {t("task.description")}
-      </label>
-      <div className="grid min-h-0" data-testid="task-description-input-frame">
-        <textarea
-          aria-describedby={descriptionError.length > 0 ? descriptionErrorId : undefined}
-          aria-invalid={descriptionError.length > 0 ? true : undefined}
-          className={cx(fieldInputClassName, "col-start-1 row-start-1 block min-h-[220px] pb-0")}
-          disabled={disabled}
-          id={descriptionId}
-          onChange={(event) => {
-            onDraftChange({ ...draft, body: event.target.value });
-          }}
-          placeholder={t("task.bodyPlaceholder")}
-          value={draft.body}
-        />
-      </div>
-      {descriptionError.length > 0 ? (
-        <span className="text-[var(--color-error)]" id={descriptionErrorId}>
-          {descriptionError}
-        </span>
-      ) : null}
-    </Island>
-  );
-}
-
-function PropertiesIsland({
-  detail,
-  disabled,
-  mutations,
-  resumeRunId,
-}: Readonly<{
-  detail: TaskDetail;
-  disabled: boolean;
-  mutations: ReturnType<typeof useTaskMutations>;
-  resumeRunId: string;
-}>) {
-  const { t } = useTranslation();
-  const { nativeBridge } = useAppServices();
-  const [openCliError, setOpenCliError] = useState("");
-  const cliSessionExists = useMemo(
-    () => detail.runs.some((run) => run.sessionID.trim().length > 0),
-    [detail.runs],
-  );
-  const cliCommand = useMemo(() => builderSessionCommand(detail.runs), [detail.runs]);
-  const activeRuns = useMemo(
-    () => detail.runs.filter((run) => run.completedAt === 0 && run.interruptedAt === 0),
-    [detail.runs],
-  );
-  const resumeID = resumeRunId.length > 0 ? resumeRunId : detail.actions.resumeRunID;
-
-  async function openInCli(): Promise<void> {
-    if (cliCommand.length === 0) {
-      setOpenCliError(t("task.cliCommandUnavailable"));
-      return;
-    }
-    await copyText(cliCommand, nativeBridge);
-    showStatusToast({
-      id: "task-cli-command-copied",
-      title: t("task.cliCommandCopied"),
-      tone: "success",
-    });
-  }
-
-  return (
-    <Island aria-label={t("task.properties")} className="grid min-w-0 content-start gap-[var(--space-3)]">
-      <PropertyLine label={t("task.project")} value={detail.projectName} />
-      <PropertyLine
-        label={t("task.status")}
-        value={<Badge tone={taskStatusTone(detail.status)}>{detail.status.label}</Badge>}
-      />
-      <PropertyLine label={t("task.workspace")} value={detail.sourceWorkspace.name} />
-      <PropertyLine label={t("task.workflow")} value={detail.workflowName} />
-      <PropertyLine label={t("task.sessions")} value={detail.runs.length.toString()} />
-      <div className="grid gap-[var(--space-2)] pt-[var(--space-1)]">
-        {cliSessionExists ? (
-          <Button
-            disabled={disabled || cliCommand.length === 0}
-            onClick={() => {
-              setOpenCliError("");
-              void openInCli().catch((cause: unknown) => {
-                setOpenCliError(errorMessage(cause));
-              });
-            }}
-            variant="secondary"
-          >
-            {t("task.openInCli")}
-          </Button>
-        ) : null}
-        {detail.actions.canResume ? (
-          <Button
-            disabled={disabled}
-            onClick={() => {
-              void mutations.resume.mutateAsync(resumeID);
-            }}
-            variant="primary"
-          >
-            {t("board.resume")}
-          </Button>
-        ) : null}
-        {activeRuns.map((run) => (
-          <Button
-            disabled={disabled}
-            key={run.id}
-            onClick={() => {
-              void mutations.interrupt.mutateAsync(run.id);
-            }}
-            variant="secondary"
-          >
-            {t("board.interrupt")} <span className="font-mono">{run.id}</span>
-          </Button>
-        ))}
-        {detail.actions.canCancel ? (
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button disabled={disabled} variant="danger">
-                {t("task.cancel")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-56" side="top">
-              <strong>{t("task.cancelConfirmTitle")}</strong>
-              <Button
-                disabled={disabled}
-                onClick={() => {
-                  void mutations.cancel.mutateAsync();
-                }}
-                variant="danger"
-              >
-                {t("app.confirm")}
-              </Button>
-            </PopoverContent>
-          </Popover>
-        ) : null}
-      </div>
-      {openCliError.length > 0 ? (
-        <p className="m-0 text-sm text-[var(--color-error)]">{openCliError}</p>
-      ) : null}
-    </Island>
-  );
-}
-
-function PropertyLine({ label, value }: Readonly<{ label: string; value: ReactNode }>) {
-  return (
-    <p className="m-0 flex min-w-0 flex-wrap items-center gap-[var(--space-1)] text-sm">
-      {label}: <span className="text-[var(--color-muted)]">{value}</span>
-    </p>
-  );
-}
-
-async function copyText(
-  value: string,
-  nativeBridge: ReturnType<typeof useAppServices>["nativeBridge"],
-): Promise<void> {
-  if (nativeBridge.capabilities.clipboard.writeText) {
-    await nativeBridge.clipboard.writeText(value);
-    return;
-  }
-  await navigator.clipboard.writeText(value);
-}
-
-function builderSessionCommand(runs: readonly TaskRun[]): string {
-  const run = preferredSessionRun(runs);
-  return run === null ? "" : `builder --session=${run.sessionID}`;
-}
-
-function preferredSessionRun(runs: readonly TaskRun[]): TaskRun | null {
-  const sessionRuns = runs.filter((run) => run.sessionID.trim().length > 0);
-  return (
-    [...sessionRuns].reverse().find((run) => run.completedAt === 0 && run.interruptedAt === 0) ??
-    sessionRuns.at(-1) ??
-    null
-  );
 }

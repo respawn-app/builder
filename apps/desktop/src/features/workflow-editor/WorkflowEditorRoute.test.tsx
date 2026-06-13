@@ -99,6 +99,7 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.click(screen.getByTestId("workflow-graph-node-node-1"));
     const nodeInspector = await screen.findByRole("complementary", { name: "Inspect node" });
     expect(within(nodeInspector).getByRole("heading", { name: "Inspect node" })).toBeInTheDocument();
+    expect(within(nodeInspector).getByRole("region", { name: "Outputs" })).toBeInTheDocument();
     const nodeIDButton = within(nodeInspector).getByRole("button", { name: "Copy node ID node-1" });
     fireEvent.click(nodeIDButton);
     await waitFor(() => {
@@ -1125,7 +1126,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const prompt = within(inspector).getByRole("textbox", { name: "Prompt" });
     if (!(prompt instanceof HTMLTextAreaElement)) {
       throw new Error("Expected Prompt to render as a textarea.");
@@ -1138,6 +1139,7 @@ describe("WorkflowEditorRoute", () => {
         .map((chip) => chip.textContent),
     ).toEqual([
       ".Params.summary",
+      "{{.Params.<transition_key>.<parameter>}}",
       ".TaskId",
       ".TaskShortId",
       ".TaskTitle",
@@ -1150,10 +1152,21 @@ describe("WorkflowEditorRoute", () => {
       "data-placeholder-tone",
       "primary",
     );
+    const transitionScopedParameterChip = within(placeholders).getByRole("button", {
+      name: "{{.Params.<transition_key>.<parameter>}}",
+    });
+    expect(transitionScopedParameterChip).toHaveAttribute("data-placeholder-tone", "primary");
     expect(within(placeholders).getByRole("button", { name: ".TaskId" })).toHaveAttribute(
       "data-placeholder-tone",
       "muted",
     );
+
+    await user.hover(transitionScopedParameterChip);
+    expect(await screen.findByTestId("transition-keyed-parameter-placeholder-help")).not.toBeEmptyDOMElement();
+    await user.unhover(transitionScopedParameterChip);
+    await waitFor(() => {
+      expect(screen.queryByTestId("transition-keyed-parameter-placeholder-help")).not.toBeInTheDocument();
+    });
 
     prompt.focus();
     prompt.setSelectionRange("Review".length, "Review".length);
@@ -1170,6 +1183,15 @@ describe("WorkflowEditorRoute", () => {
     });
     expect(prompt).toHaveFocus();
     expect(prompt.selectionStart).toBe("Review{{.Params.summary}} the task.{{.TaskTitle}}".length);
+
+    await user.click(transitionScopedParameterChip);
+    expect(await screen.findByTestId("transition-keyed-parameter-placeholder-help")).toHaveTextContent(
+      "{{.Params.planning.plan_file_location}}",
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByTestId("transition-keyed-parameter-placeholder-help")).not.toBeInTheDocument();
+    });
   });
 
   it("keeps edited branch prompts after saving from the server-returned graph", async () => {
@@ -1234,7 +1256,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const prompt = within(inspector).getByRole("textbox", { name: "Prompt" });
 
     await user.clear(prompt);
@@ -1314,7 +1336,7 @@ describe("WorkflowEditorRoute", () => {
       expect(workflowDraftValidationCallCount(services)).toBe(1);
     });
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const validationCallsBeforeEdit = workflowDraftValidationCallCount(services);
 
     await user.clear(within(inspector).getByRole("textbox", { name: "Prompt" }));
@@ -1375,7 +1397,7 @@ describe("WorkflowEditorRoute", () => {
       expect(workflowDraftValidationCallCount(services)).toBe(1);
     });
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     await user.clear(within(inspector).getByRole("textbox", { name: "Prompt" }));
 
     const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
@@ -1587,7 +1609,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const addButton = within(inspector).getByRole("button", { name: "Add parameter" });
 
     expect(parameterKeys(inspector)).toEqual(["summary"]);
@@ -1665,7 +1687,7 @@ describe("WorkflowEditorRoute", () => {
       expect(workflowDraftValidationCallCount(services)).toBe(1);
     });
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const validationCallsBeforeEdit = workflowDraftValidationCallCount(services);
 
     fireEvent.click(within(inspector).getByRole("button", { name: "Add parameter" }));
@@ -1770,8 +1792,8 @@ describe("WorkflowEditorRoute", () => {
     const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
     expect(canvas).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
-    const edgeIDButton = within(inspector).getByRole("button", { name: "Copy branch ID edge-2" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
+    const edgeIDButton = within(inspector).getByRole("button", { name: "Copy transition ID edge-2" });
     expect(within(inspector).queryByText("ID")).not.toBeInTheDocument();
     fireEvent.click(edgeIDButton);
     await waitFor(() => {
@@ -1871,7 +1893,7 @@ describe("WorkflowEditorRoute", () => {
 
     await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
 
     expect(within(routeSection).queryByRole("textbox", { name: "Transition ID" })).not.toBeInTheDocument();
@@ -1900,7 +1922,7 @@ describe("WorkflowEditorRoute", () => {
 
     await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
 
     expect(within(routeSection).queryByRole("button", { name: "Context mode" })).not.toBeInTheDocument();
@@ -1962,7 +1984,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
 
     fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "Continue session" }));
@@ -2025,7 +2047,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
 
     fireEvent.pointerDown(within(routeSection).getByRole("button", { name: "Context mode" }));
@@ -2096,7 +2118,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
 
     fireEvent.pointerDown(within(routeSection).getByRole("button", { name: "Context mode" }));
@@ -2157,7 +2179,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
     const contextMode = within(routeSection).getByRole("button", { name: "Context mode" });
     const contextSource = within(routeSection).getByRole("button", { name: "Context source" });
@@ -2224,7 +2246,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
 
     expect(within(inspector).getByRole("textbox", { name: "Prompt" })).toBeInTheDocument();
     expect(within(inspector).queryByRole("button", { name: "Add parameter" })).not.toBeInTheDocument();
@@ -2278,7 +2300,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const inspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const inspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
     expect(within(routeSection).queryByRole("button", { name: "Context mode" })).not.toBeInTheDocument();
     expect(within(routeSection).queryByRole("button", { name: "Context source" })).not.toBeInTheDocument();
@@ -2334,7 +2356,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
-    const reloadedInspector = await screen.findByRole("complementary", { name: "Inspect branch" });
+    const reloadedInspector = await screen.findByRole("complementary", { name: "Inspect transition" });
     const reloadedRouteSection = within(reloadedInspector).getByRole("region", { name: "Route" });
 
     expect(within(reloadedRouteSection).getByRole("checkbox", { name: "Requires approval" })).toBeChecked();
@@ -2467,7 +2489,7 @@ describe("WorkflowEditorRoute", () => {
     expect(workflowDraftValidationCallCount(services)).toBe(1);
   });
 
-  it("opens workflow inspectors with their own 35 percent screen-width default", async () => {
+  it("opens sidebar destinations with their own typed default widths", async () => {
     const restoreWindowWidth = mockWindowWidth(1600);
     mockSidebarLayout(() => 1600);
     try {
@@ -2491,7 +2513,7 @@ describe("WorkflowEditorRoute", () => {
       fireEvent.keyDown(within(standardSidebar).getByRole("separator", { name: "Resize sidebar" }), {
         key: "Home",
       });
-      expect(sidebarWidthStyle(standardSidebar)).toBe("360px");
+      expect(sidebarWidthStyle(standardSidebar)).toBe("350px");
       fireEvent.click(within(standardSidebar).getByRole("button", { name: "Close" }));
       await waitFor(() => {
         expect(screen.queryByRole("complementary", { name: "Settings" })).not.toBeInTheDocument();
@@ -2499,11 +2521,11 @@ describe("WorkflowEditorRoute", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Inspect workflow" }));
       const workflowInspector = await screen.findByRole("complementary", { name: "Inspect workflow" });
-      expect(sidebarWidthStyle(workflowInspector)).toBe("560px");
+      expect(sidebarWidthStyle(workflowInspector)).toBe("550px");
       fireEvent.keyDown(within(workflowInspector).getByRole("separator", { name: "Resize sidebar" }), {
         key: "ArrowLeft",
       });
-      expect(sidebarWidthStyle(workflowInspector)).toBe("592px");
+      expect(sidebarWidthStyle(workflowInspector)).toBe("582px");
       fireEvent.click(within(workflowInspector).getByRole("button", { name: "Close" }));
       await waitFor(() => {
         expect(screen.queryByRole("complementary", { name: "Inspect workflow" })).not.toBeInTheDocument();
@@ -2511,7 +2533,7 @@ describe("WorkflowEditorRoute", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Open standard sidebar" }));
       const reopenedStandardSidebar = await screen.findByRole("complementary", { name: "Settings" });
-      expect(sidebarWidthStyle(reopenedStandardSidebar)).toBe("360px");
+      expect(sidebarWidthStyle(reopenedStandardSidebar)).toBe("350px");
       fireEvent.click(within(reopenedStandardSidebar).getByRole("button", { name: "Close" }));
       await waitFor(() => {
         expect(screen.queryByRole("complementary", { name: "Settings" })).not.toBeInTheDocument();
@@ -2519,7 +2541,7 @@ describe("WorkflowEditorRoute", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Inspect workflow" }));
       expect(sidebarWidthStyle(await screen.findByRole("complementary", { name: "Inspect workflow" }))).toBe(
-        "592px",
+        "582px",
       );
     } finally {
       restoreWindowWidth();

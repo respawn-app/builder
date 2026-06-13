@@ -162,9 +162,9 @@
   --color-muted: color-mix(in srgb, var(--color-on-background) 56%, transparent);
   --color-primary: #3185fc;
   --color-on-primary: var(--color-on-background);
-  --color-secondary: #ffe74c;
+  --color-secondary: #f96824;
   --color-on-secondary: #12100e;
-  --color-warning: #f96824;
+  --color-warning: #ffe74c;
   --color-on-warning: #12100e;
   --color-success: #12ba85;
   --color-on-success: var(--color-on-background);
@@ -368,6 +368,18 @@
   }
 }
 
+@keyframes task-detail-feed-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes sidebar-slide-in {
   from {
     opacity: 0;
@@ -416,7 +428,16 @@
     font: inherit;
   }
 
-  textarea { field-sizing: content; resize: none; overflow: hidden; transition: all 0.3s ease !important; }
+  textarea {
+    field-sizing: content;
+    resize: none;
+    overflow: hidden;
+    transition:
+      height var(--motion-normal),
+      border-color var(--motion-fast),
+      box-shadow var(--motion-fast),
+      background-color var(--motion-fast);
+  }
 
   button {
     cursor: pointer;
@@ -572,6 +593,11 @@
   .route-transition-frame {
     animation: route-fade-scale var(--motion-fast) both;
     transform-origin: center;
+  }
+
+  .task-detail-feed-row {
+    animation: task-detail-feed-row-enter var(--motion-normal) both;
+    transform-origin: top center;
   }
 
   .view-transition-route::view-transition-old(root) {

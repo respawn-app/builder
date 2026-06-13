@@ -500,7 +500,7 @@ func TestConfiguredRemoteGetsServerReadinessWhenAuthMissing(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	writeServeSettings(t, home, `
-model = "base-model"
+model = "gpt-5"
 
 [subagents.coder]
 model = "coder-model"
