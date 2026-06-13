@@ -154,9 +154,9 @@ func createStagedFile(targetPath string, data []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pattern := ".builder-patch-*"
+	pattern := ".kent-patch-*"
 	if base := strings.TrimSpace(filepath.Base(targetPath)); base != "" && base != "." && base != string(filepath.Separator) {
-		pattern = ".builder-patch-" + base + "-*"
+		pattern = ".kent-patch-" + base + "-*"
 	}
 	file, err := os.CreateTemp(stageDir, pattern)
 	if err != nil {
@@ -227,7 +227,7 @@ func restoreSnapshot(path string, snapshot fileSnapshot) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".builder.rollback.tmp"
+	tmp := path + ".kent.rollback.tmp"
 	if err := os.WriteFile(tmp, snapshot.Data, snapshot.Mode); err != nil {
 		return err
 	}

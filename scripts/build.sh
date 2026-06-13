@@ -42,7 +42,7 @@ run_frontend_build() {
 	fi
 
 	local log_file
-	log_file="$(mktemp -t builder-frontend-build.XXXXXX.log)"
+	log_file="$(mktemp -t kent-frontend-build.XXXXXX.log)"
 	if pnpm --dir apps install --frozen-lockfile >"$log_file" 2>&1 &&
 		pnpm --dir apps build >>"$log_file" 2>&1; then
 		rm -f "$log_file"

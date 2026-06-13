@@ -292,7 +292,7 @@ func writeAtomicallyIfUnchanged(path string, data []byte, before os.FileInfo) er
 	if before != nil {
 		mode = before.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".builder-edit-"+filepath.Base(path)+"-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".kent-edit-"+filepath.Base(path)+"-*")
 	if err != nil {
 		return failf("stage write failed: %v", err)
 	}

@@ -18,8 +18,8 @@ if [ "${BUILDER_TEST_INHERIT_ENV:-}" != "1" ]; then
     done < <(compgen -e BUILDER_ || true)
 fi
 
-go_log_file="$(mktemp -t builder-go-test.XXXXXX.log)"
-frontend_log_file="$(mktemp -t builder-frontend-test.XXXXXX.log)"
+go_log_file="$(mktemp -t kent-go-test.XXXXXX.log)"
+frontend_log_file="$(mktemp -t kent-frontend-test.XXXXXX.log)"
 test_pid=""
 cleanup() {
     rm -f "$go_log_file" "$frontend_log_file"

@@ -64,7 +64,7 @@ type SyncResult struct {
 
 type marker struct {
 	SchemaVersion  int    `json:"schema_version"`
-	BuilderVersion string `json:"builder_version"`
+	AppVersion string `json:"app_version"`
 	TreeHash       string `json:"tree_hash"`
 }
 
@@ -434,7 +434,7 @@ func writeExpectedTree(root string, entries []treeEntry) error {
 	if err != nil {
 		return fmt.Errorf("hash generated temp root: %w", err)
 	}
-	markerData, err := json.MarshalIndent(marker{SchemaVersion: markerSchemaVersion, BuilderVersion: buildinfo.Version, TreeHash: treeHash}, "", "  ")
+	markerData, err := json.MarshalIndent(marker{SchemaVersion: markerSchemaVersion, AppVersion: buildinfo.Version, TreeHash: treeHash}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode generated marker: %w", err)
 	}

@@ -333,7 +333,7 @@ func (p *systemClipboardImagePaster) newTempPNGPath() (string, func(), error) {
 	if p.preferredTempDir != nil {
 		dir = p.preferredTempDir()
 	}
-	file, err := p.createTemp(dir, "builder-clipboard-*.png")
+	file, err := p.createTemp(dir, "kent-clipboard-*.png")
 	if err != nil {
 		return "", nil, &uiClipboardPasteError{Kind: uiClipboardPasteErrorFailed, Message: "Could not create a clipboard image temp file", Err: err}
 	}
