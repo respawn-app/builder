@@ -2,7 +2,7 @@ You should only mark the goal as completed when it is done fully, end-to-end, ac
 
 Here's the goal that the user set:
 <goal>
-{{objective}}
+{{.Objective}}
 </goal>
 
 If you testify that the goal stated above is fully achieved now, rerun this command with `--confirm` to accept the shutdown penalty for incomplete goals, or continue working until the goal is achieved. If you are unsure if the goal is achieved, for example you haven't run a full verification pass to compare the results (such as code) to PRD/plans/other requirements, do this now before calling with `--confirm`. If you intended to seek help by running this, use ask_question instead.

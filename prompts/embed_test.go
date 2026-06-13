@@ -57,7 +57,7 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptSectionPlaceholders(t *tes
 		t.Fatalf("RenderCustomSystemPrompt: %v", err)
 	}
 	for _, want := range []string{
-		"autonomous coding agent named Builder",
+		"autonomous coding agent named Kent",
 		"Your agentic environment",
 		"Product ambiguity and planning",
 		"Final answer instructions",
@@ -78,7 +78,7 @@ func TestBaseSystemPromptAssemblesDefaultSections(t *testing.T) {
 		EditingToolName:              "patch",
 	})
 	for _, want := range []string{
-		"autonomous coding agent named Builder",
+		"autonomous coding agent named Kent",
 		"Your agentic environment",
 		"Product ambiguity and planning",
 		"Final answer instructions",
@@ -167,7 +167,7 @@ func TestRenderGoalNudgePrompt(t *testing.T) {
 	rendered := RenderGoalNudgePrompt("ship /goal mode", "active")
 	for _, want := range []string{
 		"<goal>\nship /goal mode\n</goal>",
-		"builder goal complete",
+		BuilderCommand() + " goal complete",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected goal nudge to contain %q, got %q", want, rendered)

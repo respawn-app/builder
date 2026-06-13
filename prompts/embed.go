@@ -187,42 +187,54 @@ func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
 	return strings.TrimSpace(CompactionSoonReminderPrompt)
 }
 
-func RenderGoalNudgePrompt(objective, status string) string {
-	return renderTemplatePlaceholders(GoalNudgePrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-		"{{status}}":    strings.TrimSpace(status),
+// goalPromptData is the template data shared by every goal prompt. Goal
+// prompts render through the same text/template engine and command variable
+// ({{.BuilderCommand}}) as the system prompt, so the launch command is wired
+// in one place instead of a per-prompt placeholder.
+type goalPromptData struct {
+	BuilderCommand string
+	Objective      string
+	Status         string
+}
+
+func renderGoalPrompt(name, text, objective, status string) string {
+	rendered, err := renderNamedTemplate(name, text, goalPromptData{
+		BuilderCommand: BuilderCommand(),
+		Objective:      strings.TrimSpace(objective),
+		Status:         strings.TrimSpace(status),
 	})
+	if err != nil {
+		panic(err)
+	}
+	return rendered
+}
+
+func RenderGoalNudgePrompt(objective, status string) string {
+	return renderGoalPrompt("goal nudge", GoalNudgePrompt, objective, status)
 }
 
 func RenderGoalSetPrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalSetPrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal set", GoalSetPrompt, objective, "")
+}
+
+func RenderGoalAgentCommandDeniedPrompt() string {
+	return renderGoalPrompt("goal agent command denied", GoalAgentCommandDeniedPrompt, "", "")
 }
 
 func RenderGoalResumePrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalResumePrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal resume", GoalResumePrompt, objective, "")
 }
 
 func RenderGoalAlreadyCompletePrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalAlreadyCompletePrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal already complete", GoalAlreadyCompletePrompt, objective, "")
 }
 
 func RenderGoalAgentDuplicateSetDeniedPrompt(objective, status string) string {
-	return renderTemplatePlaceholders(GoalAgentDuplicateSetDeniedPrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-		"{{status}}":    strings.TrimSpace(status),
-	})
+	return renderGoalPrompt("goal agent duplicate set denied", GoalAgentDuplicateSetDeniedPrompt, objective, status)
 }
 
 func RenderGoalCompleteConfirmRequiredPrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalCompleteConfirmRequiredPrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal complete confirm required", GoalCompleteConfirmRequiredPrompt, objective, "")
 }
 
 func RenderWorktreeModePrompt(branch, cwd, worktreePath, workspaceRoot string) string {

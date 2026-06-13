@@ -162,7 +162,7 @@ func goalStatusSubcommand(action string, args []string, stdout io.Writer, stderr
 		return 2
 	}
 	if agent {
-		fmt.Fprintln(stderr, prompts.GoalAgentCommandDeniedPrompt)
+		fmt.Fprintln(stderr, prompts.RenderGoalAgentCommandDeniedPrompt())
 		return 1
 	}
 	remote, err := goalCommandRemoteOpener(context.Background())
@@ -264,7 +264,7 @@ func goalClearSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 		return 2
 	}
 	if agent {
-		fmt.Fprintln(stderr, prompts.GoalAgentCommandDeniedPrompt)
+		fmt.Fprintln(stderr, prompts.RenderGoalAgentCommandDeniedPrompt())
 		return 1
 	}
 	remote, err := goalCommandRemoteOpener(context.Background())

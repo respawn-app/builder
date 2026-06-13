@@ -36,7 +36,7 @@ priority_request_mode = true
 patch = false
 
 [subagents.research.skills]
-"builder-dogfooding" = true
+"kent-dogfooding" = true
 ```
 
 - The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster model profile.

@@ -1,7 +1,7 @@
 The user resumed the session goal.
 
 <goal>
-{{objective}}
+{{.Objective}}
 </goal>
 
 Continue working toward this goal.

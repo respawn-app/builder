@@ -10,8 +10,8 @@ func TestParseNameUsesFrontmatterNameAndSanitizesWhitespace(t *testing.T) {
 }
 
 func TestParseNameFallsBackToDirectoryName(t *testing.T) {
-	name, ok := ParseName(" builder-dogfooding ", "---\ndescription: ' use builder itself '\n---\nbody")
-	if !ok || name != "builder-dogfooding" {
+	name, ok := ParseName(" kent-dogfooding ", "---\ndescription: ' use builder itself '\n---\nbody")
+	if !ok || name != "kent-dogfooding" {
 		t.Fatalf("name=%q ok=%t", name, ok)
 	}
 }
@@ -40,7 +40,7 @@ func TestDiscoverReturnsGeneratedSkillCatalog(t *testing.T) {
 		}
 		seen[item.SkillName] = true
 	}
-	for _, name := range []string{"builder-dogfooding", "creating-skills"} {
+	for _, name := range []string{"kent-dogfooding", "creating-skills"} {
 		if !seen[name] {
 			t.Fatalf("missing generated skill %q in %+v", name, items)
 		}

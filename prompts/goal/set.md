@@ -1,6 +1,6 @@
 The user set an active session goal:
 <goal>
-{{objective}}
+{{.Objective}}
 </goal>
 
 Start working toward this goal now.
@@ -21,5 +21,5 @@ Completion discipline:
 - If the goal is complete, report completion using a shell command:
 
 ```sh
-builder goal complete
+{{.BuilderCommand}} goal complete
 ```

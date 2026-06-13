@@ -161,7 +161,7 @@ func TestGoalAgentEnvDeniesNonSetMutationWithoutDialing(t *testing.T) {
 	if code := goalSubcommand([]string{"pause"}, new(strings.Builder), stderr); code == 0 {
 		t.Fatalf("goal pause exit = 0")
 	}
-	if !strings.Contains(stderr.String(), prompts.GoalAgentCommandDeniedPrompt) {
+	if !strings.Contains(stderr.String(), prompts.RenderGoalAgentCommandDeniedPrompt()) {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 	if len(remote.showReq) != 0 || len(remote.completeReq) != 0 || len(remote.setReq) != 0 {
