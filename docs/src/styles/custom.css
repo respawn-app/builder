@@ -14,7 +14,7 @@
   --sl-font-mono:
     'Monaspace Neon', 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas,
     'Liberation Mono', 'Courier New', monospace;
-  --builder-font-heading:
+  --kent-font-heading:
     'Montserrat Alternates', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica,
     Arial, sans-serif;
 
@@ -31,11 +31,11 @@
   --sl-text-code-sm: 0.85rem;
   --sl-line-height: 1.8;
   --sl-line-height-headings: 1.2;
-  --builder-header-offset: var(--sl-nav-height);
+  --kent-header-offset: var(--sl-nav-height);
 }
 
 :root[data-header-state='hidden'] {
-  --builder-header-offset: 0rem;
+  --kent-header-offset: 0rem;
 }
 
 :root[data-theme='dark'] {
@@ -48,40 +48,40 @@
   --sl-color-gray-6: #1c1a18;
   --sl-color-black: #12100e;
 
-  --builder-color-primary: #3185fc;
-  --builder-color-primary-low: color-mix(in srgb, var(--builder-color-primary) 18%, transparent);
-  --builder-color-primary-high: color-mix(in srgb, var(--builder-color-primary) 85%, white);
-  --builder-color-secondary: #f96824;
-  --builder-color-secondary-low: color-mix(in srgb, var(--builder-color-secondary) 18%, transparent);
-  --builder-color-secondary-high: color-mix(in srgb, var(--builder-color-secondary) 85%, white);
-  --builder-color-success: #12ba85;
-  --builder-color-success-low: color-mix(in srgb, var(--builder-color-success) 18%, transparent);
-  --builder-color-success-high: color-mix(in srgb, var(--builder-color-success) 85%, white);
-  --builder-color-warning: #ffe74c;
-  --builder-color-warning-low: color-mix(in srgb, var(--builder-color-warning) 18%, transparent);
-  --builder-color-warning-high: color-mix(in srgb, var(--builder-color-warning) 70%, black);
-  --builder-color-error: #dc2e3c;
-  --builder-color-error-low: color-mix(in srgb, var(--builder-color-error) 18%, transparent);
-  --builder-color-error-high: color-mix(in srgb, var(--builder-color-error) 85%, white);
+  --kent-color-primary: #3185fc;
+  --kent-color-primary-low: color-mix(in srgb, var(--kent-color-primary) 18%, transparent);
+  --kent-color-primary-high: color-mix(in srgb, var(--kent-color-primary) 85%, white);
+  --kent-color-secondary: #f96824;
+  --kent-color-secondary-low: color-mix(in srgb, var(--kent-color-secondary) 18%, transparent);
+  --kent-color-secondary-high: color-mix(in srgb, var(--kent-color-secondary) 85%, white);
+  --kent-color-success: #12ba85;
+  --kent-color-success-low: color-mix(in srgb, var(--kent-color-success) 18%, transparent);
+  --kent-color-success-high: color-mix(in srgb, var(--kent-color-success) 85%, white);
+  --kent-color-warning: #ffe74c;
+  --kent-color-warning-low: color-mix(in srgb, var(--kent-color-warning) 18%, transparent);
+  --kent-color-warning-high: color-mix(in srgb, var(--kent-color-warning) 70%, black);
+  --kent-color-error: #dc2e3c;
+  --kent-color-error-low: color-mix(in srgb, var(--kent-color-error) 18%, transparent);
+  --kent-color-error-high: color-mix(in srgb, var(--kent-color-error) 85%, white);
 
-  --sl-color-accent-low: var(--builder-color-primary-low);
-  --sl-color-accent: var(--builder-color-primary);
-  --sl-color-accent-high: var(--builder-color-primary-high);
-  --sl-color-blue: var(--builder-color-primary);
-  --sl-color-blue-low: var(--builder-color-primary-low);
-  --sl-color-blue-high: var(--builder-color-primary-high);
-  --sl-color-green: var(--builder-color-success);
-  --sl-color-green-low: var(--builder-color-success-low);
-  --sl-color-green-high: var(--builder-color-success-high);
-  --sl-color-orange: var(--builder-color-warning);
-  --sl-color-orange-low: var(--builder-color-warning-low);
-  --sl-color-orange-high: var(--builder-color-warning-high);
-  --sl-color-purple: var(--builder-color-secondary);
-  --sl-color-purple-low: var(--builder-color-secondary-low);
-  --sl-color-purple-high: var(--builder-color-secondary-high);
-  --sl-color-red: var(--builder-color-error);
-  --sl-color-red-low: var(--builder-color-error-low);
-  --sl-color-red-high: var(--builder-color-error-high);
+  --sl-color-accent-low: var(--kent-color-primary-low);
+  --sl-color-accent: var(--kent-color-primary);
+  --sl-color-accent-high: var(--kent-color-primary-high);
+  --sl-color-blue: var(--kent-color-primary);
+  --sl-color-blue-low: var(--kent-color-primary-low);
+  --sl-color-blue-high: var(--kent-color-primary-high);
+  --sl-color-green: var(--kent-color-success);
+  --sl-color-green-low: var(--kent-color-success-low);
+  --sl-color-green-high: var(--kent-color-success-high);
+  --sl-color-orange: var(--kent-color-warning);
+  --sl-color-orange-low: var(--kent-color-warning-low);
+  --sl-color-orange-high: var(--kent-color-warning-high);
+  --sl-color-purple: var(--kent-color-secondary);
+  --sl-color-purple-low: var(--kent-color-secondary-low);
+  --sl-color-purple-high: var(--kent-color-secondary-high);
+  --sl-color-red: var(--kent-color-error);
+  --sl-color-red-low: var(--kent-color-error-low);
+  --sl-color-red-high: var(--kent-color-error-high);
 
   --sl-color-text: var(--sl-color-gray-2);
   --sl-color-text-accent: var(--sl-color-accent-high);
@@ -108,40 +108,40 @@
   --sl-color-gray-7: #f4f3f2;
   --sl-color-black: #faf9f7;
 
-  --builder-color-primary: #3185fc;
-  --builder-color-primary-low: color-mix(in srgb, var(--builder-color-primary) 14%, transparent);
-  --builder-color-primary-high: color-mix(in srgb, var(--builder-color-primary) 90%, black);
-  --builder-color-secondary: #f96824;
-  --builder-color-secondary-low: color-mix(in srgb, var(--builder-color-secondary) 14%, transparent);
-  --builder-color-secondary-high: color-mix(in srgb, var(--builder-color-secondary) 90%, black);
-  --builder-color-success: #12ba85;
-  --builder-color-success-low: color-mix(in srgb, var(--builder-color-success) 14%, transparent);
-  --builder-color-success-high: color-mix(in srgb, var(--builder-color-success) 90%, black);
-  --builder-color-warning: #ffe74c;
-  --builder-color-warning-low: color-mix(in srgb, var(--builder-color-warning) 30%, transparent);
-  --builder-color-warning-high: color-mix(in srgb, var(--builder-color-warning) 60%, black);
-  --builder-color-error: #dc2e3c;
-  --builder-color-error-low: color-mix(in srgb, var(--builder-color-error) 14%, transparent);
-  --builder-color-error-high: color-mix(in srgb, var(--builder-color-error) 90%, black);
+  --kent-color-primary: #3185fc;
+  --kent-color-primary-low: color-mix(in srgb, var(--kent-color-primary) 14%, transparent);
+  --kent-color-primary-high: color-mix(in srgb, var(--kent-color-primary) 90%, black);
+  --kent-color-secondary: #f96824;
+  --kent-color-secondary-low: color-mix(in srgb, var(--kent-color-secondary) 14%, transparent);
+  --kent-color-secondary-high: color-mix(in srgb, var(--kent-color-secondary) 90%, black);
+  --kent-color-success: #12ba85;
+  --kent-color-success-low: color-mix(in srgb, var(--kent-color-success) 14%, transparent);
+  --kent-color-success-high: color-mix(in srgb, var(--kent-color-success) 90%, black);
+  --kent-color-warning: #ffe74c;
+  --kent-color-warning-low: color-mix(in srgb, var(--kent-color-warning) 30%, transparent);
+  --kent-color-warning-high: color-mix(in srgb, var(--kent-color-warning) 60%, black);
+  --kent-color-error: #dc2e3c;
+  --kent-color-error-low: color-mix(in srgb, var(--kent-color-error) 14%, transparent);
+  --kent-color-error-high: color-mix(in srgb, var(--kent-color-error) 90%, black);
 
-  --sl-color-accent-low: var(--builder-color-primary-low);
-  --sl-color-accent: var(--builder-color-primary);
-  --sl-color-accent-high: var(--builder-color-primary-high);
-  --sl-color-blue: var(--builder-color-primary);
-  --sl-color-blue-low: var(--builder-color-primary-low);
-  --sl-color-blue-high: var(--builder-color-primary-high);
-  --sl-color-green: var(--builder-color-success);
-  --sl-color-green-low: var(--builder-color-success-low);
-  --sl-color-green-high: var(--builder-color-success-high);
-  --sl-color-orange: var(--builder-color-warning);
-  --sl-color-orange-low: var(--builder-color-warning-low);
-  --sl-color-orange-high: var(--builder-color-warning-high);
-  --sl-color-purple: var(--builder-color-secondary);
-  --sl-color-purple-low: var(--builder-color-secondary-low);
-  --sl-color-purple-high: var(--builder-color-secondary-high);
-  --sl-color-red: var(--builder-color-error);
-  --sl-color-red-low: var(--builder-color-error-low);
-  --sl-color-red-high: var(--builder-color-error-high);
+  --sl-color-accent-low: var(--kent-color-primary-low);
+  --sl-color-accent: var(--kent-color-primary);
+  --sl-color-accent-high: var(--kent-color-primary-high);
+  --sl-color-blue: var(--kent-color-primary);
+  --sl-color-blue-low: var(--kent-color-primary-low);
+  --sl-color-blue-high: var(--kent-color-primary-high);
+  --sl-color-green: var(--kent-color-success);
+  --sl-color-green-low: var(--kent-color-success-low);
+  --sl-color-green-high: var(--kent-color-success-high);
+  --sl-color-orange: var(--kent-color-warning);
+  --sl-color-orange-low: var(--kent-color-warning-low);
+  --sl-color-orange-high: var(--kent-color-warning-high);
+  --sl-color-purple: var(--kent-color-secondary);
+  --sl-color-purple-low: var(--kent-color-secondary-low);
+  --sl-color-purple-high: var(--kent-color-secondary-high);
+  --sl-color-red: var(--kent-color-error);
+  --sl-color-red-low: var(--kent-color-error-low);
+  --sl-color-red-high: var(--kent-color-error-high);
 
   --sl-color-text: #5a5651;
   --sl-color-text-accent: var(--sl-color-accent-high);
@@ -167,12 +167,12 @@ mobile-starlight-toc nav,
 }
 
 mobile-starlight-toc nav {
-  top: calc(var(--builder-header-offset) - 1px);
+  top: calc(var(--kent-header-offset) - 1px);
 }
 
 @media (min-width: 72rem) {
   .right-sidebar {
-    padding-top: var(--builder-header-offset);
+    padding-top: var(--kent-header-offset);
   }
 }
 
@@ -182,7 +182,7 @@ mobile-starlight-toc nav {
 }
 
 .site-title span {
-  font-family: var(--builder-font-heading);
+  font-family: var(--kent-font-heading);
   font-weight: 700;
 }
 
@@ -200,7 +200,7 @@ h1,
 h2,
 header.header,
 header.header * {
-  font-family: var(--builder-font-heading);
+  font-family: var(--kent-font-heading);
 }
 
 h1,

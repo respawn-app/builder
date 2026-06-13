@@ -6,7 +6,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 
 | Command | Input | What it does |
 | --- | --- | --- |
-| `/exit` | none | Exit Builder, same as Ctrl/CMD+C. |
+| `/exit` | none | Exit Kent, same as Ctrl/CMD+C. |
 | `/new` | none | Start a new session. |
 | `/resume` | none | Return to the startup session picker. Hidden when there are no other sessions to resume. |
 | `/login` | none | Open auth options again without clearing saved credentials first. Choose `No auth` there to clear saved auth. |
@@ -26,7 +26,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 | <code>/wt delete [&lt;target&gt;]</code> | optional selector | Open delete confirmation in the Worktrees page. |
 | `/copy` | none | Copy the latest committed model final answer to the system clipboard. |
 | `/back` | none | Teleport back to the parent session, if present. |
-| `/review <what to review>` | optional free-form text | Trigger Builder's native code review. Trailing text is appended to the prompt body. |
+| `/review <what to review>` | optional free-form text | Trigger Kent's native code review. Trailing text is appended to the prompt body. |
 | `/init <instructions>` | optional free-form text | Use the built-in workspace creation prompt. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |
 
@@ -38,21 +38,21 @@ Canonical forms only. Some commands also accept aliases.
 - `Tab` on a partial command autocompletes the selected command and inserts a trailing space so you can continue with arguments.
 - `Tab` on an exact known command adds it into the queue. Use this to make chains of prompts and slash commands like /compact -> /review -> /prompts:commit.
 - While the model is working on an active goal, `/goal` still opens the read-only goal page. `/goal pause` and `/goal clear` run immediately and append one persistent goal info line; setting or resuming a goal is rejected until the runtime is idle.
-- If `ask_question` is disabled, Builder opens sessions with active goals for management, but goal set/resume fails until `ask_question` is enabled; pause and clear remain available.
+- If `ask_question` is disabled, Kent opens sessions with active goals for management, but goal set/resume fails until `ask_question` is enabled; pause and clear remain available.
 
 ### 2. Built-In and Custom Prompts
 
-Builder supports markdown file-backed custom prompt commands discovered from `.builder/prompts` or `.builder/commands`
+Kent supports markdown file-backed custom prompt commands discovered from `.kent/prompts` or `.kent/commands`
 
-- If the prompt body contains the exact token `$ARGUMENTS`, Builder replaces every occurrence with the trailing input.
-- Otherwise, if trailing input was provided, Builder appends it to the end of the prompt body.
+- If the prompt body contains the exact token `$ARGUMENTS`, Kent replaces every occurrence with the trailing input.
+- Otherwise, if trailing input was provided, Kent appends it to the end of the prompt body.
 
 To add a custom prompt, create a Markdown file in one of these directories:
 
-- `<workspace>/.builder/prompts`
-- `<workspace>/.builder/commands`
-- `~/.builder/prompts`
-- `~/.builder/commands`
+- `<workspace>/.kent/prompts`
+- `<workspace>/.kent/commands`
+- `~/.kent/prompts`
+- `~/.kent/commands`
 
 The command id is derived from the filename as `prompt:<normalized_base_name>`.
 Duplicate command ids are deduplicated by first match, so repo-scoped commands override global command.

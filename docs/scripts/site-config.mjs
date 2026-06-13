@@ -1,22 +1,22 @@
-const DEFAULT_SITE_URL = 'https://respawn-app.github.io';
-const DEFAULT_BASE_PATH = '/builder';
-const SITE_TITLE = 'Builder';
-const DOCS_HOME_LABEL = 'Builder';
+const DEFAULT_SITE_URL = 'https://kent.sh';
+const DEFAULT_BASE_PATH = '';
+const SITE_TITLE = 'Kent';
+const DOCS_HOME_LABEL = 'Kent';
 const DOCS_HOME_TITLE = 'Home';
-const DOCS_HOME_VISIBLE_TITLE = 'Builder';
+const DOCS_HOME_VISIBLE_TITLE = 'Kent';
 const DOCS_HOME_SLUG = 'docs';
 const DOCS_HOME_PATH = '/docs/';
 const CONTRIBUTING_PATH = '/contributing/';
 const SECURITY_PATH = '/security/';
-const REPO_URL = 'https://github.com/respawn-llc/builder';
+const REPO_URL = 'https://github.com/respawn-llc/kent';
 const REPO_DEFAULT_BRANCH = 'main';
 const REPO_EDIT_ROOT_URL = `${REPO_URL}/edit/${REPO_DEFAULT_BRANCH}/`;
 const REPO_BLOB_ROOT_URL = `${REPO_URL}/blob/${REPO_DEFAULT_BRANCH}/`;
-const REPO_RAW_ROOT_URL = `https://raw.githubusercontent.com/respawn-llc/builder/${REPO_DEFAULT_BRANCH}/`;
+const REPO_RAW_ROOT_URL = `https://raw.githubusercontent.com/respawn-llc/kent/${REPO_DEFAULT_BRANCH}/`;
 const DOCSEARCH_APP_ID = 'YFIMJHUME7';
 const DOCSEARCH_API_KEY = '87f58a573c52b1bb4aa289030dbb9ed9';
-const DOCSEARCH_INDEX_NAME = 'builder';
-const SOCIAL_PREVIEW_PATH = '/builder-social-preview.webp';
+const DOCSEARCH_INDEX_NAME = 'kent';
+const SOCIAL_PREVIEW_PATH = '/kent-social-preview.webp';
 
 function firstNonEmpty(value) {
     if (typeof value !== 'string') {

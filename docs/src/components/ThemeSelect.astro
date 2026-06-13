@@ -2,7 +2,7 @@
 import { Icon } from '@astrojs/starlight/components';
 ---
 
-<builder-theme-toggle>
+<kent-theme-toggle>
   <button type="button" class="theme-toggle" aria-label="Switch theme">
     <span class="icon icon-light" aria-hidden="true">
       <Icon name="moon" />
@@ -11,7 +11,7 @@ import { Icon } from '@astrojs/starlight/components';
       <Icon name="sun" />
     </span>
   </button>
-</builder-theme-toggle>
+</kent-theme-toggle>
 
 <script>
   const storageKey = 'starlight-theme';
@@ -47,7 +47,7 @@ import { Icon } from '@astrojs/starlight/components';
     button.setAttribute('aria-label', `Switch to ${nextTheme} theme`);
   };
 
-  class BuilderThemeToggle extends HTMLElement {
+  class KentThemeToggle extends HTMLElement {
     constructor() {
       super();
       this.mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
@@ -86,14 +86,14 @@ import { Icon } from '@astrojs/starlight/components';
     }
   }
 
-  if (!customElements.get('builder-theme-toggle')) {
-    customElements.define('builder-theme-toggle', BuilderThemeToggle);
+  if (!customElements.get('kent-theme-toggle')) {
+    customElements.define('kent-theme-toggle', KentThemeToggle);
   }
 </script>
 
 <style>
   @layer starlight.core {
-    builder-theme-toggle {
+    kent-theme-toggle {
       display: inline-flex;
       align-items: center;
     }

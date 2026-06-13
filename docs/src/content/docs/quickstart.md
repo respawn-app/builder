@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Install Builder, authenticate on first launch, tune the most useful settings, and learn the main session workflows.
+description: Install Kent, authenticate on first launch, tune the most useful settings, and learn the main session workflows.
 ---
 
 ## Install
@@ -9,7 +9,7 @@ description: Install Builder, authenticate on first launch, tune the most useful
 
 ```bash
 brew tap respawn-llc/tap
-brew install builder-cli
+brew install respawn-llc/homebrew-tap/kent
 ```
 
 ### Standalone binaries via GitHub Releases
@@ -19,39 +19,39 @@ These versions are **not auto-updated**. Please keep them updated manually by re
 Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/respawn-llc/kent/main/scripts/install.sh | sh
 ```
 
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/respawn-llc/kent/main/scripts/install.ps1 | iex
 ```
 
-Check the installed version with: `builder --version`
+Check the installed version with: `kent --version`
 
-Builder is unsandboxed by default.
+Kent is unsandboxed by default.
 For container, VM, and remote-server isolation, see [Sandboxing](../sandboxing/).
 
 ## Optional: Install the Background Service
 
-Run this if you want one shared Builder server to start at login:
+Run this if you want one shared Kent server to start at login:
 
 ```bash
-builder service install
+kent service install
 ```
 
 It uses about 50 MB of RAM, lets unlimited frontends stay lightweight by connecting to one local orchestrator, and makes background shells reliable when a terminal frontend exits.
-See [Builder Server](../server/) for details and service management commands.
+See [Kent Server](../server/) for details and service management commands.
 
 ## First Authentication
 
-Start Builder CLI with: `builder`
+Start Kent CLI with: `kent`
 
 Supported auth options:
 
 - OpenAI/Codex subscription OAuth via the startup sign-in picker.
-- OpenAI API-key auth via `OPENAI_API_KEY`. If you prefer API-key auth, export `OPENAI_API_KEY` before launch and builder will use it with your permission.
+- OpenAI API-key auth via `OPENAI_API_KEY`. If you prefer API-key auth, export `OPENAI_API_KEY` before launch and kent will use it with your permission.
 
 You can switch later with `/login`.
 
@@ -68,7 +68,7 @@ Anthropic or Gemini subscriptions/models will not be supported until they allow 
 - Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. Use `Up`/`Down` to walk through user messages; the picker loads older transcript pages at the edges, including messages before compaction boundaries. File edits are not rolled back.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
 - Press `Ctrl+V` or `Ctrl+D` to paste a clipboard screenshot into the prompt as an image file path.
-- Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
+- Use `/review` to start a code review. In a non-empty session, Kent opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
 - `/name <new-name>` will set your session name in the picker and terminal title.
 - `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it. **Going above 100% will cost more and degrade model performance**.
 - Run `/status` to get detailed info about the session.
@@ -77,20 +77,20 @@ For the full command reference, see [Slash Commands](../slash-commands/).
 
 ## Configuration
 
-Builder reads settings from `~/.builder/config.toml` and will auto-create it through a UI flow on first start. The full reference is on the [Configuration](../config/) page.
+Kent reads settings from `~/.kent/config.toml` and will auto-create it through a UI flow on first start. The full reference is on the [Configuration](../config/) page.
 
 ## Skills and Slash Commands
 
-On first launch, the setup wizard can optionally symlink existing skills and slash-command directories from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout.
+On first launch, the setup wizard can optionally symlink existing skills and slash-command directories from `~/.claude`, `~/.codex`, or `~/.agents` into Kent's `~/.kent` layout.
 
-Builder discovers skills from:
+Kent discovers skills from:
 
-- `<workspace>/.builder/skills`
-- `~/.builder/skills`
+- `<workspace>/.kent/skills`
+- `~/.kent/skills`
 
-Builder also seeds preinstalled skills into `~/.builder/.generated/skills`. Do not edit `~/.builder/.generated`; copy a generated skill into a workspace or global skill root to customize it.
+Kent also seeds preinstalled skills into `~/.kent/.generated/skills`. Do not edit `~/.kent/.generated`; copy a generated skill into a workspace or global skill root to customize it.
 
-You can disable individual skills for new sessions in `~/.builder/config.toml`:
+You can disable individual skills for new sessions in `~/.kent/config.toml`:
 
 ```toml
 [skills]
@@ -98,12 +98,12 @@ apiresult = false
 ```
 Changes take effect when you start a new session.
 
-Builder discovers custom slash commands from Markdown files in:
+Kent discovers custom slash commands from Markdown files in:
 
-- `<workspace>/.builder/prompts`
-- `<workspace>/.builder/commands`
-- `~/.builder/prompts`
-- `~/.builder/commands`
+- `<workspace>/.kent/prompts`
+- `<workspace>/.kent/commands`
+- `~/.kent/prompts`
+- `~/.kent/commands`
 
 ## Supervisor
 

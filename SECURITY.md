@@ -4,7 +4,7 @@ Please report security issues privately.
 
 Do not open a public GitHub issue for an unpatched vulnerability.
 
-For Builder's default tool trust model and container/VM isolation guidance, see the [Sandboxing and Security guide](https://opensource.respawn.pro/builder/sandboxing/).
+For Kent's default tool trust model and container/VM isolation guidance, see the [Sandboxing and Security guide](https://kent.sh/sandboxing/).
 
 ## Reporting a Vulnerability
 

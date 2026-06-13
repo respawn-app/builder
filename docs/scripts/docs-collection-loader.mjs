@@ -78,7 +78,7 @@ export function createDocsCollectionLoader() {
   const initializedWatchers = new WeakSet();
 
   return {
-    name: 'builder-docs-collection-loader',
+    name: 'kent-docs-collection-loader',
     async load(context) {
       const docsRoot = fileURLToPath(context.config.root);
       const repoRoot = path.dirname(docsRoot);

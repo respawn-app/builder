@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx']);
 const EXCLUDED_ENTRY_IDS = new Set(['404']);
-const MANIFEST_FILE_NAME = '.builder-docs-markdown-endpoints.json';
+const MANIFEST_FILE_NAME = '.kent-docs-markdown-endpoints.json';
 
 async function collectMarkdownFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
