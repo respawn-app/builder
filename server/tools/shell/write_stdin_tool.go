@@ -81,8 +81,8 @@ func (t *WriteStdinTool) Call(ctx context.Context, c tools.Call) (tools.Result, 
 		return tools.Result{}, marshalErr
 	}
 	toolResult := tools.Result{CallID: c.ID, Name: c.Name, Output: body}
-	if result.Truncated {
-		toolResult.Presentation = shellOutputStatusPresentation(c.Name, false, result.Truncated)
+	if result.RawOutputRequested || result.Truncated {
+		toolResult.Presentation = shellOutputStatusPresentation(c.Name, result.RawOutputRequested, result.Truncated)
 	}
 	return toolResult, nil
 }

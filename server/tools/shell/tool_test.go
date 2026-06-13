@@ -1044,6 +1044,38 @@ func TestExecCommandRawOutputAddsPresentationMetadata(t *testing.T) {
 	}
 }
 
+func TestWriteStdinRawSessionAddsPresentationMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	stdinTool := NewWriteStdinTool(16_000, manager)
+
+	result := callExecCommand(t, execTool, "raw-tty-1", map[string]any{
+		"cmd":           "read line; printf '\\033[31m%s\\033[0m' \"$line\"",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"raw":           true,
+		"tty":           true,
+		"yield_time_ms": 250,
+	})
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+
+	stdinResult := callWriteStdin(t, stdinTool, "raw-tty-2", map[string]any{
+		"session_id":    1000,
+		"chars":         "raw builder\n",
+		"yield_time_ms": 2_000,
+	})
+	if stdinResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
+	}
+	if stdinResult.Presentation == nil || !stdinResult.Presentation.RawOutputRequested || stdinResult.Presentation.OutputTruncated {
+		t.Fatalf("expected raw write_stdin presentation metadata without truncation, got %+v", stdinResult.Presentation)
+	}
+	waitForManagerCount(t, manager, 0, time.Second)
+}
+
 func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	workspace := t.TempDir()
 	manager := newBackgroundTestManager(t)

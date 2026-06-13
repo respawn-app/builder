@@ -215,9 +215,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		return ExecResult{}, err
 	}
 	result := ExecResult{
-		SessionID:  id,
-		WallTime:   time.Since(start),
-		OutputPath: logPath,
+		SessionID:          id,
+		WallTime:           time.Since(start),
+		OutputPath:         logPath,
+		RawOutputRequested: req.Raw,
 	}
 	snapshot, backgrounded := entry.transitionToBackground()
 	if !backgrounded {
@@ -340,16 +341,17 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		entry.markCompletionNoticeConsumed()
 	}
 	return ExecResult{
-		SessionID:    id,
-		WallTime:     time.Since(start),
-		Warning:      postprocess.JoinWarnings(warning, processed.Warning),
-		ToolError:    processed.UnrecoverableError,
-		Output:       display,
-		OutputPath:   snapshot.LogPath,
-		Running:      snapshot.Running,
-		Backgrounded: snapshot.Backgrounded,
-		ExitCode:     postprocess.CloneIntPtr(snapshot.ExitCode),
-		Truncated:    sourceTruncated || displayTruncated,
+		SessionID:          id,
+		WallTime:           time.Since(start),
+		Warning:            postprocess.JoinWarnings(warning, processed.Warning),
+		ToolError:          processed.UnrecoverableError,
+		Output:             display,
+		OutputPath:         snapshot.LogPath,
+		Running:            snapshot.Running,
+		Backgrounded:       snapshot.Backgrounded,
+		ExitCode:           postprocess.CloneIntPtr(snapshot.ExitCode),
+		RawOutputRequested: snapshot.RawOutputRequested,
+		Truncated:          sourceTruncated || displayTruncated,
 	}, nil
 }
 
