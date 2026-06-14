@@ -629,6 +629,30 @@ try {
     Restart-ServiceIfInstalled $target
     $installSucceeded = $true
     Write-Output "Installed kent $normalizedVersion to $target"
+
+    # Upgrade safety net for users coming from the old Builder release. Kent never
+    # reads ~/.builder and this installer never runs the migration for you (it
+    # mutates your DB and filesystem). Surface the steps so the user runs them
+    # explicitly. A reparse point (the post-migration ~/.builder -> ~/.kent compat
+    # link) is benign and intentionally ignored here.
+    $oldBuilderRoot = Join-Path (Get-UserHome) ".builder"
+    if (Test-Path -LiteralPath $oldBuilderRoot) {
+        $oldItem = Get-Item -LiteralPath $oldBuilderRoot -Force
+        $isReparse = (($oldItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+        if ($oldItem.PSIsContainer -and -not $isReparse) {
+            $compatUrl = "$ReleaseBase/builder-2.0.0/builder_2.0.0_windows_$arch.exe"
+            Write-Output ""
+            Write-Output "Found an existing ~/.builder from the previous Builder release."
+            Write-Output "Kent uses ~/.kent and does not read ~/.builder. To migrate your sessions,"
+            Write-Output "worktrees, and config, run the one-time Builder 2.0 migration BEFORE using kent:"
+            Write-Output "  1. Stop any running Builder activity (interactive sessions and the service)."
+            Write-Output "  2. Download the Builder 2.0 migration binary and run the migration:"
+            Write-Output ("       Invoke-WebRequest -Uri '" + $compatUrl + "' -OutFile '.\builder-migrate.exe'")
+            Write-Output "       .\builder-migrate.exe migrate"
+            Write-Output "  3. Re-run this installer if needed."
+            Write-Output "Migration guide: https://kent.sh/"
+        }
+    }
 } finally {
     if ($serviceStoppedForUpdate -and -not $installSucceeded) {
         Restart-ServiceAfterFailedUpdate $target

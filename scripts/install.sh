@@ -239,13 +239,20 @@ fi
 # explicitly. A ~/.builder that is a symlink (the post-migration compat link to
 # ~/.kent) is benign and intentionally ignored here.
 if [ -d "$HOME/.builder" ] && [ ! -L "$HOME/.builder" ]; then
+	# This curl|bash installer targets macOS/Linux; Windows users get the
+	# equivalent migration steps from install.ps1.
+	compat_url="${RELEASE_BASE}/builder-2.0.0/builder_2.0.0_${os}_${arch}"
 	cat >&2 <<EOF
 
 Found an existing ~/.builder from the previous Builder release.
 Kent uses ~/.kent and does not read ~/.builder. To migrate your sessions,
 worktrees, and config, run the one-time Builder 2.0 migration BEFORE using kent:
-  1. Stop any running Builder activity (server/agents).
-  2. Get the Builder 2.0 migration binary and run: builder migrate
+  1. Stop any running Builder activity (interactive sessions, 'builder serve',
+     and 'builder service stop' if the background service is installed).
+  2. Download the Builder 2.0 migration binary and run the migration:
+       curl -fsSL -o /tmp/builder-migrate "${compat_url}"
+       chmod +x /tmp/builder-migrate
+       /tmp/builder-migrate migrate
   3. Re-run this installer if needed.
 Migration guide: https://kent.sh/
 EOF
