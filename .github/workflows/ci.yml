@@ -183,6 +183,24 @@ jobs:
           grep -q '^stopped$' "$marker_path"
           grep -q '^restarted$' "$marker_path"
 
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The compat build ships a Windows binary whose `builder migrate` creates a
+      # directory junction and prints PowerShell-correct guidance. Exercise that
+      # platform-specific path (junction create/detect) on a real Windows runner.
+      - name: Test migrate package
+        run: go test ./cli/builder/...
+
   docs:
     runs-on: ubuntu-latest
     defaults:

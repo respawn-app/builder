@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -27,18 +28,10 @@ type migrateOptions struct {
 }
 
 // writeMigrationNotice prints the message shown for every command the builder
-// 2.0 compat build refuses to run. It does not try to detect how the binary was
-// installed (unreliable); it lists both install channels and lets the user pick.
+// 2.0 compat build refuses to run. The guidance is rendered for the host OS so
+// Windows users see PowerShell-correct commands.
 func writeMigrationNotice(w io.Writer) {
-	fmt.Fprint(w, `Builder has been renamed to Kent. This command is to help you migrate.
-
-To finish migrating:
-  1. Run the migration:  builder migrate
-  2. Install Kent (pick one):
-       Homebrew:  brew install respawn-llc/homebrew-tap/kent
-       Script:    see https://kent.sh/quickstart/ for the install command
-  3. Remove this builder binary once Kent works:  rm "$(command -v builder)"
-`)
+	fmt.Fprint(w, migrationNoticeText(runtime.GOOS))
 }
 
 // runCompatGate implements the builder 2.0 refuse-to-start behavior and returns
@@ -90,8 +83,8 @@ func runMigration(ctx context.Context, opts migrateOptions, stdout io.Writer, st
 	if err != nil {
 		return fmt.Errorf("inspect %s: %w", oldRoot, err)
 	}
-	if oldInfo.Mode()&os.ModeSymlink != 0 {
-		fmt.Fprintf(stdout, "Already migrated: %s is a symlink (compat link to %s); nothing to do.\n", oldRoot, newRoot)
+	if isCompatLink(oldInfo) {
+		fmt.Fprintf(stdout, "Already migrated: %s is already a compat link to %s; nothing to do.\n", oldRoot, newRoot)
 		return nil
 	}
 	if !oldInfo.IsDir() {
@@ -162,12 +155,14 @@ func runMigration(ctx context.Context, opts migrateOptions, stdout io.Writer, st
 		for _, offender := range offenders {
 			fmt.Fprintf(stderr, "  - %s\n", offender)
 		}
-		return fmt.Errorf("verification failed; left %s and its snapshot at %s for manual restore and did NOT create the compat symlink", newRoot, backupDir)
+		return fmt.Errorf("verification failed; left %s and its snapshot at %s for manual restore and did NOT create the compat link", newRoot, backupDir)
 	}
 
-	// Step 9 — compat symlink old -> new (only on a clean verification).
-	if err := os.Symlink(newRoot, oldRoot); err != nil {
-		return fmt.Errorf("create compat symlink %s -> %s: %w", oldRoot, newRoot, err)
+	// Step 9 — compat link old -> new (only on a clean verification). On Unix
+	// this is a symlink; on Windows it is a directory junction (createCompatLink),
+	// which, unlike a directory symlink, needs no elevation.
+	if err := createCompatLink(newRoot, oldRoot); err != nil {
+		return fmt.Errorf("create compat link %s -> %s: %w", oldRoot, newRoot, err)
 	}
 
 	// Step 10 — drop generated assets so kent regenerates them fresh.
@@ -612,13 +607,15 @@ func printMigrationSummary(stdout io.Writer, oldRoot string, newRoot string, bac
 	fmt.Fprintf(stdout, "  Snapshot:    %s (delete when satisfied)\n", backupDir)
 	fmt.Fprintf(stdout, "  Sessions:    %d metadata file(s) rebased\n", sessionsRebased)
 	fmt.Fprintln(stdout, "")
+	goos := runtime.GOOS
 	fmt.Fprintln(stdout, "Next steps:")
-	fmt.Fprintln(stdout, "  - Install Kent:  brew install respawn-llc/homebrew-tap/kent  (or see https://kent.sh/quickstart/)")
-	fmt.Fprintln(stdout, "  - Map env vars:  BUILDER_* -> KENT_* in your shell rc (not edited automatically)")
-	fmt.Fprintln(stdout, "  - Remove the old builder binary:  rm \"$(command -v builder)\"")
+	fmt.Fprintln(stdout, "  - Install Kent:  "+installKentSummaryHint(goos))
+	fmt.Fprintln(stdout, "  - Map env vars:  "+envVarMapHint(goos))
+	fmt.Fprintln(stdout, "  - Remove the old builder binary:  "+removeBinaryHint(goos))
 	if serviceExisted {
 		fmt.Fprintln(stdout, "  - Restore autostart under Kent:  kent service install")
 	}
-	fmt.Fprintln(stdout, "  - External tools that hardcode ~/.builder keep working via the compat symlink.")
-	fmt.Fprintln(stdout, "    Find them with:  grep -rl ~/.builder ~   then repoint and finally:  rm ~/.builder")
+	for _, line := range legacyCompatLinkCleanupLines(goos, oldRoot) {
+		fmt.Fprintln(stdout, line)
+	}
 }
