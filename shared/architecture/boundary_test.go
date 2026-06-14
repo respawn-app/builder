@@ -740,7 +740,7 @@ type cliInternalBoundaryCase struct {
 	Packages             []string
 	Label                string
 	ForbidServer         bool
-	ForbidAllCore     bool
+	ForbidAllCore        bool
 	ServerViolationLabel string
 }
 
