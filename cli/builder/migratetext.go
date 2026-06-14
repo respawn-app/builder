@@ -73,7 +73,7 @@ func legacyCompatLinkCleanupLines(goos string, oldRoot string) []string {
 	if goos == "windows" {
 		return []string{
 			"  - Legacy tools that hardcode " + oldRoot + " keep working via the compat junction.",
-			"    Repoint them, then remove it:  Remove-Item -Force " + oldRoot,
+			"    Repoint them, then remove it:  Remove-Item -Force \"" + oldRoot + "\"",
 		}
 	}
 	return []string{

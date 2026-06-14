@@ -1,11 +1,31 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"builder/server/session"
 )
+
+// cmdShellMetacharacters are the characters cmd.exe interprets as shell syntax
+// rather than literal path content. The Windows compat junction is created with
+// mklink, a cmd builtin invoked through `cmd /c`, so a junction path containing
+// any of these cannot be passed through the shell safely. They are exceedingly
+// rare in a Windows user-profile path but are valid in account names, so the
+// migration refuses with actionable guidance instead of risking a mis-parsed or
+// injected command. The check lives here (not in the windows-only file) so it is
+// pure, dependency-free string logic that is unit-tested on every platform.
+const cmdShellMetacharacters = "&|<>^\"()%!"
+
+// ensureShellSafeJunctionPath returns an error when p contains a character that
+// cmd.exe would interpret as shell syntax rather than a literal path component.
+func ensureShellSafeJunctionPath(p string) error {
+	if i := strings.IndexAny(p, cmdShellMetacharacters); i >= 0 {
+		return fmt.Errorf("path %q contains %q, which cmd.exe cannot pass to mklink safely; create the compat junction manually, e.g. mklink /J %q <new-root>", p, string(p[i]), p)
+	}
+	return nil
+}
 
 // rebaseUnderRoot rewrites value from oldRoot to newRoot when value is oldRoot
 // itself or a descendant of oldRoot. The match is made only at a path-separator

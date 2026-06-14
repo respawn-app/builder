@@ -96,6 +96,20 @@ func runMigration(ctx context.Context, opts migrateOptions, stdout io.Writer, st
 		return fmt.Errorf("inspect %s: %w", oldRoot, err)
 	}
 	if isCompatLink(oldInfo) {
+		// A link at the old root only means "already migrated" if it actually
+		// resolves to the new root. A stale or user-created symlink/junction
+		// pointing elsewhere must not silently skip the migration.
+		resolvedOld, err := filepath.EvalSymlinks(oldRoot)
+		if err != nil {
+			return fmt.Errorf("%s is a link but could not be resolved: %w", oldRoot, err)
+		}
+		resolvedNew, err := filepath.EvalSymlinks(newRoot)
+		if err != nil {
+			resolvedNew = filepath.Clean(newRoot)
+		}
+		if filepath.Clean(resolvedOld) != filepath.Clean(resolvedNew) {
+			return fmt.Errorf("%s is a link to %s, not the expected new root %s; resolve this manually before migrating", oldRoot, resolvedOld, newRoot)
+		}
 		fmt.Fprintf(stdout, "Already migrated: %s is already a compat link to %s; nothing to do.\n", oldRoot, newRoot)
 		return nil
 	}
@@ -259,7 +273,10 @@ func snapshotBeforeRewrite(newRoot string, backupDir string) error {
 	for _, name := range []string{"main.sqlite3", "main.sqlite3-wal", "main.sqlite3-shm"} {
 		src := filepath.Join(dbDir, name)
 		if _, err := os.Stat(src); err != nil {
-			continue
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("inspect db snapshot source %s: %w", src, err)
 		}
 		if err := copyFile(src, filepath.Join(backupDir, "db", name)); err != nil {
 			return err
@@ -551,6 +568,11 @@ func repairWorktrees(ctx context.Context, newRoot string, oldRoot string, stderr
 			return
 		}
 		pairs = append(pairs, pair{worktreePath: worktreePath, repoPath: repoPath})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		fmt.Fprintf(stderr, "warning: iterate worktrees for repair (some may be left unrepaired): %v\n", err)
+		return
 	}
 	_ = rows.Close()
 

@@ -21,10 +21,21 @@ import (
 // (with its output) as an error, and the caller's verification confirms the link
 // resolves to the new root.
 func createCompatLink(target string, link string) error {
-	cmd := exec.Command("cmd", "/c", "mklink", "/J", filepath.Clean(link), filepath.Clean(target))
+	cleanLink := filepath.Clean(link)
+	cleanTarget := filepath.Clean(target)
+	// mklink is a cmd builtin, so the paths are re-parsed by cmd.exe. Refuse any
+	// path holding a cmd metacharacter rather than letting the shell mis-parse or
+	// execute it; filepath.Clean only normalizes separators, it does not escape.
+	if err := ensureShellSafeJunctionPath(cleanLink); err != nil {
+		return err
+	}
+	if err := ensureShellSafeJunctionPath(cleanTarget); err != nil {
+		return err
+	}
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", cleanLink, cleanTarget)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("mklink /J %q %q: %w: %s", link, target, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("mklink /J %q %q: %w: %s", cleanLink, cleanTarget, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

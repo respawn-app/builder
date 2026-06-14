@@ -53,6 +53,26 @@ func TestPathStillUnderRoot(t *testing.T) {
 	}
 }
 
+func TestEnsureShellSafeJunctionPath(t *testing.T) {
+	safe := []string{
+		`C:\Users\nek\.kent`,
+		`C:\Users\First Last\.builder`, // spaces are escaped by exec arg quoting, not cmd-special
+		`/home/u/.kent`,
+	}
+	for _, p := range safe {
+		if err := ensureShellSafeJunctionPath(p); err != nil {
+			t.Fatalf("expected %q to be safe, got error: %v", p, err)
+		}
+	}
+	// Each cmd metacharacter (valid in a Windows account name) must be rejected.
+	for _, meta := range []string{"&", "|", "<", ">", "^", `"`, "(", ")", "%", "!"} {
+		p := `C:\Users\a` + meta + `b\.builder`
+		if err := ensureShellSafeJunctionPath(p); err == nil {
+			t.Fatalf("expected %q (contains %q) to be rejected", p, meta)
+		}
+	}
+}
+
 func TestRebaseSessionMeta(t *testing.T) {
 	oldRoot := filepath.FromSlash("/home/u/.builder")
 	newRoot := filepath.FromSlash("/home/u/.kent")
