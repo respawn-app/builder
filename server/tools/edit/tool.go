@@ -12,12 +12,12 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"builder/server/tools"
-	"builder/server/tools/fsguard"
-	patchtool "builder/server/tools/patch"
-	"builder/shared/toolspec"
-	"builder/shared/transcript"
-	patchformat "builder/shared/transcript/patchformat"
+	"core/server/tools"
+	"core/server/tools/fsguard"
+	patchtool "core/server/tools/patch"
+	"core/shared/toolspec"
+	"core/shared/transcript"
+	patchformat "core/shared/transcript/patchformat"
 )
 
 const (
@@ -292,7 +292,7 @@ func writeAtomicallyIfUnchanged(path string, data []byte, before os.FileInfo) er
 	if before != nil {
 		mode = before.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".builder-edit-"+filepath.Base(path)+"-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".kent-edit-"+filepath.Base(path)+"-*")
 	if err != nil {
 		return failf("stage write failed: %v", err)
 	}

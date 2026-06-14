@@ -1,7 +1,7 @@
 Continue working toward the active session goal.
 
 <goal>
-{{objective}}
+{{.Objective}}
 </goal>
 
 Work mode:
@@ -19,5 +19,5 @@ Completion discipline:
 - If the goal is complete, report completion through the CLI from a shell command:
 
 ```sh
-builder goal complete
+{{.LaunchCommand}} goal complete
 ```

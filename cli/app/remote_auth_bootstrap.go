@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/cli/app/internal/oauthadapter"
-	serverauth "builder/server/auth"
-	"builder/shared/client"
-	"builder/shared/config"
-	"builder/shared/serverapi"
+	"core/cli/app/internal/oauthadapter"
+	serverauth "core/server/auth"
+	"core/shared/client"
+	"core/shared/config"
+	"core/shared/serverapi"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -87,7 +87,7 @@ func (i *interactiveAuthInteractor) completeRemoteAuthBootstrap(ctx context.Cont
 			req.FlowErr = serverapi.ErrServerAuthRequired
 			continue
 		}
-		i.printAuthSection(req.Theme, "Server Auth Ready", []string{lipgloss.NewStyle().Foreground(uiPalette(req.Theme).muted).Faint(true).Render("Builder configured auth on the server.")})
+		i.printAuthSection(req.Theme, "Server Auth Ready", []string{lipgloss.NewStyle().Foreground(uiPalette(req.Theme).muted).Faint(true).Render("Kent configured auth on the server.")})
 		return nil
 	}
 }

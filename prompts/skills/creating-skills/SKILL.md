@@ -5,11 +5,11 @@ description: Create or improve agent skills. Use when the user wants to add a ne
 
 Skills are a specialized technical documentation standard intended for AI Agents to read on-demand, and designed to teach them a specific technology, tool, or approach that is **outside of their training data** (aka "knowledge cutoff"). Agents learn about skills when they see the injected frontmatter description, just like you did in this session for this skill. When agents need the skill, they read SKILL.md and change their behavior to follow skill instructions, just like you are doing right now.
 
-Builder discovers skills from these roots (priority order):
+Kent discovers skills from these roots (priority order):
 
-- `<workspace>/.builder/skills` - use workspace skills for project-specific workflows, repository conventions, local tools, or instructions that should travel with a codebase.
-- `~/.builder/skills` - use global skills for reusable personal workflows that apply across all projects.
-- `~/.builder/.generated/skills` - Skills in ~/.builder/.generated/ are ephemeral, do not attempt to edit them or add new ones.
+- `<workspace>/.kent/skills` - use workspace skills for project-specific workflows, repository conventions, local tools, or instructions that should travel with a codebase.
+- `~/.kent/skills` - use global skills for reusable personal workflows that apply across all projects.
+- `~/.kent/.generated/skills` - Skills in ~/.kent/.generated/ are ephemeral, do not attempt to edit them or add new ones.
 
 When the user asks to create a skill and it's not evident if it's global or local, use `ask_question` to ask for scope.
 
@@ -89,12 +89,12 @@ Overall, treat writing skills like public developer documentation or guidance. A
 To disable or enable a skill, edit its config property instead of deleting the files directly, especially for skills in `.generated/` dir.
 
 ```toml
-# in ~/.builder/config.toml :
+# in ~/.kent/config.toml :
 [skills]
 "skill-name" = false
 ```
 
-More info in the `builder-dogfooding` skill, if available, or official docs.
+More info in the `kent-dogfooding` skill, if available, or official docs.
 
 ## Creation Workflow
 1. Check existing skills so the new one does not duplicate or conflict with them.

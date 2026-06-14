@@ -9,15 +9,15 @@ import (
 	"strconv"
 	"testing"
 
-	"builder/server/llm"
-	"builder/server/metadata"
-	"builder/server/projectview"
-	"builder/server/runtime"
-	"builder/server/serve"
-	"builder/server/session"
-	"builder/server/tools"
-	"builder/shared/client"
-	"builder/shared/config"
+	"core/server/llm"
+	"core/server/metadata"
+	"core/server/projectview"
+	"core/server/runtime"
+	"core/server/serve"
+	"core/server/session"
+	"core/server/tools"
+	"core/shared/client"
+	"core/shared/config"
 )
 
 func registerAppWorkspace(t *testing.T, workspace string) {
@@ -139,8 +139,8 @@ func configureAppTestServerPort(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	serve.ReserveTestListenReservation(listener)
 	t.Cleanup(func() { serve.ReleaseTestListenReservation(listener.Addr().String()) })
-	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
-	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+	t.Setenv("KENT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("KENT_SERVER_PORT", strconv.Itoa(port))
 }
 
 func mustRegisterAppBinding(t *testing.T, persistenceRoot string, workspaceRoot string) metadata.Binding {

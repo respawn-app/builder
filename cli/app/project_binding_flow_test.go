@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/metadata"
-	"builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
+	"core/server/metadata"
+	"core/shared/client"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -425,7 +425,7 @@ func TestEnsureInteractiveProjectBindingFormatsMissingSelectedProjectError(t *te
 	if !errors.Is(err, serverapi.ErrProjectNotFound) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "Restart Builder and choose another project") || !strings.Contains(got, "project-missing") {
+	if got := err.Error(); !strings.Contains(got, "Restart Kent and choose another project") || !strings.Contains(got, "project-missing") {
 		t.Fatalf("error = %q, want missing project picker guidance", got)
 	}
 }

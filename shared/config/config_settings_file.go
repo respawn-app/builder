@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"builder/shared/theme"
+	"core/shared/brand"
+	"core/shared/theme"
 	"github.com/BurntSushi/toml"
 )
 
@@ -25,7 +26,7 @@ func resolveSettingsFilePathInRoot(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".builder", "config.toml"), nil
+	return filepath.Join(home, brand.ConfigDirName, "config.toml"), nil
 }
 
 func resolveWorkspaceSettingsFilePath(workspaceRoot string) (string, error) {
@@ -37,7 +38,7 @@ func resolveWorkspaceSettingsFilePath(workspaceRoot string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve workspace root: %w", err)
 	}
-	return filepath.Join(absRoot, ".builder", "config.toml"), nil
+	return filepath.Join(absRoot, brand.ConfigDirName, "config.toml"), nil
 }
 
 func settingsFileExists(path string) (bool, error) {

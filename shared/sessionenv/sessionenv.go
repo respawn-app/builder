@@ -1,14 +1,18 @@
 package sessionenv
 
-import "strings"
+import (
+	"strings"
 
-const BuilderSessionID = "BUILDER_SESSION_ID"
+	"core/shared/brand"
+)
 
-func LookupBuilderSessionID(lookup func(string) (string, bool)) (string, bool) {
+const SessionIDEnv = brand.SessionIDEnv
+
+func LookupSessionID(lookup func(string) (string, bool)) (string, bool) {
 	if lookup == nil {
 		return "", false
 	}
-	value, ok := lookup(BuilderSessionID)
+	value, ok := lookup(SessionIDEnv)
 	if !ok {
 		return "", false
 	}

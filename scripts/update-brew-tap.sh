@@ -5,13 +5,13 @@ usage() {
 	cat <<'USAGE'
 Usage: scripts/update-brew-tap.sh [--version vX.Y.Z] [--tap /path/to/homebrew-tap] [--repo owner/name] [--formula name] [--commit] [--push]
 
-Updates the Homebrew tap formula for builder-cli with a new tag tarball + sha256.
+Updates the Homebrew tap formula for kent with a new tag tarball + sha256.
 
 Defaults:
-  --version : $BUILDER_VERSION, $GITHUB_REF_NAME, or latest git tag in this repo
-  --repo    : respawn-llc/builder
-  --formula : builder-cli
-  --tap     : $BUILDER_TAP_PATH, $HOMEBREW_TAP_PATH, else ../homebrew-tap (relative to repo root)
+  --version : $KENT_VERSION, $GITHUB_REF_NAME, or latest git tag in this repo
+  --repo    : respawn-llc/kent
+  --formula : kent
+  --tap     : $KENT_TAP_PATH, $HOMEBREW_TAP_PATH, else ../homebrew-tap (relative to repo root)
 
 Flags:
   --commit  : commit the formula update in the tap repo
@@ -31,8 +31,8 @@ require_option_value() {
 }
 
 version=""
-repo="respawn-llc/builder"
-formula="builder-cli"
+repo="respawn-llc/kent"
+formula="kent"
 tap_dir=""
 do_commit="false"
 do_push="false"
@@ -121,8 +121,8 @@ if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
 fi
 
 if [[ -z "$version" ]]; then
-	if [[ -n "${BUILDER_VERSION:-}" ]]; then
-		version="${BUILDER_VERSION}"
+	if [[ -n "${KENT_VERSION:-}" ]]; then
+		version="${KENT_VERSION}"
 	elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
 		version="${GITHUB_REF_NAME}"
 	elif [[ -n "${GITHUB_REF:-}" ]]; then
@@ -133,8 +133,8 @@ if [[ -z "$version" ]]; then
 fi
 
 if [[ -z "$tap_dir" ]]; then
-	if [[ -n "${BUILDER_TAP_PATH:-}" ]]; then
-		tap_dir="$BUILDER_TAP_PATH"
+	if [[ -n "${KENT_TAP_PATH:-}" ]]; then
+		tap_dir="$KENT_TAP_PATH"
 	elif [[ -n "${HOMEBREW_TAP_PATH:-}" ]]; then
 		tap_dir="$HOMEBREW_TAP_PATH"
 	elif [[ -d "$repo_root/../homebrew-tap" ]]; then
@@ -170,7 +170,7 @@ mkdir -p "$(dirname "$formula_path")"
 cat >"$tmp_formula" <<EOF
 class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
-  homepage "https://github.com/respawn-llc/builder"
+  homepage "https://github.com/respawn-llc/kent"
   url "$url"
   sha256 "$sha256"
   license "AGPL-3.0-only"
@@ -186,28 +186,28 @@ class ${formula_class} < Formula
   depends_on "ripgrep"
 
   def install
-    ENV["BUILDER_VERSION"] = version.to_s
-    system "bash", "scripts/build.sh", "--output", bin/"builder"
+    ENV["KENT_VERSION"] = version.to_s
+    system "bash", "scripts/build.sh", "--output", bin/"kent"
   end
 
   def post_install
-    output = Utils.safe_popen_read(bin/"builder", "service", "restart", "--if-installed").strip
+    output = Utils.safe_popen_read(bin/"kent", "service", "restart", "--if-installed").strip
     ohai output unless output.empty?
   rescue => e
-    opoo "Builder background service restart failed after update: #{e.message}"
+    opoo "Kent background service restart failed after update: #{e.message}"
   end
 
   def caveats
     <<~EOS
-      Homebrew does not install the Builder server background service.
+      Homebrew does not install the Kent server background service.
 
-      If you want one shared background server for all Builder frontends (~70 MB RAM), run:
-        builder service install
+      If you want one shared background server for all Kent frontends (~70 MB RAM), run:
+        kent service install
     EOS
   end
 
   test do
-    assert_match "Usage of builder:", shell_output("#{bin}/builder --help 2>&1")
+    assert_match "Usage of kent:", shell_output("#{bin}/kent --help 2>&1")
   end
 end
 EOF

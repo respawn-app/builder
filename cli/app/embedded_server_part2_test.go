@@ -1,14 +1,14 @@
 package app
 
 import (
-	"builder/server/primaryrun"
-	askquestion "builder/server/tools/askquestion"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/testopenai"
 	"context"
+	"core/server/primaryrun"
+	askquestion "core/server/tools/askquestion"
+	shelltool "core/server/tools/shell"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/testopenai"
 	"errors"
 	"io"
 	"net/http"
@@ -279,7 +279,7 @@ func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
 	if got := ringer.Count(); got != 2 {
 		t.Fatalf("ask notification count = %d, want 2", got)
 	}
-	wantLast := "builder: Question: " + second.req.Question
+	wantLast := "kent: Question: " + second.req.Question
 	if got := ringer.Last(); got != wantLast {
 		t.Fatalf("last ask notification = %q, want %q", got, wantLast)
 	}

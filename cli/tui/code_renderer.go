@@ -1,15 +1,15 @@
 package tui
 
 import (
-	"builder/shared/theme"
 	"bytes"
+	"core/shared/theme"
 	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
 
-	"builder/shared/transcript"
-	patchformat "builder/shared/transcript/patchformat"
+	"core/shared/transcript"
+	patchformat "core/shared/transcript/patchformat"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"

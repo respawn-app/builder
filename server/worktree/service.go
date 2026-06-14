@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"builder/server/metadata"
-	"builder/server/metadata/sqlitegen"
-	"builder/server/primaryrun"
-	"builder/server/session"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
+	"core/server/metadata"
+	"core/server/metadata/sqlitegen"
+	"core/server/primaryrun"
+	"core/server/session"
+	shelltool "core/server/tools/shell"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
 	"github.com/google/uuid"
 )
 
@@ -238,7 +238,7 @@ func (s *Service) EnsureTaskWorktree(ctx context.Context, req EnsureTaskWorktree
 	if !ok {
 		return EnsureTaskWorktreeResponse{}, fmt.Errorf("created task worktree %q was not discovered after git sync: %w", worktreeRoot, serverapi.ErrWorktreeNotFound)
 	}
-	created.record.BuilderManaged = true
+	created.record.Managed = true
 	created.record.CreatedBranch = createdBranch
 	created.record.UpdatedAt = time.Now().UTC()
 	cleanup.worktreeID = strings.TrimSpace(created.record.ID)
@@ -416,7 +416,7 @@ func (s *Service) ensureTaskWorktreeDeletionUnblocked(ctx context.Context, taskI
 }
 
 func (s *Service) deleteTaskWorktreeBranch(ctx context.Context, workspaceRoot string, record metadata.WorktreeRecord, target syncedWorktree, found bool) (bool, error) {
-	if !record.BuilderManaged || !record.CreatedBranch {
+	if !record.Managed || !record.CreatedBranch {
 		return false, nil
 	}
 	branchName := ""
@@ -579,7 +579,7 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 	if !ok {
 		return serverapi.WorktreeCreateResponse{}, fmt.Errorf("created worktree %q was not discovered after git sync: %w", worktreeRoot, serverapi.ErrWorktreeNotFound)
 	}
-	created.record.BuilderManaged = true
+	created.record.Managed = true
 	created.record.CreatedBranch = createdBranch
 	created.record.OriginSessionID = workspaceCtx.sessionID
 	created.record.UpdatedAt = time.Now().UTC()
@@ -594,7 +594,7 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 	}
 	setupScheduled := s.scheduleSetupScript(workspaceCtx, req.ControllerLeaseID, created, strings.TrimSpace(created.git.BranchName), createdBranch)
 	createdView := worktreeViewFromSynced(created, nextTarget)
-	createdView.BuilderManaged = true
+	createdView.Managed = true
 	createdView.CreatedBranch = createdBranch
 	createdView.OriginSessionID = workspaceCtx.sessionID
 	cleanup.active = false
@@ -877,7 +877,7 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 		if !found {
 			record = metadata.WorktreeRecord{ID: "worktree-" + uuid.NewString(), WorkspaceID: strings.TrimSpace(workspaceID), CreatedAt: now}
 		} else if shouldResetWorktreeProvenance(record, gitEntry) {
-			record.BuilderManaged = false
+			record.Managed = false
 			record.CreatedBranch = false
 			record.OriginSessionID = ""
 		}
@@ -1069,7 +1069,7 @@ func (s *Service) rollbackRetargetedSessions(ctx context.Context, workspaceID st
 }
 
 func shouldResetWorktreeProvenance(record metadata.WorktreeRecord, gitEntry GitWorktree) bool {
-	if !record.BuilderManaged && !record.CreatedBranch && strings.TrimSpace(record.OriginSessionID) == "" {
+	if !record.Managed && !record.CreatedBranch && strings.TrimSpace(record.OriginSessionID) == "" {
 		return false
 	}
 	if gitEntry.Detached || (strings.TrimSpace(gitEntry.BranchRef) == "" && !gitEntry.IsMain) {
@@ -1396,15 +1396,15 @@ func (s *Service) runSetupScript(scriptPath string, sessionID string, payload se
 	cmd.Dir = payload.WorktreeRoot
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Env = append(os.Environ(),
-		"BUILDER_WORKTREE_SOURCE_WORKSPACE_ROOT="+payload.SourceWorkspaceRoot,
-		"BUILDER_WORKTREE_BRANCH_NAME="+payload.BranchName,
-		"BUILDER_WORKTREE_ROOT="+payload.WorktreeRoot,
-		"BUILDER_WORKTREE_SESSION_ID="+payload.SessionID,
-		"BUILDER_WORKTREE_PROJECT_ID="+payload.ProjectID,
-		"BUILDER_WORKTREE_WORKSPACE_ID="+payload.WorkspaceID,
-		"BUILDER_WORKTREE_WORKTREE_ID="+payload.WorktreeID,
-		fmt.Sprintf("BUILDER_WORKTREE_CREATED_BRANCH=%t", payload.CreatedBranch),
-		"BUILDER_WORKTREE_PAYLOAD_JSON="+string(body),
+		"KENT_WORKTREE_SOURCE_WORKSPACE_ROOT="+payload.SourceWorkspaceRoot,
+		"KENT_WORKTREE_BRANCH_NAME="+payload.BranchName,
+		"KENT_WORKTREE_ROOT="+payload.WorktreeRoot,
+		"KENT_WORKTREE_SESSION_ID="+payload.SessionID,
+		"KENT_WORKTREE_PROJECT_ID="+payload.ProjectID,
+		"KENT_WORKTREE_WORKSPACE_ID="+payload.WorkspaceID,
+		"KENT_WORKTREE_WORKTREE_ID="+payload.WorktreeID,
+		fmt.Sprintf("KENT_WORKTREE_CREATED_BRANCH=%t", payload.CreatedBranch),
+		"KENT_WORKTREE_PAYLOAD_JSON="+string(body),
 	)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -1469,7 +1469,7 @@ func worktreeViewFromSynced(item syncedWorktree, target clientui.SessionExecutio
 		DirtyFileCount:  item.git.DirtyFileCount,
 		IsMain:          item.git.IsMain,
 		IsCurrent:       isCurrent,
-		BuilderManaged:  item.record.BuilderManaged,
+		Managed:         item.record.Managed,
 		CreatedBranch:   item.record.CreatedBranch,
 		OriginSessionID: item.record.OriginSessionID,
 	}
@@ -1524,7 +1524,7 @@ func (s *Service) shouldAttemptBranchCleanup(target syncedWorktree, explicitDele
 	if explicitDeleteBranch {
 		return true
 	}
-	return target.record.BuilderManaged && target.record.CreatedBranch
+	return target.record.Managed && target.record.CreatedBranch
 }
 
 func (s *Service) branchCleanupSkippedMessage(target syncedWorktree, explicitDeleteBranch bool) string {
@@ -1532,10 +1532,10 @@ func (s *Service) branchCleanupSkippedMessage(target syncedWorktree, explicitDel
 	if branchName == "" {
 		return ""
 	}
-	if explicitDeleteBranch || (target.record.BuilderManaged && target.record.CreatedBranch) {
+	if explicitDeleteBranch || (target.record.Managed && target.record.CreatedBranch) {
 		return ""
 	}
-	return fmt.Sprintf("Kept branch %s: Builder cannot prove this worktree created it", branchName)
+	return fmt.Sprintf("Kept branch %s: Kent cannot prove this worktree created it", branchName)
 }
 
 func pathAvailability(path string) string {

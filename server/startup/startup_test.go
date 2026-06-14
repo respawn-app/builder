@@ -8,15 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/auth"
-	"builder/server/authflow"
-	serverbootstrap "builder/server/bootstrap"
-	"builder/server/embedded"
-	"builder/server/generated"
-	"builder/server/metadata"
-	"builder/server/rootlock"
-	"builder/shared/config"
-	"builder/shared/serverapi"
+	"core/server/auth"
+	"core/server/authflow"
+	serverbootstrap "core/server/bootstrap"
+	"core/server/embedded"
+	"core/server/generated"
+	"core/server/metadata"
+	"core/server/rootlock"
+	"core/shared/brand"
+	"core/shared/config"
+	"core/shared/serverapi"
 )
 
 func registerStartupWorkspace(t *testing.T, workspace string) {
@@ -145,7 +146,7 @@ func TestEnsureReadyRequiresAuthManager(t *testing.T) {
 func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	handler := stubAuthHandler{
 		lookupEnv: func(key string) string {
-			if key == "BUILDER_LOOKUP_TEST" {
+			if key == "KENT_LOOKUP_TEST" {
 				return "lookup-value"
 			}
 			return ""
@@ -183,15 +184,15 @@ func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	if req.LoadOptions.Tools != "shell,patch" {
 		t.Fatalf("tools = %q, want shell,patch", req.LoadOptions.Tools)
 	}
-	if got := req.LookupEnv("BUILDER_LOOKUP_TEST"); got != "lookup-value" {
+	if got := req.LookupEnv("KENT_LOOKUP_TEST"); got != "lookup-value" {
 		t.Fatalf("lookup env returned %q, want lookup-value", got)
 	}
 }
 
 func TestLookupEnvFallsBackToProcessEnvWhenHandlerMissing(t *testing.T) {
-	t.Setenv("BUILDER_LOOKUP_ENV_FALLBACK", "fallback-value")
+	t.Setenv("KENT_LOOKUP_ENV_FALLBACK", "fallback-value")
 	req := buildRequest(Request{}, nil)
-	if got := req.LookupEnv("BUILDER_LOOKUP_ENV_FALLBACK"); got != "fallback-value" {
+	if got := req.LookupEnv("KENT_LOOKUP_ENV_FALLBACK"); got != "fallback-value" {
 		t.Fatalf("lookup env fallback = %q, want fallback-value", got)
 	}
 }
@@ -259,7 +260,7 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	if generatedCalls != 1 {
 		t.Fatalf("generated sync calls = %d, want 1", generatedCalls)
 	}
-	generatedSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	generatedSkillsRoot := filepath.Join(home, brand.ConfigDirName, ".generated", "skills")
 	if entries, err := os.ReadDir(generatedSkillsRoot); err != nil {
 		t.Fatalf("expected StartCore to seed generated skills through bootstrap: %v", err)
 	} else if len(entries) == 0 {

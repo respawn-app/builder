@@ -274,7 +274,7 @@ jobs:
       - publish_release
     runs-on: ubuntu-latest
     env:
-      BREW_FORMULA_NAME: builder-cli
+      BREW_FORMULA_NAME: kent
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -293,7 +293,7 @@ jobs:
 
       - name: Update tap formula
         env:
-          BUILDER_VERSION: ${{ needs.prepare_release.outputs.tag }}
+          KENT_VERSION: ${{ needs.prepare_release.outputs.tag }}
         run: bash scripts/update-brew-tap.sh --tap "$GITHUB_WORKSPACE/homebrew-tap" --formula "$BREW_FORMULA_NAME"
 
       - name: Ensure pr-pull label exists

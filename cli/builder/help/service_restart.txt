@@ -1,7 +1,0 @@
-Usage of builder service restart:
-  builder service restart [--if-installed]
-
-Notes:
-  Refuses to run inside Builder shell commands to avoid halting active agent work.
-
-Flags:

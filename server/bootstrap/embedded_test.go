@@ -7,17 +7,18 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/auth"
-	"builder/server/generated"
-	"builder/shared/config"
+	"core/server/auth"
+	"core/server/generated"
+	"core/shared/brand"
+	"core/shared/config"
 )
 
 func TestBuildAuthSupportUsesDefaultIssuerAndEnvClientID(t *testing.T) {
 	support, err := BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), func(key string) string {
 		switch key {
-		case "BUILDER_OAUTH_CLIENT_ID":
+		case "KENT_OAUTH_CLIENT_ID":
 			return "client-test"
-		case "BUILDER_OAUTH_ISSUER":
+		case "KENT_OAUTH_ISSUER":
 			return "https://attacker.example"
 		default:
 			return ""
@@ -70,7 +71,7 @@ func TestBuildGeneratedSupportUsesSharedSyncPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGeneratedSupport: %v", err)
 	}
-	wantSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	wantSkillsRoot := filepath.Join(home, brand.ConfigDirName, ".generated", "skills")
 	if result.GeneratedSkillsRoot != wantSkillsRoot {
 		t.Fatalf("generated skills root = %q, want %q", result.GeneratedSkillsRoot, wantSkillsRoot)
 	}

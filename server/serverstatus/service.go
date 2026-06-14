@@ -3,13 +3,13 @@ package serverstatus
 import (
 	"context"
 
-	"builder/server/auth"
-	"builder/server/authpolicy"
-	"builder/server/workflow"
-	"builder/shared/buildinfo"
-	"builder/shared/config"
-	"builder/shared/protocol"
-	"builder/shared/serverapi"
+	"core/server/auth"
+	"core/server/authpolicy"
+	"core/server/workflow"
+	"core/shared/buildinfo"
+	"core/shared/config"
+	"core/shared/protocol"
+	"core/shared/serverapi"
 )
 
 type Service struct {
@@ -57,7 +57,7 @@ func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerRead
 		response.Causes = []serverapi.ServerReadinessCause{{
 			Code:       "server_not_ready",
 			Severity:   "error",
-			Summary:    "Builder server is not ready.",
+			Summary:    "Kent server is not ready.",
 			NextAction: "Resolve the startup blocker and retry.",
 		}}
 	}

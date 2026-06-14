@@ -1,12 +1,12 @@
 package launch
 
 import (
-	"builder/server/auth"
-	"builder/server/session"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/toolspec"
 	"context"
+	"core/server/auth"
+	"core/server/session"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/toolspec"
 	"errors"
 	"os"
 	"path/filepath"

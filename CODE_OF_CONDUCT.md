@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Builder is a professional technical project. Participation in this repository is expected to stay respectful, constructive, and focused on the work.
+Kent is a professional technical project. Participation in this repository is expected to stay respectful, constructive, and focused on the work.
 
 ## Expected Behavior
 

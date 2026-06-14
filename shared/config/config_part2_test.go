@@ -1,7 +1,8 @@
 package config
 
 import (
-	"builder/shared/toolspec"
+	"core/shared/brand"
+	"core/shared/toolspec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,17 +49,17 @@ is_openai_first_party = false
 
 func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "true")
-	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "true")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT", "false")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "false")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "true")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED", "false")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_IS_OPENAI_FIRST_PARTY", "false")
+	t.Setenv("KENT_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "true")
+	t.Setenv("KENT_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "true")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT", "false")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "false")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "true")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED", "false")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_IS_OPENAI_FIRST_PARTY", "false")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
@@ -119,13 +120,13 @@ supports_prompt_cache_key = true
 		t.Fatalf("expected reviewer provider capability source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_REVIEWER_MODEL_VERBOSITY", "medium")
-	t.Setenv("BUILDER_REVIEWER_MODEL_CONTEXT_WINDOW", "32000")
-	t.Setenv("BUILDER_REVIEWER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "false")
-	t.Setenv("BUILDER_REVIEWER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "false")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_CAPABILITIES_PROVIDER_ID", "env-reviewer")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "false")
+	t.Setenv("KENT_REVIEWER_MODEL_VERBOSITY", "medium")
+	t.Setenv("KENT_REVIEWER_MODEL_CONTEXT_WINDOW", "32000")
+	t.Setenv("KENT_REVIEWER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "false")
+	t.Setenv("KENT_REVIEWER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "false")
+	t.Setenv("KENT_REVIEWER_PROVIDER_CAPABILITIES_PROVIDER_ID", "env-reviewer")
+	t.Setenv("KENT_REVIEWER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
+	t.Setenv("KENT_REVIEWER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "false")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Reviewer.ModelVerbosity != ModelVerbosityMedium {
 		t.Fatalf("expected env reviewer.model_verbosity=medium, got %q", cfg.Settings.Reviewer.ModelVerbosity)
@@ -478,7 +479,7 @@ func TestLoadProviderOverrideFromCLIWithExplicitFileModel(t *testing.T) {
 
 func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
 
 	_, err := Load(workspace, LoadOptions{})
 	if err == nil {
@@ -491,7 +492,7 @@ func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
 
 func TestLoadRequestInputTokenCountCapabilityRequiresProviderID(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "true")
+	t.Setenv("KENT_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "true")
 
 	_, err := Load(workspace, LoadOptions{})
 	if err == nil {
@@ -590,7 +591,7 @@ verbose_output = true
 	if !cfg.Settings.Reviewer.VerboseOutput {
 		t.Fatalf("expected file reviewer.verbose_output=true")
 	}
-	if want := filepath.Join(home, ".builder", "reviewer-global.md"); cfg.Settings.Reviewer.SystemPromptFile != want {
+	if want := filepath.Join(home, brand.ConfigDirName, "reviewer-global.md"); cfg.Settings.Reviewer.SystemPromptFile != want {
 		t.Fatalf("expected file reviewer.system_prompt_file=%q, got %q", want, cfg.Settings.Reviewer.SystemPromptFile)
 	}
 	if got := cfg.Source.Sources["reviewer.verbose_output"]; got != "file" {
@@ -618,7 +619,7 @@ verbose_output = true
 		t.Fatalf("expected reviewer.auth source file, got %q", got)
 	}
 
-	workspaceConfigPath := filepath.Join(workspace, ".builder", "config.toml")
+	workspaceConfigPath := filepath.Join(workspace, brand.ConfigDirName, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(workspaceConfigPath), 0o755); err != nil {
 		t.Fatalf("mkdir workspace config dir: %v", err)
 	}
@@ -626,18 +627,18 @@ verbose_output = true
 		t.Fatalf("write workspace config: %v", err)
 	}
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
-	if want := filepath.Join(workspace, ".builder", "workspace-reviewer.md"); cfg.Settings.Reviewer.SystemPromptFile != want {
+	if want := filepath.Join(workspace, brand.ConfigDirName, "workspace-reviewer.md"); cfg.Settings.Reviewer.SystemPromptFile != want {
 		t.Fatalf("expected workspace reviewer.system_prompt_file=%q, got %q", want, cfg.Settings.Reviewer.SystemPromptFile)
 	}
 
-	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "off")
-	t.Setenv("BUILDER_REVIEWER_MODEL", "gpt-env-reviewer")
-	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "high")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_OVERRIDE", "openai")
-	t.Setenv("BUILDER_REVIEWER_OPENAI_BASE_URL", "http://localhost:11434/v1")
-	t.Setenv("BUILDER_REVIEWER_AUTH", "inherit")
-	t.Setenv("BUILDER_REVIEWER_TIMEOUT_SECONDS", "30")
-	t.Setenv("BUILDER_REVIEWER_VERBOSE_OUTPUT", "false")
+	t.Setenv("KENT_REVIEWER_FREQUENCY", "off")
+	t.Setenv("KENT_REVIEWER_MODEL", "gpt-env-reviewer")
+	t.Setenv("KENT_REVIEWER_THINKING_LEVEL", "high")
+	t.Setenv("KENT_REVIEWER_PROVIDER_OVERRIDE", "openai")
+	t.Setenv("KENT_REVIEWER_OPENAI_BASE_URL", "http://localhost:11434/v1")
+	t.Setenv("KENT_REVIEWER_AUTH", "inherit")
+	t.Setenv("KENT_REVIEWER_TIMEOUT_SECONDS", "30")
+	t.Setenv("KENT_REVIEWER_VERBOSE_OUTPUT", "false")
 
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Reviewer.Frequency != "off" {
@@ -677,13 +678,13 @@ verbose_output = true
 		t.Fatalf("expected reviewer.verbose_output source env, got %q", got)
 	}
 
-	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "sometimes")
+	t.Setenv("KENT_REVIEWER_FREQUENCY", "sometimes")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid reviewer frequency")
 	}
-	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "all")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_OVERRIDE", "bogus")
-	t.Setenv("BUILDER_REVIEWER_OPENAI_BASE_URL", "")
+	t.Setenv("KENT_REVIEWER_FREQUENCY", "all")
+	t.Setenv("KENT_REVIEWER_PROVIDER_OVERRIDE", "bogus")
+	t.Setenv("KENT_REVIEWER_OPENAI_BASE_URL", "")
 	if _, err := Load(workspace, LoadOptions{}); err == nil || !strings.Contains(err.Error(), "invalid reviewer.provider_override") {
 		t.Fatalf("expected invalid reviewer provider error, got %v", err)
 	}
@@ -701,7 +702,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("expected web_search tool to remain enabled by default")
 	}
 
-	t.Setenv("BUILDER_WEB_SEARCH", "off")
+	t.Setenv("KENT_WEB_SEARCH", "off")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.WebSearch != "off" {
 		t.Fatalf("expected env web_search=off, got %q", cfg.Settings.WebSearch)
@@ -713,7 +714,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("expected web_search tool to stay enabled when only web_search mode is off")
 	}
 
-	t.Setenv("BUILDER_WEB_SEARCH", "custom")
+	t.Setenv("KENT_WEB_SEARCH", "custom")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected web_search=custom validation error")
 	}
@@ -784,7 +785,7 @@ func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("expected notification_method source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_NOTIFICATION_METHOD", "osc9")
+	t.Setenv("KENT_NOTIFICATION_METHOD", "osc9")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.NotificationMethod != "osc9" {
 		t.Fatalf("expected env notification_method=osc9, got %q", cfg.Settings.NotificationMethod)
@@ -793,7 +794,7 @@ func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("expected notification_method source env, got %q", got)
 	}
 
-	t.Setenv("BUILDER_NOTIFICATION_METHOD", "bad")
+	t.Setenv("KENT_NOTIFICATION_METHOD", "bad")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid notification_method validation error")
 	}
@@ -808,7 +809,7 @@ func TestLoadToolPreamblesPrecedence(t *testing.T) {
 		t.Fatalf("expected tool_preambles source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_TOOL_PREAMBLES", "true")
+	t.Setenv("KENT_TOOL_PREAMBLES", "true")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if !cfg.Settings.ToolPreambles {
 		t.Fatalf("expected env tool_preambles=true")
@@ -817,9 +818,9 @@ func TestLoadToolPreamblesPrecedence(t *testing.T) {
 		t.Fatalf("expected tool_preambles source env, got %q", got)
 	}
 
-	t.Setenv("BUILDER_TOOL_PREAMBLES", "broken")
+	t.Setenv("KENT_TOOL_PREAMBLES", "broken")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid BUILDER_TOOL_PREAMBLES error")
+		t.Fatal("expected invalid KENT_TOOL_PREAMBLES error")
 	}
 }
 
@@ -865,7 +866,7 @@ func TestLoadRejectsRemovedTUIAlternateScreenSetting(t *testing.T) {
 func TestLoadPrecedenceCLIOverEnvOverFile(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
 
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	writeConfigTestFile(t, configPath, `model = "gpt-file"
 thinking_level = "low"
 theme = "light"
@@ -879,9 +880,9 @@ ask_question = true
 model_request_seconds = 45
 `)
 
-	t.Setenv("BUILDER_MODEL", "gpt-env")
-	t.Setenv("BUILDER_THINKING_LEVEL", "medium")
-	t.Setenv("BUILDER_TOOLS", "shell,patch")
+	t.Setenv("KENT_MODEL", "gpt-env")
+	t.Setenv("KENT_THINKING_LEVEL", "medium")
+	t.Setenv("KENT_TOOLS", "shell,patch")
 
 	cfg, err := Load(workspace, LoadOptions{Model: "gpt-cli", ThinkingLevel: "xhigh"})
 	if err != nil {

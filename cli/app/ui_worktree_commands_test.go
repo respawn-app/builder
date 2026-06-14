@@ -1,12 +1,12 @@
 package app
 
 import (
-	"builder/cli/app/internal/worktreeview"
-	"builder/cli/tui"
-	sharedclient "builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/serverapi"
 	"context"
+	"core/cli/app/internal/worktreeview"
+	"core/cli/tui"
+	sharedclient "core/shared/client"
+	"core/shared/clientui"
+	"core/shared/serverapi"
 	"errors"
 	"strings"
 	"testing"
@@ -203,7 +203,7 @@ func worktreeListResponseForRoots(mainRoot string, featureRoot string) serverapi
 			CanonicalRoot:   featureRoot,
 			BranchName:      "feature",
 			IsCurrent:       true,
-			BuilderManaged:  true,
+			Managed:         true,
 			CreatedBranch:   true,
 			OriginSessionID: "session-1",
 		})
@@ -234,7 +234,7 @@ func testLinkedWorktreeListResponse() serverapi.WorktreeListResponse {
 				CanonicalRoot:   "/wt/feature-a",
 				BranchName:      "feature/a",
 				IsCurrent:       true,
-				BuilderManaged:  true,
+				Managed:         true,
 				CreatedBranch:   true,
 				OriginSessionID: "session-1",
 			},

@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem with Builder
+about: Report a problem with Kent
 title: ""
 labels: []
 assignees: []

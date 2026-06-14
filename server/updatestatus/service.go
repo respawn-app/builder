@@ -9,10 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"builder/shared/clientui"
+	"core/shared/brand"
+	"core/shared/clientui"
 )
 
-const defaultLatestReleaseURL = "https://api.github.com/repos/respawn-llc/builder/releases/latest"
+const defaultLatestReleaseURL = "https://api.github.com/repos/" + brand.RepoSlug + "/releases/latest"
 
 type Service struct {
 	currentVersion string
@@ -138,7 +139,7 @@ func (s *Service) fetchLatestVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "builder")
+	req.Header.Set("User-Agent", "kent")
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return "", err

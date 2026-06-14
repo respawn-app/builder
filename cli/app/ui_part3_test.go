@@ -1,11 +1,11 @@
 package app
 
 import (
-	"builder/server/llm"
-	"builder/server/runtime"
-	"builder/shared/clientui"
 	"bytes"
 	"context"
+	"core/server/llm"
+	"core/server/runtime"
+	"core/shared/clientui"
 	"errors"
 	goruntime "runtime"
 	"strings"
@@ -15,7 +15,7 @@ import (
 )
 
 func TestDebugKeysTransientStatusShowsNormalizationSource(t *testing.T) {
-	t.Setenv("BUILDER_DEBUG_KEYS", "1")
+	t.Setenv("KENT_DEBUG_KEYS", "1")
 	m := newProjectedStaticUIModel()
 
 	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlBackspace})

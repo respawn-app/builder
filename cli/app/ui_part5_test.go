@@ -1,11 +1,11 @@
 package app
 
 import (
-	"builder/cli/tui"
-	"builder/server/llm"
-	"builder/server/runtime"
-	shelltool "builder/server/tools/shell"
 	"context"
+	"core/cli/tui"
+	"core/server/llm"
+	"core/server/runtime"
+	shelltool "core/server/tools/shell"
 	"strings"
 	"testing"
 	"time"

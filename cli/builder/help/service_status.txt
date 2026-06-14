@@ -1,4 +1,0 @@
-Usage of builder service status:
-  builder service status [--json]
-
-Flags:

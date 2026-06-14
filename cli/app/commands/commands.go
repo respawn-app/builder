@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"builder/prompts"
+	"core/prompts"
 	"sort"
 	"strings"
 	"unicode"
@@ -84,7 +84,7 @@ func NewRegistry() *Registry {
 
 func NewDefaultRegistry() *Registry {
 	r := NewRegistry()
-	r.RegisterWithOptions("exit", "Exit builder", RegisterOptions{PreservePromptHistoryDraft: true}, func(string) Result {
+	r.RegisterWithOptions("exit", "Exit Kent", RegisterOptions{PreservePromptHistoryDraft: true}, func(string) Result {
 		return Result{Handled: true, Action: ActionExit}
 	})
 	r.RegisterWithOptions("new", "Create a new session", RegisterOptions{PreservePromptHistoryDraft: true}, func(string) Result {

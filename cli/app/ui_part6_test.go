@@ -1,10 +1,10 @@
 package app
 
 import (
-	"builder/cli/tui"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/clientui"
 	"context"
+	"core/cli/tui"
+	shelltool "core/server/tools/shell"
+	"core/shared/clientui"
 	"errors"
 	"fmt"
 	"os"

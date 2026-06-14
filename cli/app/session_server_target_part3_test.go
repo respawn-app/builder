@@ -1,15 +1,15 @@
 package app
 
 import (
-	"builder/server/serve"
-	serverstartup "builder/server/startup"
-	askquestion "builder/server/tools/askquestion"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/protocol"
-	"builder/shared/serverapi"
 	"context"
+	"core/server/serve"
+	serverstartup "core/server/startup"
+	askquestion "core/server/tools/askquestion"
+	shelltool "core/server/tools/shell"
+	"core/shared/client"
+	"core/shared/clientui"
+	"core/shared/protocol"
+	"core/shared/serverapi"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -562,8 +562,8 @@ func publishConfiguredRemoteForWorkspace(t *testing.T, workspace string, caps pr
 		server.Close()
 		t.Fatalf("SplitHostPort: %v", err)
 	}
-	t.Setenv("BUILDER_SERVER_HOST", host)
-	t.Setenv("BUILDER_SERVER_PORT", port)
+	t.Setenv("KENT_SERVER_HOST", host)
+	t.Setenv("KENT_SERVER_PORT", port)
 	return func() {
 		server.Close()
 	}

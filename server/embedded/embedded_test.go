@@ -13,20 +13,21 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/auth"
-	"builder/server/authflow"
-	serverbootstrap "builder/server/bootstrap"
-	"builder/server/generated"
-	"builder/server/llm"
-	"builder/server/metadata"
-	"builder/server/runtime"
-	"builder/server/session"
-	"builder/server/tools"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/testopenai"
+	"core/server/auth"
+	"core/server/authflow"
+	serverbootstrap "core/server/bootstrap"
+	"core/server/generated"
+	"core/server/llm"
+	"core/server/metadata"
+	"core/server/runtime"
+	"core/server/session"
+	"core/server/tools"
+	shelltool "core/server/tools/shell"
+	"core/shared/brand"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/testopenai"
 )
 
 type testAuthHandler struct {
@@ -162,8 +163,8 @@ func openEmbeddedSessionByID(t *testing.T, server *Server, sessionID string) *se
 func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
-	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
+	t.Setenv("KENT_OAUTH_ISSUER", "https://attacker.example")
+	t.Setenv("KENT_OAUTH_CLIENT_ID", "client-test")
 
 	workspace := t.TempDir()
 	registerEmbeddedWorkspace(t, workspace)
@@ -185,7 +186,7 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 		t.Fatalf("start embedded server: %v", err)
 	}
 	t.Cleanup(func() { _ = server.Close() })
-	generatedSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	generatedSkillsRoot := filepath.Join(home, brand.ConfigDirName, ".generated", "skills")
 	if entries, err := os.ReadDir(generatedSkillsRoot); err != nil {
 		t.Fatalf("expected embedded startup to seed generated skills through bootstrap: %v", err)
 	} else if len(entries) == 0 {

@@ -87,7 +87,7 @@ jobs:
 
       - name: Test
         env:
-          BUILDER_TEST_DISABLE_WALL_CLOCK_CAP: "1"
+          KENT_TEST_DISABLE_WALL_CLOCK_CAP: "1"
         run: ./scripts/ci-check.sh test
 
   windows-installer:
@@ -122,11 +122,11 @@ jobs:
           VERSION: 0.0.0
         run: |
           mkdir -p dist staging
-          GOOS=windows GOARCH=amd64 BUILDER_VERSION="$VERSION" \
-            bash scripts/build.sh --output "staging/builder_${VERSION}_windows_amd64.exe"
-          powershell -NoProfile -Command "Compress-Archive -LiteralPath 'staging/builder_${VERSION}_windows_amd64.exe' -DestinationPath 'dist/builder_${VERSION}_windows_amd64.zip' -Force"
-          checksum=$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'dist/builder_${VERSION}_windows_amd64.zip').Hash.ToLowerInvariant()")
-          printf '%s  %s\n' "$checksum" "builder_${VERSION}_windows_amd64.zip" > dist/checksums.txt
+          GOOS=windows GOARCH=amd64 KENT_VERSION="$VERSION" \
+            bash scripts/build.sh --output "staging/kent_${VERSION}_windows_amd64.exe"
+          powershell -NoProfile -Command "Compress-Archive -LiteralPath 'staging/kent_${VERSION}_windows_amd64.exe' -DestinationPath 'dist/kent_${VERSION}_windows_amd64.zip' -Force"
+          checksum=$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'dist/kent_${VERSION}_windows_amd64.zip').Hash.ToLowerInvariant()")
+          printf '%s  %s\n' "$checksum" "kent_${VERSION}_windows_amd64.zip" > dist/checksums.txt
 
       - name: Smoke test installer
         env:
@@ -137,7 +137,7 @@ jobs:
         env:
           VERSION: 0.0.0
         run: |
-          cat > fake-builder.go <<'GO'
+          cat > fake-kent.go <<'GO'
           package main
           import (
             "fmt"
@@ -145,14 +145,14 @@ jobs:
             "strings"
           )
           func mark(value string) {
-            path := os.Getenv("BUILDER_FAKE_MARKER")
+            path := os.Getenv("KENT_FAKE_MARKER")
             if path == "" { return }
             f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
             if err == nil { _, _ = f.WriteString(value + "\n"); _ = f.Close() }
           }
           func main() {
             args := os.Args[1:]
-            if len(args) == 1 && args[0] == "--version" { fmt.Println(os.Getenv("BUILDER_FAKE_VERSION")); return }
+            if len(args) == 1 && args[0] == "--version" { fmt.Println(os.Getenv("KENT_FAKE_VERSION")); return }
             if len(args) >= 2 && args[0] == "service" && args[1] == "status" {
               exe, _ := os.Executable()
               fmt.Printf(`{"installed":true,"loaded":true,"running":true,"command":[%q],"endpoint":"","logs":[]}`+"\n", exe)
@@ -165,16 +165,16 @@ jobs:
           }
           GO
           mkdir -p "recovery-release/v${VERSION}" "recovery-install" "recovery-staging"
-          GOOS=windows GOARCH=amd64 go build -o recovery-install/builder.exe fake-builder.go
-          cp recovery-install/builder.exe "recovery-staging/builder_${VERSION}_windows_amd64.exe"
-          powershell -NoProfile -Command "Compress-Archive -LiteralPath 'recovery-staging/builder_${VERSION}_windows_amd64.exe' -DestinationPath 'recovery-release/v${VERSION}/builder_${VERSION}_windows_amd64.zip' -Force"
-          checksum=$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'recovery-release/v${VERSION}/builder_${VERSION}_windows_amd64.zip').Hash.ToLowerInvariant()")
-          printf '%s  %s\n' "$checksum" "builder_${VERSION}_windows_amd64.zip" > "recovery-release/v${VERSION}/checksums.txt"
+          GOOS=windows GOARCH=amd64 go build -o recovery-install/kent.exe fake-kent.go
+          cp recovery-install/kent.exe "recovery-staging/kent_${VERSION}_windows_amd64.exe"
+          powershell -NoProfile -Command "Compress-Archive -LiteralPath 'recovery-staging/kent_${VERSION}_windows_amd64.exe' -DestinationPath 'recovery-release/v${VERSION}/kent_${VERSION}_windows_amd64.zip' -Force"
+          checksum=$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'recovery-release/v${VERSION}/kent_${VERSION}_windows_amd64.zip').Hash.ToLowerInvariant()")
+          printf '%s  %s\n' "$checksum" "kent_${VERSION}_windows_amd64.zip" > "recovery-release/v${VERSION}/checksums.txt"
           release_base="$(cygpath -w "$PWD/recovery-release")"
           install_dir="$(cygpath -w "$PWD/recovery-install")"
           marker_path="$PWD/recovery-marker.txt"
           marker_win="$(cygpath -w "$marker_path")"
-          if BUILDER_RELEASE_BASE="$release_base" BUILDER_FAKE_MARKER="$marker_win" BUILDER_FAKE_VERSION="wrong" \
+          if KENT_RELEASE_BASE="$release_base" KENT_FAKE_MARKER="$marker_win" KENT_FAKE_VERSION="wrong" \
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 \
               -Version "$VERSION" -InstallDir "$install_dir" -Yes -NoPath -NoDeps; then
             echo "installer unexpectedly succeeded" >&2

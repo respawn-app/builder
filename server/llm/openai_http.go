@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"builder/server/auth"
+	"core/server/auth"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -23,8 +23,8 @@ import (
 const (
 	defaultOpenAIBaseURL   = "https://api.openai.com/v1"
 	codexResponsesEndpoint = "https://chatgpt.com/backend-api/codex/responses"
-	defaultOriginator      = "builder"
-	defaultUserAgent       = "builder/dev"
+	defaultOriginator      = "kent"
+	defaultUserAgent       = "kent/dev"
 	reasoningRoleSummary   = "reasoning"
 )
 
@@ -58,7 +58,7 @@ type HTTPTransport struct {
 
 func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 	window := 200000
-	if raw := strings.TrimSpace(os.Getenv("BUILDER_CONTEXT_WINDOW")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("KENT_CONTEXT_WINDOW")); raw != "" {
 		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
 			window = value
 		}

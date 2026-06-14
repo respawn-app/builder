@@ -283,21 +283,21 @@ func TestSystemClipboardImagePasterDarwinUsesOsascript(t *testing.T) {
 		if len(args) != 4 || args[0] != "-l" || args[1] != "JavaScript" || args[2] != "-e" {
 			return nil, errors.New("unexpected osascript args")
 		}
-		path := filepath.Join(dir, "builder-clipboard-darwin-test.png")
+		path := filepath.Join(dir, "kent-clipboard-darwin-test.png")
 		if err := os.WriteFile(path, []byte("pngdata"), 0o600); err != nil {
 			return nil, err
 		}
 		return nil, nil
 	}
 	paster.createTemp = func(string, string) (*os.File, error) {
-		return os.Create(filepath.Join(dir, "builder-clipboard-darwin-test.png"))
+		return os.Create(filepath.Join(dir, "kent-clipboard-darwin-test.png"))
 	}
 
 	path, err := paster.PasteImage(context.Background())
 	if err != nil {
 		t.Fatalf("paste image: %v", err)
 	}
-	if got, want := path, filepath.Join(dir, "builder-clipboard-darwin-test.png"); got != want {
+	if got, want := path, filepath.Join(dir, "kent-clipboard-darwin-test.png"); got != want {
 		t.Fatalf("path = %q, want %q", got, want)
 	}
 	if len(runner.commands) != 1 {

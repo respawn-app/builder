@@ -1,9 +1,9 @@
 package tools
 
 import (
-	"builder/shared/toolspec"
-	"builder/shared/transcript"
 	"context"
+	"core/shared/toolspec"
+	"core/shared/transcript"
 	"encoding/json"
 	"strings"
 	"testing"

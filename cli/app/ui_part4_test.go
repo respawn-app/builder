@@ -1,13 +1,13 @@
 package app
 
 import (
-	"builder/cli/app/internal/submissionerror"
-	"builder/cli/tui"
-	"builder/server/llm"
-	"builder/server/runtime"
-	"builder/shared/clientui"
-	"builder/shared/transcript"
 	"context"
+	"core/cli/app/internal/submissionerror"
+	"core/cli/tui"
+	"core/server/llm"
+	"core/server/runtime"
+	"core/shared/clientui"
+	"core/shared/transcript"
 	"errors"
 	"strings"
 	"testing"

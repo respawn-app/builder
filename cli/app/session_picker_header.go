@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"builder/cli/app/internal/statuscollect"
+	"core/cli/app/internal/statuscollect"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -49,7 +49,7 @@ func (m *sessionPickerModel) renderHeader() string {
 
 func (m *sessionPickerModel) renderHeaderLines(maxWidth int) []sessionPickerHeaderLine {
 	info := m.normalizedHeaderInfo()
-	title := "Builder v" + info.Version
+	title := "Kent v" + info.Version
 	if maxWidth < 1 {
 		maxWidth = 1
 	}

@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/auth"
-	"builder/server/session"
-	"builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/toolspec"
+	"core/server/auth"
+	"core/server/session"
+	"core/shared/client"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/toolspec"
 )
 
 type plannerOwnershipServer struct {
@@ -112,7 +112,7 @@ func TestRuntimeLaunchPlanCurrentControllerLeaseIDFallsBackToRawID(t *testing.T)
 
 func TestSessionLaunchPlannerBuildsSessionPickerHeaderInfo(t *testing.T) {
 	home := newAppTestHome(t)
-	workspaceRoot := filepath.Join(home, "Developer", "builder-cli")
+	workspaceRoot := filepath.Join(home, "Developer", "kent-cli")
 	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

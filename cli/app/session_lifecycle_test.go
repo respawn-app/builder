@@ -1,17 +1,17 @@
 package app
 
 import (
-	"builder/server/llm"
-	"builder/server/metadata"
-	"builder/server/session"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/rollbacktarget"
-	"builder/shared/serverapi"
-	"builder/shared/toolspec"
 	"context"
+	"core/server/llm"
+	"core/server/metadata"
+	"core/server/session"
+	shelltool "core/server/tools/shell"
+	"core/shared/client"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/rollbacktarget"
+	"core/shared/serverapi"
+	"core/shared/toolspec"
 	"errors"
 	"io"
 	"os"
@@ -74,7 +74,7 @@ func TestRunSessionLifecycleMissingWorkspacePrepareRuntimeSuggestsRebind(t *test
 	if len(summaries) != 1 {
 		t.Fatalf("session count = %d, want 1", len(summaries))
 	}
-	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`builder rebind " + strconv.Quote(summaries[0].SessionID) + " " + strconv.Quote(newWorkspace) + "`"
+	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`kent rebind " + strconv.Quote(summaries[0].SessionID) + " " + strconv.Quote(newWorkspace) + "`"
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}

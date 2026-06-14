@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"builder/server/llm"
-	"builder/server/tools"
-	"builder/shared/toolspec"
-	"builder/shared/transcript"
+	"core/server/llm"
+	"core/server/tools"
+	"core/shared/toolspec"
+	"core/shared/transcript"
 )
 
 func TestSubmitUserMessageDoesNotEmitCommittedConversationUpdatedAfterFlushedUserTurn(t *testing.T) {
@@ -111,7 +111,7 @@ func TestHostedToolOnlyTurnEmitsCommittedConversationUpdatedBeforeFollowUpAssist
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: ""},
 			OutputItems: []llm.ResponseItem{{
 				Type: llm.ResponseItemTypeOther,
-				Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+				Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"kent cli"}}`),
 			}},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -163,7 +163,7 @@ func TestHostedToolOnlyMissingPhaseTurnEmitsCommittedConversationUpdatedAfterHos
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: ""},
 			OutputItems: []llm.ResponseItem{
 				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleAssistant, Content: "working"},
-				{Type: llm.ResponseItemTypeOther, Raw: json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`)},
+				{Type: llm.ResponseItemTypeOther, Raw: json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"kent cli"}}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},

@@ -1,8 +1,12 @@
 package app
 
-import "strings"
+import (
+	"strings"
 
-const defaultSessionTitle = "builder"
+	"core/shared/brand"
+)
+
+const defaultSessionTitle = brand.Command
 
 func sessionTitle(name string) string {
 	trimmed := strings.TrimSpace(name)

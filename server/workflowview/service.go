@@ -16,14 +16,14 @@ import (
 
 	_ "embed"
 
-	"builder/server/metadata"
-	"builder/server/metadata/sqlitegen"
-	"builder/server/workflow"
-	"builder/server/workflowapi"
-	"builder/server/workflowjson"
-	"builder/shared/clientui"
-	"builder/shared/serverapi"
-	"builder/shared/toolspec"
+	"core/server/metadata"
+	"core/server/metadata/sqlitegen"
+	"core/server/workflow"
+	"core/server/workflowapi"
+	"core/server/workflowjson"
+	"core/shared/clientui"
+	"core/shared/serverapi"
+	"core/shared/toolspec"
 )
 
 type Service struct {
@@ -930,7 +930,7 @@ func workflowPickerItem(def serverapi.WorkflowDefinition, link sqlitegen.Project
 }
 
 func worktreeView(row sqlitegen.GetWorktreeByIDRow) serverapi.WorktreeView {
-	return serverapi.WorktreeView{WorktreeID: row.ID, DisplayName: displayNameForPath(row.CanonicalRootPath), CanonicalRoot: row.CanonicalRootPath, Availability: availabilityForPath(row.CanonicalRootPath), IsMain: row.IsMain != 0, BuilderManaged: row.BuilderManaged != 0, CreatedBranch: row.CreatedBranch != 0, OriginSessionID: row.OriginSessionID}
+	return serverapi.WorktreeView{WorktreeID: row.ID, DisplayName: displayNameForPath(row.CanonicalRootPath), CanonicalRoot: row.CanonicalRootPath, Availability: availabilityForPath(row.CanonicalRootPath), IsMain: row.IsMain != 0, Managed: row.Managed != 0, CreatedBranch: row.CreatedBranch != 0, OriginSessionID: row.OriginSessionID}
 }
 
 func displayNameForPath(path string) string {

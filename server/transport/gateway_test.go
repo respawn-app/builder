@@ -1,20 +1,20 @@
 package transport
 
 import (
-	"builder/server/auth"
-	serverbootstrap "builder/server/bootstrap"
-	"builder/server/core"
-	"builder/server/metadata"
-	"builder/server/runtime"
-	"builder/server/session"
-	shelltool "builder/server/tools/shell"
-	remoteclient "builder/shared/client"
-	"builder/shared/config"
-	"builder/shared/protocol"
-	"builder/shared/rpccontract"
-	"builder/shared/rpcwire"
-	"builder/shared/serverapi"
 	"context"
+	"core/server/auth"
+	serverbootstrap "core/server/bootstrap"
+	"core/server/core"
+	"core/server/metadata"
+	"core/server/runtime"
+	"core/server/session"
+	shelltool "core/server/tools/shell"
+	remoteclient "core/shared/client"
+	"core/shared/config"
+	"core/shared/protocol"
+	"core/shared/rpccontract"
+	"core/shared/rpcwire"
+	"core/shared/serverapi"
 	"errors"
 	"fmt"
 	"golang.org/x/net/websocket"
@@ -37,8 +37,8 @@ func registerGatewayWorkspace(t *testing.T, workspace string) {
 func configureGatewayTestServerPort(t *testing.T) {
 	t.Helper()
 	port := 56000 + int(gatewayTestPortCounter.Add(1))
-	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
-	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+	t.Setenv("KENT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("KENT_SERVER_PORT", strconv.Itoa(port))
 }
 
 var gatewayTestPortCounter atomic.Uint32
@@ -568,7 +568,7 @@ func TestGatewayHandshakeRejectsProtocolVersionMismatch(t *testing.T) {
 	if respErr.Code != protocol.ErrCodeProtocolVersionMismatch ||
 		!strings.Contains(respErr.Message, "unsupported protocol version") ||
 		!strings.Contains(respErr.Message, "server requires "+strconv.Quote(protocol.Version)) ||
-		!strings.Contains(respErr.Message, "upgrade the older Builder process") {
+		!strings.Contains(respErr.Message, "upgrade the older Kent process") {
 		t.Fatalf("expected unsupported protocol version error, got %+v", respErr)
 	}
 }

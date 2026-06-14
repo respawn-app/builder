@@ -1,7 +1,8 @@
 package config
 
 import (
-	"builder/shared/toolspec"
+	"core/shared/brand"
+	"core/shared/toolspec"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,14 +17,14 @@ func TestMain(m *testing.M) {
 func TestPreparePersistenceRootRefusesProcessStartRootUnderGoTest(t *testing.T) {
 	originalHome := processStartHome
 	originalAccountHome := processStartAccountHome
-	processStartHome = filepath.Join(string(filepath.Separator), "builder-test-home")
+	processStartHome = filepath.Join(string(filepath.Separator), "kent-test-home")
 	processStartAccountHome = ""
 	t.Cleanup(func() {
 		processStartHome = originalHome
 		processStartAccountHome = originalAccountHome
 	})
 
-	_, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder"))
+	_, err := preparePersistenceRoot(filepath.Join(processStartHome, brand.ConfigDirName))
 	if err == nil {
 		t.Fatal("expected process-start persistence root to be refused under go test")
 	}
@@ -36,13 +37,13 @@ func TestPreparePersistenceRootAllowsIsolatedTempHomeUnderGoTest(t *testing.T) {
 	originalHome := processStartHome
 	originalAccountHome := processStartAccountHome
 	processStartHome = t.TempDir()
-	processStartAccountHome = filepath.Join(string(filepath.Separator), "builder-real-home")
+	processStartAccountHome = filepath.Join(string(filepath.Separator), "app-real-home")
 	t.Cleanup(func() {
 		processStartHome = originalHome
 		processStartAccountHome = originalAccountHome
 	})
 
-	if _, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder")); err != nil {
+	if _, err := preparePersistenceRoot(filepath.Join(processStartHome, brand.ConfigDirName)); err != nil {
 		t.Fatalf("prepare temp persistence root: %v", err)
 	}
 }
@@ -51,11 +52,11 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 
-	settingsPath := filepath.Join(home, ".builder", "config.toml")
+	settingsPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected config file to stay absent, got err=%v", err)
 	}
-	rgConfigPath := filepath.Join(home, ".builder", managedRGConfigName)
+	rgConfigPath := filepath.Join(home, brand.ConfigDirName, managedRGConfigName)
 	rgConfigBytes, err := os.ReadFile(rgConfigPath)
 	if err != nil {
 		t.Fatalf("read managed rg config: %v", err)
@@ -90,7 +91,7 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Debug {
 		t.Fatalf("expected default debug=false")
 	}
-	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
+	if got := cfg.PersistenceRoot; got != filepath.Join(home, brand.ConfigDirName) {
 		t.Fatalf("default persistence root mismatch: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, "sessions")); err == nil || !os.IsNotExist(err) {
@@ -213,10 +214,10 @@ func TestLoadHonorsHOMEEnvironmentForDefaultConfigRoot(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
-	if cfg.PersistenceRoot != filepath.Join(home, ".builder") {
+	if cfg.PersistenceRoot != filepath.Join(home, brand.ConfigDirName) {
 		t.Fatalf("persistence root = %q, want HOME-scoped root", cfg.PersistenceRoot)
 	}
-	if cfg.Source.HomeSettingsPath != filepath.Join(home, ".builder", "config.toml") {
+	if cfg.Source.HomeSettingsPath != filepath.Join(home, brand.ConfigDirName, "config.toml") {
 		t.Fatalf("home settings path = %q, want HOME-scoped config", cfg.Source.HomeSettingsPath)
 	}
 }
@@ -235,17 +236,17 @@ func TestLoadTrimsWorkspaceRootBeforeResolving(t *testing.T) {
 
 func TestLoadAppliesWorkspaceConfigBeforeEnvBeforeCLI(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_MODEL", "env-model")
-	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+	t.Setenv("KENT_MODEL", "env-model")
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create home config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"home-model\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, brand.ConfigDirName, "config.toml"), []byte("model = \"home-model\"\n"), 0o644); err != nil {
 		t.Fatalf("write home config: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspace, ".builder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspace, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create workspace config dir: %v", err)
 	}
-	workspaceConfigPath := filepath.Join(workspace, ".builder", "config.toml")
+	workspaceConfigPath := filepath.Join(workspace, brand.ConfigDirName, "config.toml")
 	if err := os.WriteFile(workspaceConfigPath, []byte("model = \"workspace-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -271,11 +272,11 @@ func TestLoadAppliesWorkspaceConfigBeforeEnvBeforeCLI(t *testing.T) {
 func TestLoadGlobalSkipsWorkspaceConfigLayer(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_MODEL", "env-model")
-	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+	t.Setenv("KENT_MODEL", "env-model")
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create home config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"home-model\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, brand.ConfigDirName, "config.toml"), []byte("model = \"home-model\"\n"), 0o644); err != nil {
 		t.Fatalf("write home config: %v", err)
 	}
 
@@ -360,7 +361,7 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 	if role.Settings.EnabledTools[toolspec.ToolPatch] {
 		t.Fatalf("expected fast role patch tool disabled, got %+v", role.Settings.EnabledTools)
 	}
-	if want := filepath.Join(home, ".builder", "fast-reviewer.md"); role.Settings.Reviewer.SystemPromptFile != want {
+	if want := filepath.Join(home, brand.ConfigDirName, "fast-reviewer.md"); role.Settings.Reviewer.SystemPromptFile != want {
 		t.Fatalf("role reviewer system prompt file = %q, want %q", role.Settings.Reviewer.SystemPromptFile, want)
 	}
 	if role.Sources["model"] != "file" || role.Sources["thinking_level"] != "file" || role.Sources["tools.patch"] != "file" || role.Sources["reviewer.system_prompt_file"] != "file" {
@@ -483,7 +484,7 @@ func TestSubagentRoleHasMeaningfulDiffComparesProviderReviewerAndTimeoutValues(t
 }
 
 func TestAppendSystemPromptFileFromConfigResolvesConfigRelativePath(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), ".builder", "config.toml")
+	configPath := filepath.Join(t.TempDir(), brand.ConfigDirName, "config.toml")
 	state := configRegistry.defaultState()
 
 	if err := appendSystemPromptFileFromConfig(
@@ -502,7 +503,7 @@ func TestAppendSystemPromptFileFromConfigResolvesConfigRelativePath(t *testing.T
 }
 
 func TestParseSubagentRoleSystemPromptFileResolvesConfigRelativePath(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), ".builder", "config.toml")
+	configPath := filepath.Join(t.TempDir(), brand.ConfigDirName, "config.toml")
 
 	role, err := parseSubagentRole(settingsFile{"system_prompt_file": "fast-system.md"}, configPath, "fast")
 	if err != nil {
@@ -559,7 +560,7 @@ func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
 func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
 	home, workspace, configPath := newConfigTestFile(t)
 	configText := strings.Join([]string{
-		"persistence_root = \"~/custom-builder\"",
+		"persistence_root = \"~/custom-kent\"",
 		"",
 		"[worktrees]",
 		"base_dir = \"managed/worktrees\"",
@@ -570,7 +571,7 @@ func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 
-	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-builder"); got != want {
+	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-kent"); got != want {
 		t.Fatalf("persistence root = %q, want %q", got, want)
 	}
 	if got, want := cfg.Settings.Worktrees.BaseDir, filepath.Join(cfg.PersistenceRoot, "managed", "worktrees"); got != want {
@@ -582,10 +583,10 @@ func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
 }
 
 func TestLoadDerivesDefaultWorktreeBaseDirFromPersistenceRoot(t *testing.T) {
-	configText := "persistence_root = \"~/custom-builder\"\n"
+	configText := "persistence_root = \"~/custom-kent\"\n"
 	home, _, cfg := loadConfigTestFileApp(t, configText, LoadOptions{})
 
-	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-builder"); got != want {
+	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-kent"); got != want {
 		t.Fatalf("persistence root = %q, want %q", got, want)
 	}
 	if got, want := cfg.Settings.Worktrees.BaseDir, filepath.Join(cfg.PersistenceRoot, "worktrees"); got != want {
@@ -595,7 +596,7 @@ func TestLoadDerivesDefaultWorktreeBaseDirFromPersistenceRoot(t *testing.T) {
 
 func TestLoadCreatesWorktreeBaseDir(t *testing.T) {
 	configText := strings.Join([]string{
-		"persistence_root = \"~/custom-builder\"",
+		"persistence_root = \"~/custom-kent\"",
 		"",
 		"[worktrees]",
 		"base_dir = \"managed/worktrees\"",
@@ -721,7 +722,7 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 func TestWriteSettingsFileForOnboardingDoesNotOverwriteExistingFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	writeConfigTestFile(t, configPath, "model = \"existing\"\n")
 	_, err := WriteSettingsFileForOnboarding(configRegistry.defaultState().Settings)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
@@ -747,7 +748,7 @@ func TestValidateThemeAllowsAutoAndEmpty(t *testing.T) {
 func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
 
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	writeConfigTestFile(t, configPath, "model = \"gpt-main-file\"\nthinking_level = \"xhigh\"\nprovider_override = \"openai\"\nopenai_base_url = \"http://127.0.0.1:8080/v1\"\n[reviewer]\nfrequency = \"all\"\n")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
@@ -764,13 +765,13 @@ func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
 		t.Fatalf("expected reviewer.openai_base_url to inherit file main base URL, got %q", cfg.Settings.Reviewer.OpenAIBaseURL)
 	}
 
-	t.Setenv("BUILDER_MODEL", "gpt-main-env")
-	t.Setenv("BUILDER_THINKING_LEVEL", "medium")
-	t.Setenv("BUILDER_OPENAI_BASE_URL", "http://localhost:9090/v1")
-	t.Setenv("BUILDER_REVIEWER_MODEL", "")
-	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "")
-	t.Setenv("BUILDER_REVIEWER_PROVIDER_OVERRIDE", "")
-	t.Setenv("BUILDER_REVIEWER_OPENAI_BASE_URL", "")
+	t.Setenv("KENT_MODEL", "gpt-main-env")
+	t.Setenv("KENT_THINKING_LEVEL", "medium")
+	t.Setenv("KENT_OPENAI_BASE_URL", "http://localhost:9090/v1")
+	t.Setenv("KENT_REVIEWER_MODEL", "")
+	t.Setenv("KENT_REVIEWER_THINKING_LEVEL", "")
+	t.Setenv("KENT_REVIEWER_PROVIDER_OVERRIDE", "")
+	t.Setenv("KENT_REVIEWER_OPENAI_BASE_URL", "")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Reviewer.Model != "gpt-main-env" {
 		t.Fatalf("expected reviewer.model to inherit env main model, got %q", cfg.Settings.Reviewer.Model)
@@ -786,7 +787,7 @@ func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
 func TestLoadReviewerOpenAIProviderOverrideInheritsMainOpenAIBaseURL(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
 
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	writeConfigTestFile(t, configPath, "openai_base_url = \"http://127.0.0.1:8080/v1\"\n[reviewer]\nprovider_override = \"openai\"\nmodel = \"local-reviewer\"\n")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})

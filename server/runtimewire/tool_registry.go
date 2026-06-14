@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 
-	"builder/server/tools"
-	askquestion "builder/server/tools/askquestion"
-	edittool "builder/server/tools/edit"
-	patchtool "builder/server/tools/patch"
-	readimagetool "builder/server/tools/readimage"
-	shelltool "builder/server/tools/shell"
-	triggerhandofftool "builder/server/tools/triggerhandoff"
-	"builder/shared/toolspec"
+	"core/server/tools"
+	askquestion "core/server/tools/askquestion"
+	edittool "core/server/tools/edit"
+	patchtool "core/server/tools/patch"
+	readimagetool "core/server/tools/readimage"
+	shelltool "core/server/tools/shell"
+	triggerhandofftool "core/server/tools/triggerhandoff"
+	"core/shared/toolspec"
 	"errors"
 	"fmt"
 	"os"
@@ -270,7 +270,7 @@ type sessionWorkspaceRetargetError struct {
 
 func (e sessionWorkspaceRetargetError) Error() string {
 	return fmt.Sprintf(
-		"workspace root %q is missing; run `builder rebind %s %s`",
+		"workspace root %q is missing; run `kent rebind %s %s`",
 		e.workspaceRoot,
 		strconv.Quote(e.sessionID),
 		strconv.Quote(e.newRoot),

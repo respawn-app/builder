@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"builder/server/auth"
-	"builder/server/generated"
-	"builder/server/launch"
-	"builder/server/runtime"
-	"builder/server/runtimewire"
-	shelltool "builder/server/tools/shell"
-	"builder/server/tools/shell/postprocess"
-	"builder/shared/config"
-	"builder/shared/textutil"
+	"core/server/auth"
+	"core/server/generated"
+	"core/server/launch"
+	"core/server/runtime"
+	"core/server/runtimewire"
+	shelltool "core/server/tools/shell"
+	"core/server/tools/shell/postprocess"
+	"core/shared/config"
+	"core/shared/textutil"
 )
 
 type Request struct {
@@ -107,7 +107,7 @@ func BuildAuthSupport(store auth.Store, lookupEnv func(string) string, now func(
 	}
 	oauthOpts := auth.OpenAIOAuthOptions{
 		Issuer:   auth.DefaultOpenAIIssuer,
-		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(lookupEnv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
+		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(lookupEnv("KENT_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
 	}
 	return AuthSupport{
 		OAuthOptions: oauthOpts,

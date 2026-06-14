@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/cli/app/internal/authview"
-	"builder/cli/tui"
-	sharedtheme "builder/shared/theme"
+	"core/cli/app/internal/authview"
+	"core/cli/tui"
+	sharedtheme "core/shared/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -382,7 +382,7 @@ func authMethodOptions(includeEnvAPIKey bool, allowSkip bool) []startupPickerOpt
 
 func newAuthMethodPickerModel(theme string, notice startupPickerNotice, includeEnvAPIKey bool, allowSkip bool) *startupPickerModel {
 	model := newStartupPickerModel(authPickerHeaderMarkdown, "Pick auth options", theme, notice, authMethodOptions(includeEnvAPIKey, allowSkip))
-	model.banner = builderStartupBannerANSI
+	model.banner = startupBannerANSI
 	return model
 }
 
@@ -448,7 +448,7 @@ func runAuthConflictPicker(req authInteraction) (authConflictPickerResult, error
 		authConflictPickerHeaderMarkdown,
 		"Choose auth source",
 		req.Theme,
-		startupPickerNotice{Text: "Builder found both saved subscription auth and OPENAI_API_KEY. Choose which auth source should win from now on.", Kind: startupPickerNoticeNeutral},
+		startupPickerNotice{Text: "Kent found both saved subscription auth and OPENAI_API_KEY. Choose which auth source should win from now on.", Kind: startupPickerNoticeNeutral},
 		authConflictOptions(),
 	)
 	picked, err := runStartupPickerFlow(model)

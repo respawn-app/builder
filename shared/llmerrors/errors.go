@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/shared/auth"
+	"core/shared/auth"
 )
 
 type APIStatusError struct {
@@ -217,7 +217,7 @@ func authenticationFailedWarning(provider string, statusCode int) string {
 		label = "API"
 	}
 	if statusCode > 0 {
-		return fmt.Sprintf("Authentication failed with %s (HTTP %d). Run /login or check OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Builder auth.", label, statusCode)
+		return fmt.Sprintf("Authentication failed with %s (HTTP %d). Run /login or check OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Kent auth.", label, statusCode)
 	}
-	return fmt.Sprintf("Authentication failed with %s. Run /login or check OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Builder auth.", label)
+	return fmt.Sprintf("Authentication failed with %s. Run /login or check OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Kent auth.", label)
 }

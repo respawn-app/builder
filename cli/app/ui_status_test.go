@@ -1,14 +1,15 @@
 package app
 
 import (
-	appstatus "builder/cli/app/internal/status"
-	"builder/cli/app/internal/statuscollect"
-	"builder/cli/tui"
-	"builder/server/auth"
-	"builder/server/runtime"
-	"builder/shared/clientui"
-	"builder/shared/config"
 	"context"
+	appstatus "core/cli/app/internal/status"
+	"core/cli/app/internal/statuscollect"
+	"core/cli/tui"
+	"core/server/auth"
+	"core/server/runtime"
+	"core/shared/brand"
+	"core/shared/clientui"
+	"core/shared/config"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,7 +118,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 		},
 		Update: uiStatusUpdateInfo{Checked: true, Available: true, LatestVersion: "1.2.3"},
 		Config: uiStatusConfigInfo{
-			SettingsPath:    "/Users/test/.builder/config.toml",
+			SettingsPath:    "/Users/test/.kent/config.toml",
 			OverrideSources: []string{"ENV", "CLI ARGS"},
 			Supervisor:      "edits",
 			AutoCompaction:  true,
@@ -131,12 +132,12 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 			},
 		},
 		Skills: []uiStatusSkillInspection{
-			{Name: "apiresult", Path: "/Users/test/.builder/skills/apiresult/SKILL.md", Loaded: true},
-			{Name: "local helper", Path: "/Users/test/.builder/skills/local-helper/SKILL.md", Loaded: true, Disabled: true},
-			{Name: "skill-creator", Path: "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md", Loaded: true, SourceKind: "generated"},
-			{Name: "broken", Path: "/Users/test/.builder/skills/broken/SKILL.md", Loaded: false, Reason: "missing SKILL.md"},
+			{Name: "apiresult", Path: "/Users/test/.kent/skills/apiresult/SKILL.md", Loaded: true},
+			{Name: "local helper", Path: "/Users/test/.kent/skills/local-helper/SKILL.md", Loaded: true, Disabled: true},
+			{Name: "skill-creator", Path: "/Users/test/.kent/.generated/skills/skill-creator/SKILL.md", Loaded: true, SourceKind: "generated"},
+			{Name: "broken", Path: "/Users/test/.kent/skills/broken/SKILL.md", Loaded: false, Reason: "missing SKILL.md"},
 		},
-		AgentsPaths:     []string{"/Users/test/.builder/AGENTS.md", "/tmp/workdir/AGENTS.md"},
+		AgentsPaths:     []string{"/Users/test/.kent/AGENTS.md", "/tmp/workdir/AGENTS.md"},
 		CompactionCount: 3,
 	}}
 
@@ -146,7 +147,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 			Settings: config.Settings{
 				ContextCompactionThresholdTokens: 300000,
 			},
-			Source: config.SourceReport{SettingsPath: "/Users/test/.builder/config.toml"},
+			Source: config.SourceReport{SettingsPath: "/Users/test/.kent/config.toml"},
 		}),
 		WithUIStatusCollector(collector),
 	)
@@ -181,7 +182,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	if !strings.Contains(plain, "incident\nSession ID: session-123\nParent session: incident-root <parent-456>") {
 		t.Fatalf("expected session id before parent session id, got %q", plain)
 	}
-	for _, want := range []string{"4 skills", "/Users/test/.builder/skills", "apiresult (0k)", "local helper disabled", "! broken (missing SKILL.md)", "/Users/test/.builder/.generated/skills", "skill-creator (0k) generated"} {
+	for _, want := range []string{"4 skills", "/Users/test/.kent/skills", "apiresult (0k)", "local helper disabled", "! broken (missing SKILL.md)", "/Users/test/.kent/.generated/skills", "skill-creator (0k) generated"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected grouped skill rendering to contain %q, got %q", want, plain)
 		}
@@ -190,7 +191,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnd})
 	updated = next.(*uiModel)
 	plain = stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"weekly", "60% left", "auto-compaction on", "3 compactions", "2 agents files", "/Users/test/.builder/AGENTS.md", "supervisor edits"} {
+	for _, want := range []string{"weekly", "60% left", "auto-compaction on", "3 compactions", "2 agents files", "/Users/test/.kent/AGENTS.md", "supervisor edits"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected scrolled status overlay to contain %q, got %q", want, plain)
 		}
@@ -251,12 +252,12 @@ func TestStatusOverlaySectionOrderPrioritizesSessionGitContext(t *testing.T) {
 		SessionID: "session-123",
 		Git:       uiStatusGitInfo{Visible: true, Branch: "main"},
 		Context:   uiStatusContextInfo{AvailableTokens: 100, ThresholdTokens: 50},
-		Config:    uiStatusConfigInfo{SettingsPath: "/tmp/workdir/.builder/config.toml", Supervisor: "edits"},
+		Config:    uiStatusConfigInfo{SettingsPath: "/tmp/workdir/.kent/config.toml", Supervisor: "edits"},
 		Subscription: uiStatusSubscriptionInfo{
 			Applicable: true,
 			Summary:    "Pro subscription",
 		},
-		Skills: []uiStatusSkillInspection{{Name: "apiresult", Path: "/tmp/workdir/.builder/skills/apiresult/SKILL.md", Loaded: true}},
+		Skills: []uiStatusSkillInspection{{Name: "apiresult", Path: "/tmp/workdir/.kent/skills/apiresult/SKILL.md", Loaded: true}},
 	}
 	lines := stripANSIAndTrimRight(strings.Join(m.layout().statusOverlayContentLines(100), "\n"))
 
@@ -434,20 +435,20 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 
 func TestStatusGroupSkillsByDirectoryKeepsBrokenSkillUnderSkillsRoot(t *testing.T) {
 	groups := statusGroupSkillsByDirectory([]uiStatusSkillInspection{
-		{Name: "apiresult", Path: "/Users/test/.builder/skills/apiresult/SKILL.md", Loaded: true},
-		{Name: "broken", Path: "/Users/test/.builder/skills/broken/SKILL.md", Loaded: false, Reason: "symlink target does not exist"},
+		{Name: "apiresult", Path: "/Users/test/.kent/skills/apiresult/SKILL.md", Loaded: true},
+		{Name: "broken", Path: "/Users/test/.kent/skills/broken/SKILL.md", Loaded: false, Reason: "symlink target does not exist"},
 	})
 
 	if len(groups) != 1 {
 		t.Fatalf("expected one skills directory group, got %+v", groups)
 	}
-	if groups[0].Directory != "/Users/test/.builder/skills" {
+	if groups[0].Directory != "/Users/test/.kent/skills" {
 		t.Fatalf("expected skills root grouping, got %+v", groups)
 	}
 	if len(groups[0].Skills) != 2 {
 		t.Fatalf("expected both skills in the same group, got %+v", groups)
 	}
-	if groups[0].Skills[1].Path != "/Users/test/.builder/skills/broken/SKILL.md" {
+	if groups[0].Skills[1].Path != "/Users/test/.kent/skills/broken/SKILL.md" {
 		t.Fatalf("expected broken skill path to remain in SKILL.md form, got %+v", groups[0].Skills[1])
 	}
 }
@@ -455,7 +456,7 @@ func TestStatusGroupSkillsByDirectoryKeepsBrokenSkillUnderSkillsRoot(t *testing.
 func TestStatusSkillLineMarksGeneratedAndShadowed(t *testing.T) {
 	line := stripANSIAndTrimRight(statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
-		Path:       "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md",
+		Path:       "/Users/test/.kent/.generated/skills/skill-creator/SKILL.md",
 		Loaded:     true,
 		SourceKind: "generated",
 		Shadowed:   true,
@@ -471,7 +472,7 @@ func TestStatusSkillLineRendersGeneratedLabelWithMutedStyle(t *testing.T) {
 	withTrueColor(t)
 	line := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
-		Path:       "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md",
+		Path:       "/Users/test/.kent/.generated/skills/skill-creator/SKILL.md",
 		Loaded:     true,
 		SourceKind: "generated",
 	}, nil, generatedSkillTestStyle())
@@ -481,7 +482,7 @@ func TestStatusSkillLineRendersGeneratedLabelWithMutedStyle(t *testing.T) {
 }
 
 func TestStatusSkillLinePreservesTokenCountForActiveGeneratedSkill(t *testing.T) {
-	path := "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md"
+	path := "/Users/test/.kent/.generated/skills/skill-creator/SKILL.md"
 	withTrueColor(t)
 	activeRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
@@ -529,7 +530,7 @@ func TestStatusOverlayGeneratedSkillLabelRendersMuted(t *testing.T) {
 		Workdir: "/tmp/workdir",
 		Skills: []uiStatusSkillInspection{{
 			Name:       "skill-creator",
-			Path:       "/tmp/workdir/.builder/.generated/skills/skill-creator/SKILL.md",
+			Path:       "/tmp/workdir/.kent/.generated/skills/skill-creator/SKILL.md",
 			Loaded:     true,
 			SourceKind: "generated",
 		}},
@@ -578,11 +579,11 @@ func findRawStatusOverlayLine(t *testing.T, lines []string, want string) string 
 func TestStatusEnvironmentWarnsWhenRecoveredGeneratedFilesExist(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Join(home, ".builder", "recovered", "old"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, brand.ConfigDirName, "recovered", "old"), 0o755); err != nil {
 		t.Fatalf("mkdir recovered: %v", err)
 	}
 	result := defaultUIStatusCollector{}.CollectEnvironment(context.Background(), newStatusRequestForTest(withStatusWorkspaceRoot(t.TempDir())), uiStatusSnapshot{})
-	if !strings.Contains(result.CollectorWarning, "~/.builder/.generated folder was edited") {
+	if !strings.Contains(result.CollectorWarning, brand.PersistenceRoot+"/.generated folder was edited") {
 		t.Fatalf("expected recovered generated warning, got %q", result.CollectorWarning)
 	}
 }
@@ -650,7 +651,7 @@ func TestStatusRepositorySeparatesOpaqueOAuthCacheByTokenFingerprint(t *testing.
 func TestStatusRepositoryDoesNotSeedPathBackedAuthCache(t *testing.T) {
 	repo := appstatus.NewMemoryRepository()
 	req := newStatusRequestForTest(withStatusWorkspaceRoot("/tmp/workdir"))
-	req.AuthCacheIdentity = "auth:path:/tmp/builder-auth.json"
+	req.AuthCacheIdentity = "auth:path:/tmp/kent-auth.json"
 	req.AuthCacheUnseedable = true
 	req.CacheKeys.Auth = appstatus.AuthCacheKey(req)
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
@@ -674,7 +675,7 @@ func TestStatusRepositoryDoesNotSeedPathBackedAuthCache(t *testing.T) {
 
 func TestStatusRequestMarksAuthStatePathCacheUnseedable(t *testing.T) {
 	m := newProjectedStaticUIModel(
-		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir", AuthStatePath: "/tmp/builder-auth.json"}),
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir", AuthStatePath: "/tmp/kent-auth.json"}),
 	)
 
 	req := m.newStatusRequest(time.Now())

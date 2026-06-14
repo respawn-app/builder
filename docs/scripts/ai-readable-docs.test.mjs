@@ -24,7 +24,7 @@ test('markdownOutputPath writes extensionless entry ids as root .md files', () =
 });
 
 test('emitMarkdownEndpoints copies source markdown, excludes docs 404 page, and records manifest', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'builder-ai-docs-'));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'kent-ai-docs-'));
   const sourceDirectory = path.join(tempRoot, 'src');
   const generatedDirectory = path.join(tempRoot, 'generated');
   const outputDirectory = path.join(tempRoot, 'dist');
@@ -45,14 +45,14 @@ test('emitMarkdownEndpoints copies source markdown, excludes docs 404 page, and 
   assert.equal(await readFile(path.join(outputDirectory, 'quickstart.md'), 'utf8'), 'quickstart source\n');
   assert.equal(await readFile(path.join(outputDirectory, 'nested', 'page.md'), 'utf8'), 'nested source\n');
   assert.equal(await readFile(path.join(outputDirectory, 'docs.md'), 'utf8'), 'generated docs source\n');
-  assert.deepEqual(JSON.parse(await readFile(path.join(outputDirectory, '.builder-docs-markdown-endpoints.json'), 'utf8')), {
+  assert.deepEqual(JSON.parse(await readFile(path.join(outputDirectory, '.kent-docs-markdown-endpoints.json'), 'utf8')), {
     entryIds: ['docs', 'nested/page', 'quickstart'],
   });
   await assert.rejects(readFile(path.join(outputDirectory, '404.md'), 'utf8'));
 });
 
 test('emitMarkdownEndpoints fails fast on duplicate raw markdown endpoint slugs', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'builder-ai-docs-'));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'kent-ai-docs-'));
   const sourceDirectory = path.join(tempRoot, 'src');
   const generatedDirectory = path.join(tempRoot, 'generated');
   const outputDirectory = path.join(tempRoot, 'dist');
@@ -72,7 +72,7 @@ test('emitMarkdownEndpoints fails fast on duplicate raw markdown endpoint slugs'
 });
 
 test('emitMarkdownEndpoints removes stale endpoints from the previous manifest', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'builder-ai-docs-'));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'kent-ai-docs-'));
   const sourceDirectory = path.join(tempRoot, 'src');
   const outputDirectory = path.join(tempRoot, 'dist');
 
@@ -81,7 +81,7 @@ test('emitMarkdownEndpoints removes stale endpoints from the previous manifest',
   await writeFile(path.join(sourceDirectory, 'quickstart.md'), 'quickstart source\n', 'utf8');
   await writeFile(path.join(outputDirectory, 'stale.md'), 'stale endpoint\n', 'utf8');
   await writeFile(
-    path.join(outputDirectory, '.builder-docs-markdown-endpoints.json'),
+    path.join(outputDirectory, '.kent-docs-markdown-endpoints.json'),
     `${JSON.stringify({ entryIds: ['quickstart', 'stale'] })}\n`,
     'utf8',
   );
@@ -97,16 +97,16 @@ test('emitMarkdownEndpoints removes stale endpoints from the previous manifest',
 });
 
 test('appendMarkdownDiscovery appends absolute raw markdown links to llms.txt', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'builder-ai-docs-'));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'kent-ai-docs-'));
   const llmsPath = path.join(tempRoot, 'llms.txt');
 
-  await writeFile(llmsPath, '# Builder\n', 'utf8');
+  await writeFile(llmsPath, '# Kent\n', 'utf8');
   await appendMarkdownDiscovery({
     llmsPath,
     markdownEntryIds: ['quickstart', 'nested/page'],
     docsConfig: {
       getPublicUrl(pathname) {
-        return `https://example.com/builder${pathname}`;
+        return `https://example.com/kent${pathname}`;
       },
     },
   });
@@ -114,12 +114,12 @@ test('appendMarkdownDiscovery appends absolute raw markdown links to llms.txt', 
   assert.equal(
     await readFile(llmsPath, 'utf8'),
     [
-      '# Builder',
+      '# Kent',
       '',
       '## Raw Markdown Pages',
       '',
-      '- [quickstart](https://example.com/builder/quickstart.md)',
-      '- [nested/page](https://example.com/builder/nested/page.md)',
+      '- [quickstart](https://example.com/kent/quickstart.md)',
+      '- [nested/page](https://example.com/kent/nested/page.md)',
       '',
     ].join('\n'),
   );

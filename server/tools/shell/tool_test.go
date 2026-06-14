@@ -1,12 +1,14 @@
 package shell
 
 import (
-	"builder/server/tools"
-	"builder/server/tools/shell/postprocess"
-	"builder/server/tools/shell/shellenv"
-	"builder/shared/config"
-	"builder/shared/toolspec"
 	"context"
+	"core/server/tools"
+	"core/server/tools/shell/postprocess"
+	"core/server/tools/shell/shellenv"
+	"core/shared/brand"
+	"core/shared/config"
+	"core/shared/sessionenv"
+	"core/shared/toolspec"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -141,8 +143,8 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 	if env["TERM"] != "dumb" {
 		t.Fatalf("TERM = %q, want dumb", env["TERM"])
 	}
-	if env["AGENT"] != "builder" {
-		t.Fatalf("AGENT = %q, want builder", env["AGENT"])
+	if env["AGENT"] != "kent" {
+		t.Fatalf("AGENT = %q, want kent", env["AGENT"])
 	}
 	if env["GIT_EDITOR"] != ":" {
 		t.Fatalf("GIT_EDITOR = %q, want :", env["GIT_EDITOR"])
@@ -181,12 +183,12 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 
 func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 	env := envSliceToMap(t, shellenv.EnrichForSession([]string{
-		"BUILDER_SESSION_ID=stale",
+		"KENT_SESSION_ID=stale",
 		"KEEP=1",
 	}, "session-abc"))
 
-	if env["BUILDER_SESSION_ID"] != "session-abc" {
-		t.Fatalf("BUILDER_SESSION_ID = %q, want session-abc", env["BUILDER_SESSION_ID"])
+	if env[sessionenv.SessionIDEnv] != "session-abc" {
+		t.Fatalf("KENT_SESSION_ID = %q, want session-abc", env[sessionenv.SessionIDEnv])
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
@@ -196,8 +198,8 @@ func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
 func TestManagerStartEmbedsOwnerSessionIDInProcessEnv(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	result, err := manager.Start(context.Background(), ExecRequest{
-		Command:        []string{"/bin/sh", "-c", "printf %s \"$BUILDER_SESSION_ID\""},
-		DisplayCommand: "print builder session id",
+		Command:        []string{"/bin/sh", "-c", "printf %s \"$" + sessionenv.SessionIDEnv + "\""},
+		DisplayCommand: "print kent session id",
 		OwnerSessionID: "session-env-123",
 		Workdir:        t.TempDir(),
 		YieldTime:      time.Second,
@@ -222,7 +224,7 @@ func TestEnrichEnvAddsManagedRGConfigPathWhenAvailable(t *testing.T) {
 	}
 
 	env := envSliceToMap(t, shellenv.EnrichForSession([]string{"KEEP=1"}, ""))
-	want := filepath.Join(home, ".builder", "rg.conf")
+	want := filepath.Join(home, brand.ConfigDirName, "rg.conf")
 	if env["RIPGREP_CONFIG_PATH"] != want {
 		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want %q", env["RIPGREP_CONFIG_PATH"], want)
 	}
@@ -667,8 +669,8 @@ func TestExecCommandExportsAgentEnv(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
-	if got := decodeStringToolOutput(t, result); !strings.Contains(got, "builder") {
-		t.Fatalf("expected AGENT=builder in shell output, got %q", got)
+	if got := decodeStringToolOutput(t, result); !strings.Contains(got, "kent") {
+		t.Fatalf("expected AGENT=kent in shell output, got %q", got)
 	}
 }
 
@@ -698,14 +700,14 @@ func TestExecCommandBackgroundProcessExportsAgentEnv(t *testing.T) {
 	if pollResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
-	if got := decodeStringToolOutput(t, pollResult); !strings.Contains(got, "builder") {
-		t.Fatalf("expected AGENT=builder in background shell output, got %q", got)
+	if got := decodeStringToolOutput(t, pollResult); !strings.Contains(got, "kent") {
+		t.Fatalf("expected AGENT=kent in background shell output, got %q", got)
 	}
 }
 
 func TestExecCommandAppliesUserHookOutput(t *testing.T) {
 	workspace := t.TempDir()
-	hookPath := writeExecutableScript(t, "#!/bin/sh\nif [ \"$AGENT\" != builder ]; then printf '{\"processed\":true,\"replaced_output\":\"MISSING_AGENT\"}'; exit 0; fi\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
+	hookPath := writeExecutableScript(t, "#!/bin/sh\nif [ \"$AGENT\" != kent ]; then printf '{\"processed\":true,\"replaced_output\":\"MISSING_AGENT\"}'; exit 0; fi\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
 	manager, err := NewManager(
 		WithMinimumExecToBgTime(250*time.Millisecond),
 		WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond),
@@ -1064,7 +1066,7 @@ func TestWriteStdinRawSessionAddsPresentationMetadata(t *testing.T) {
 
 	stdinResult := callWriteStdin(t, stdinTool, "raw-tty-2", map[string]any{
 		"session_id":    1000,
-		"chars":         "raw builder\n",
+		"chars":         "raw app\n",
 		"yield_time_ms": 2_000,
 	})
 	if stdinResult.IsError {
@@ -1098,7 +1100,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 
 	stdinResult := callWriteStdin(t, stdinTool, "tty-2", map[string]any{
 		"session_id":    1000,
-		"chars":         "hello builder\n",
+		"chars":         "hello app\n",
 		"yield_time_ms": 800,
 	})
 	if stdinResult.IsError {
@@ -1114,7 +1116,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	if !strings.Contains(stdinText, "Log file:") {
 		t.Fatalf("expected log file once interactive background shell completed, got %q", stdinText)
 	}
-	if !strings.Contains(stdinText, "hello builder") {
+	if !strings.Contains(stdinText, "hello app") {
 		t.Fatalf("expected echoed stdin in output, got %q", stdinText)
 	}
 	waitForManagerCount(t, manager, 0, time.Second)

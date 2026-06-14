@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"builder/shared/clientui"
-	"builder/shared/transcript"
-	patchformat "builder/shared/transcript/patchformat"
+	"core/shared/clientui"
+	"core/shared/transcript"
+	patchformat "core/shared/transcript/patchformat"
 	"fmt"
 	"strings"
 	"testing"
@@ -993,7 +993,7 @@ func TestOngoingMultilineToolBlocksRenderTreeGuides(t *testing.T) {
 }
 
 func TestOngoingPatchSummaryRendersPathAsPlainContiguousText(t *testing.T) {
-	path := "./.builder/plans/td-006-runtime-state-ownership.md"
+	path := "./.kent/plans/td-006-runtime-state-ownership.md"
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role:       "tool_call",
@@ -1026,7 +1026,7 @@ func TestOngoingPatchSummaryRendersPathAsPlainContiguousText(t *testing.T) {
 }
 
 func TestPatchSummaryRenderingUsesStructuredPathRemovedAddedParts(t *testing.T) {
-	path := "./.builder/plans/td-006+runtime-state-ownership.md"
+	path := "./.kent/plans/td-006+runtime-state-ownership.md"
 	model := NewModel(WithPreviewLines(20))
 	content, ok := model.renderPatchSummaryContent(&transcript.ToolCallMeta{
 		PatchRender: &patchformat.RenderedPatch{

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"builder/cli/selfcmd"
+	"core/cli/selfcmd"
 )
 
 type SystemPromptTemplateArgs struct {
@@ -16,13 +16,14 @@ type SystemPromptTemplateArgs struct {
 }
 
 type systemPromptRuntimeTemplateData struct {
-	BuilderCommand               string
+	LaunchCommand                string
 	EstimatedToolCallsForContext int
 	EditingToolName              string
 }
 
 type defaultSystemPromptTemplateData struct {
-	BuilderCommand                               string
+	LaunchCommand                                string
+	BuilderCommand                               string // deprecated alias of LaunchCommand; kept so migrated custom prompts render during the Builder->Kent window.
 	EstimatedToolCallsForContext                 int
 	EditingToolName                              string
 	DefaultSystemPromptPersonality               string
@@ -33,7 +34,8 @@ type defaultSystemPromptTemplateData struct {
 }
 
 type systemPromptTemplateData struct {
-	BuilderCommand                               string
+	LaunchCommand                                string
+	BuilderCommand                               string // deprecated alias of LaunchCommand; kept so migrated custom prompts render during the Builder->Kent window.
 	EstimatedToolCallsForContext                 int
 	EditingToolName                              string
 	DefaultSystemPrompt                          string
@@ -176,8 +178,8 @@ func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
 	return rendered
 }
 
-func BuilderCommand() string {
-	return selfcmd.BuilderCommand()
+func LaunchCommand() string {
+	return selfcmd.LaunchCommand()
 }
 
 func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
@@ -187,42 +189,54 @@ func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
 	return strings.TrimSpace(CompactionSoonReminderPrompt)
 }
 
-func RenderGoalNudgePrompt(objective, status string) string {
-	return renderTemplatePlaceholders(GoalNudgePrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-		"{{status}}":    strings.TrimSpace(status),
+// goalPromptData is the template data shared by every goal prompt. Goal
+// prompts render through the same text/template engine and command variable
+// ({{.LaunchCommand}}) as the system prompt, so the launch command is wired
+// in one place instead of a per-prompt placeholder.
+type goalPromptData struct {
+	LaunchCommand string
+	Objective     string
+	Status        string
+}
+
+func renderGoalPrompt(name, text, objective, status string) string {
+	rendered, err := renderNamedTemplate(name, text, goalPromptData{
+		LaunchCommand: LaunchCommand(),
+		Objective:     strings.TrimSpace(objective),
+		Status:        strings.TrimSpace(status),
 	})
+	if err != nil {
+		panic(err)
+	}
+	return rendered
+}
+
+func RenderGoalNudgePrompt(objective, status string) string {
+	return renderGoalPrompt("goal nudge", GoalNudgePrompt, objective, status)
 }
 
 func RenderGoalSetPrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalSetPrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal set", GoalSetPrompt, objective, "")
+}
+
+func RenderGoalAgentCommandDeniedPrompt() string {
+	return renderGoalPrompt("goal agent command denied", GoalAgentCommandDeniedPrompt, "", "")
 }
 
 func RenderGoalResumePrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalResumePrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal resume", GoalResumePrompt, objective, "")
 }
 
 func RenderGoalAlreadyCompletePrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalAlreadyCompletePrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal already complete", GoalAlreadyCompletePrompt, objective, "")
 }
 
 func RenderGoalAgentDuplicateSetDeniedPrompt(objective, status string) string {
-	return renderTemplatePlaceholders(GoalAgentDuplicateSetDeniedPrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-		"{{status}}":    strings.TrimSpace(status),
-	})
+	return renderGoalPrompt("goal agent duplicate set denied", GoalAgentDuplicateSetDeniedPrompt, objective, status)
 }
 
 func RenderGoalCompleteConfirmRequiredPrompt(objective string) string {
-	return renderTemplatePlaceholders(GoalCompleteConfirmRequiredPrompt, map[string]string{
-		"{{objective}}": strings.TrimSpace(objective),
-	})
+	return renderGoalPrompt("goal complete confirm required", GoalCompleteConfirmRequiredPrompt, objective, "")
 }
 
 func RenderWorktreeModePrompt(branch, cwd, worktreePath, workspaceRoot string) string {
@@ -246,32 +260,32 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 func RenderWorkflowTaskInstructions(args WorkflowNodeContextArgs, nodeCompletionInstructions string) (string, error) {
 	type workflowTaskInstructionsTemplateData struct {
 		WorkflowNodeContextArgs
-		BuilderCommand             string
+		LaunchCommand              string
 		NodeCompletionInstructions string
 	}
 	return renderNamedTemplate("workflow task instructions", WorkflowTaskInstructionsPrompt, workflowTaskInstructionsTemplateData{
 		WorkflowNodeContextArgs:    args,
-		BuilderCommand:             selfcmd.BuilderCommand(),
+		LaunchCommand:              selfcmd.LaunchCommand(),
 		NodeCompletionInstructions: strings.TrimSpace(nodeCompletionInstructions),
 	})
 }
 
 func RenderWorkflowToolCompletionInstructions(workflowShortId string) (string, error) {
 	return renderNamedTemplate("workflow tool completion instructions", WorkflowToolCompletionInstructionsPrompt, struct {
-		BuilderCommand  string
+		LaunchCommand   string
 		WorkflowShortId string
 	}{
-		BuilderCommand:  selfcmd.BuilderCommand(),
+		LaunchCommand:   selfcmd.LaunchCommand(),
 		WorkflowShortId: strings.TrimSpace(workflowShortId),
 	})
 }
 
 func RenderWorkflowStructuredCompletionInstructions(workflowShortId string) (string, error) {
 	return renderNamedTemplate("workflow structured completion instructions", WorkflowStructuredCompletionInstructionsPrompt, struct {
-		BuilderCommand  string
+		LaunchCommand   string
 		WorkflowShortId string
 	}{
-		BuilderCommand:  selfcmd.BuilderCommand(),
+		LaunchCommand:   selfcmd.LaunchCommand(),
 		WorkflowShortId: strings.TrimSpace(workflowShortId),
 	})
 }
@@ -305,7 +319,7 @@ type systemPromptSections struct {
 
 func renderSystemPromptSections(args SystemPromptTemplateArgs) (systemPromptSections, error) {
 	runtimeTemplateData := systemPromptRuntimeTemplateData{
-		BuilderCommand:               selfcmd.BuilderCommand(),
+		LaunchCommand:                selfcmd.LaunchCommand(),
 		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
 		EditingToolName:              strings.TrimSpace(args.EditingToolName),
 	}
@@ -344,7 +358,8 @@ func renderDefaultSystemPromptTemplateWithSections(text string, args SystemPromp
 		return "", nil
 	}
 	return renderNamedTemplate("system prompt", trimmed, defaultSystemPromptTemplateData{
-		BuilderCommand:                               selfcmd.BuilderCommand(),
+		LaunchCommand:                                selfcmd.LaunchCommand(),
+		BuilderCommand:                               selfcmd.LaunchCommand(),
 		EstimatedToolCallsForContext:                 args.EstimatedToolCallsForContext,
 		EditingToolName:                              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPromptPersonality:               strings.TrimSpace(sections.personality),
@@ -361,7 +376,8 @@ func renderSystemPromptTemplateWithSections(text string, args SystemPromptTempla
 		return "", nil
 	}
 	return renderNamedTemplate("system prompt", trimmed, systemPromptTemplateData{
-		BuilderCommand:                               selfcmd.BuilderCommand(),
+		LaunchCommand:                                selfcmd.LaunchCommand(),
+		BuilderCommand:                               selfcmd.LaunchCommand(),
 		EstimatedToolCallsForContext:                 args.EstimatedToolCallsForContext,
 		EditingToolName:                              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPrompt:                          strings.TrimSpace(defaultSystemPrompt),

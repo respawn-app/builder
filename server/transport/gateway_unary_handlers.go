@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/shared/client"
-	"builder/shared/protocol"
-	"builder/shared/serverapi"
+	"core/shared/client"
+	"core/shared/protocol"
+	"core/shared/serverapi"
 )
 
 func gatewayClientCall[C any, Req any, Resp any](getClient func(GatewayDependencies) C, call func(C, context.Context, Req) (Resp, error)) gatewayUnaryHandler {
@@ -37,7 +37,7 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error())
 		}
 		if params.ProtocolVersion != protocol.Version {
-			return protocol.NewErrorResponse(req.ID, protocol.ErrCodeProtocolVersionMismatch, fmt.Sprintf("unsupported protocol version %q; server requires %q, upgrade the older Builder process", params.ProtocolVersion, protocol.Version))
+			return protocol.NewErrorResponse(req.ID, protocol.ErrCodeProtocolVersionMismatch, fmt.Sprintf("unsupported protocol version %q; server requires %q, upgrade the older Kent process", params.ProtocolVersion, protocol.Version))
 		}
 		state.handshakeDone = true
 		return protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: g.identity})

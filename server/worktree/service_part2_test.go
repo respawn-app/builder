@@ -1,14 +1,14 @@
 package worktree
 
 import (
-	"builder/server/metadata"
-	"builder/server/primaryrun"
-	"builder/server/session"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/testgit"
 	"context"
+	"core/server/metadata"
+	"core/server/primaryrun"
+	"core/server/session"
+	shelltool "core/server/tools/shell"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/testgit"
 	"encoding/json"
 	"errors"
 	"os"

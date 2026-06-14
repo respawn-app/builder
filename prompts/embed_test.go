@@ -4,23 +4,40 @@ import (
 	"strings"
 	"testing"
 
-	"builder/cli/selfcmd"
+	"core/cli/selfcmd"
 )
 
 func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
-	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderCommand}} run edit={{.EditingToolName}}", SystemPromptTemplateArgs{
+	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.LaunchCommand}} run edit={{.EditingToolName}}", SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
 		EditingToolName:              "edit",
 	}, "")
 	if !strings.Contains(rendered, "calls=123") {
 		t.Fatalf("expected estimated tool calls rendered, got %q", rendered)
 	}
-	expectedCmd := "cmd=" + selfcmd.BuilderCommand() + " run"
+	expectedCmd := "cmd=" + selfcmd.LaunchCommand() + " run"
 	if !strings.Contains(rendered, expectedCmd) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected %q in rendered output, got %q", expectedCmd, rendered)
 	}
 	if !strings.Contains(rendered, "edit=edit") {
 		t.Fatalf("expected editing tool name rendered, got %q", rendered)
+	}
+}
+
+func TestSystemPromptRendersDeprecatedBuilderCommandAlias(t *testing.T) {
+	// Custom prompts migrated from Builder may still use the deprecated
+	// {{.BuilderCommand}} placeholder; it must render identically to
+	// {{.LaunchCommand}} in both the default-prompt and explicit-default paths
+	// so those sessions keep starting through the rebrand window.
+	for _, defaultPrompt := range []string{"", "base default prompt"} {
+		alias := renderSystemPromptTemplate("cmd={{.BuilderCommand}}", SystemPromptTemplateArgs{}, defaultPrompt)
+		launch := renderSystemPromptTemplate("cmd={{.LaunchCommand}}", SystemPromptTemplateArgs{}, defaultPrompt)
+		if alias != launch {
+			t.Fatalf("BuilderCommand alias = %q, want identical to LaunchCommand %q (defaultPrompt=%q)", alias, launch, defaultPrompt)
+		}
+		if !strings.Contains(alias, selfcmd.LaunchCommand()) {
+			t.Fatalf("expected alias render to contain launch command, got %q", alias)
+		}
 	}
 }
 
@@ -57,11 +74,11 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptSectionPlaceholders(t *tes
 		t.Fatalf("RenderCustomSystemPrompt: %v", err)
 	}
 	for _, want := range []string{
-		"autonomous coding agent named Builder",
+		"autonomous coding agent named Kent",
 		"Your agentic environment",
 		"Product ambiguity and planning",
 		"Final answer instructions",
-		selfcmd.BuilderCommand(),
+		selfcmd.LaunchCommand(),
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected section prompt to contain %q, got %q", want, rendered)
@@ -78,7 +95,7 @@ func TestBaseSystemPromptAssemblesDefaultSections(t *testing.T) {
 		EditingToolName:              "patch",
 	})
 	for _, want := range []string{
-		"autonomous coding agent named Builder",
+		"autonomous coding agent named Kent",
 		"Your agentic environment",
 		"Product ambiguity and planning",
 		"Final answer instructions",
@@ -147,7 +164,7 @@ func TestRenderWorkflowTaskInstructionsUsesCompletionModeFragment(t *testing.T) 
 	for _, want := range []string{
 		"ticket `BUI-1`",
 		"workflow `workflow-1`",
-		selfcmd.BuilderCommand() + " task show BUI-1",
+		selfcmd.LaunchCommand() + " task show BUI-1",
 		"complete_node",
 		"actionable (Actionable)",
 		"Triage the ticket.",
@@ -167,7 +184,7 @@ func TestRenderGoalNudgePrompt(t *testing.T) {
 	rendered := RenderGoalNudgePrompt("ship /goal mode", "active")
 	for _, want := range []string{
 		"<goal>\nship /goal mode\n</goal>",
-		"builder goal complete",
+		LaunchCommand() + " goal complete",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected goal nudge to contain %q, got %q", want, rendered)

@@ -1,11 +1,11 @@
 package app
 
 import (
-	"builder/server/runtime"
-	"builder/server/runtimewire"
-	"builder/shared/clientui"
-	"builder/shared/serverapi"
 	"context"
+	"core/server/runtime"
+	"core/server/runtimewire"
+	"core/shared/clientui"
+	"core/shared/serverapi"
 	"testing"
 	"time"
 )

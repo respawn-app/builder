@@ -1,15 +1,15 @@
 package app
 
 import (
-	"builder/server/llm"
-	"builder/server/registry"
-	"builder/server/runtime"
-	"builder/server/runtimecontrol"
-	"builder/server/runtimeview"
-	sharedclient "builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/serverapi"
 	"context"
+	"core/server/llm"
+	"core/server/registry"
+	"core/server/runtime"
+	"core/server/runtimecontrol"
+	"core/server/runtimeview"
+	sharedclient "core/shared/client"
+	"core/shared/clientui"
+	"core/shared/serverapi"
 	"errors"
 	"reflect"
 	"strings"

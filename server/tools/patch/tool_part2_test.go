@@ -1,9 +1,9 @@
 package patch
 
 import (
-	"builder/server/tools"
-	"builder/shared/toolspec"
 	"context"
+	"core/server/tools"
+	"core/shared/toolspec"
 	"encoding/json"
 	"errors"
 	"os"
@@ -161,7 +161,7 @@ func outsideNonTempDir(t *testing.T) string {
 		bases = append(bases, home)
 	}
 	for _, base := range bases {
-		dir, err := os.MkdirTemp(base, "builder-patch-outside-*")
+		dir, err := os.MkdirTemp(base, "kent-patch-outside-*")
 		if err != nil {
 			continue
 		}

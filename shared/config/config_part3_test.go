@@ -24,14 +24,14 @@ func TestLoadShellOutputMaxCharsPrecedenceAndValidation(t *testing.T) {
 	}
 	assertConfigSource(t, cfg, "shell_output_max_chars", "file")
 
-	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "18000")
+	t.Setenv("KENT_SHELL_OUTPUT_MAX_CHARS", "18000")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.ShellOutputMaxChars != 18000 {
 		t.Fatalf("expected env shell_output_max_chars=18000, got %d", cfg.Settings.ShellOutputMaxChars)
 	}
 	assertConfigSource(t, cfg, "shell_output_max_chars", "env")
 
-	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "0")
+	t.Setenv("KENT_SHELL_OUTPUT_MAX_CHARS", "0")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid shell_output_max_chars")
 	}
@@ -47,14 +47,14 @@ func TestLoadMinimumExecToBgSecondsPrecedenceAndValidation(t *testing.T) {
 	}
 	assertConfigSource(t, cfg, "minimum_exec_to_bg_seconds", "file")
 
-	t.Setenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS", "18")
+	t.Setenv("KENT_MINIMUM_EXEC_TO_BG_SECONDS", "18")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.MinimumExecToBgSeconds != 18 {
 		t.Fatalf("expected env minimum_exec_to_bg_seconds=18, got %d", cfg.Settings.MinimumExecToBgSeconds)
 	}
 	assertConfigSource(t, cfg, "minimum_exec_to_bg_seconds", "env")
 
-	t.Setenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS", "0")
+	t.Setenv("KENT_MINIMUM_EXEC_TO_BG_SECONDS", "0")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid minimum_exec_to_bg_seconds")
 	}
@@ -70,14 +70,14 @@ func TestLoadBGShellsOutputPrecedenceAndValidation(t *testing.T) {
 	}
 	assertConfigSource(t, cfg, "bg_shells_output", "file")
 
-	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "verbose")
+	t.Setenv("KENT_BG_SHELLS_OUTPUT", "verbose")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.BGShellsOutput != BGShellsOutputVerbose {
 		t.Fatalf("expected env bg_shells_output=verbose, got %q", cfg.Settings.BGShellsOutput)
 	}
 	assertConfigSource(t, cfg, "bg_shells_output", "env")
 
-	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "loud")
+	t.Setenv("KENT_BG_SHELLS_OUTPUT", "loud")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid bg_shells_output")
 	}
@@ -97,8 +97,8 @@ func TestLoadShellPostprocessingPrecedenceAndValidation(t *testing.T) {
 	assertConfigSource(t, cfg, "shell.postprocessing_mode", "file")
 	assertConfigSource(t, cfg, "shell.postprocess_hook", "file")
 
-	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "user")
-	t.Setenv("BUILDER_SHELL_POSTPROCESS_HOOK", "/tmp/env-hook")
+	t.Setenv("KENT_SHELL_POSTPROCESSING_MODE", "user")
+	t.Setenv("KENT_SHELL_POSTPROCESS_HOOK", "/tmp/env-hook")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeUser {
 		t.Fatalf("expected env shell.postprocessing_mode=user, got %q", cfg.Settings.Shell.PostprocessingMode)
@@ -109,7 +109,7 @@ func TestLoadShellPostprocessingPrecedenceAndValidation(t *testing.T) {
 	assertConfigSource(t, cfg, "shell.postprocessing_mode", "env")
 	assertConfigSource(t, cfg, "shell.postprocess_hook", "env")
 
-	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "broken")
+	t.Setenv("KENT_SHELL_POSTPROCESSING_MODE", "broken")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid shell.postprocessing_mode")
 	}
@@ -117,7 +117,7 @@ func TestLoadShellPostprocessingPrecedenceAndValidation(t *testing.T) {
 
 func TestLoadAcceptsCustomThinkingLevel(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_THINKING_LEVEL", "ultra")
+	t.Setenv("KENT_THINKING_LEVEL", "ultra")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.ThinkingLevel != "ultra" {
@@ -127,10 +127,10 @@ func TestLoadAcceptsCustomThinkingLevel(t *testing.T) {
 
 func TestLoadExpandsTildePersistenceRootFromEnv(t *testing.T) {
 	home, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_PERSISTENCE_ROOT", "~/.builder-custom")
+	t.Setenv("KENT_PERSISTENCE_ROOT", "~/.kent-custom")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
-	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder-custom") {
+	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".kent-custom") {
 		t.Fatalf("expanded persistence root mismatch: %q", got)
 	}
 }
@@ -139,7 +139,7 @@ func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
 	writeConfigTestFile(t, configPath, `openai_base_url = "http://file.local/v1"`)
 
-	t.Setenv("BUILDER_OPENAI_BASE_URL", "http://env.local/v1")
+	t.Setenv("KENT_OPENAI_BASE_URL", "http://env.local/v1")
 	cfg, err := Load(workspace, LoadOptions{OpenAIBaseURL: "http://cli.local/v1"})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -192,7 +192,7 @@ func TestNormalizeSettingsForPersistence_AllowsProviderOverrideWithExplicitPersi
 
 func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS", "123")
+	t.Setenv("KENT_TIMEOUTS_MODEL_REQUEST_SECONDS", "123")
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Timeouts.ModelRequestSeconds != 123 {
 		t.Fatalf("expected canonical env model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
@@ -214,7 +214,7 @@ func TestLoadStorePrecedence(t *testing.T) {
 		t.Fatalf("expected store source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_STORE", "false")
+	t.Setenv("KENT_STORE", "false")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Store {
 		t.Fatalf("expected env store=false")
@@ -224,13 +224,13 @@ func TestLoadStorePrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadIgnoresUnknownBuilderEnvVars(t *testing.T) {
+func TestLoadIgnoresUnknownEnvVars(t *testing.T) {
 	_, workspace := newConfigTestEnv(t)
-	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "custom-provider")
-	t.Setenv("BUILDER_MODEL_SUPPORTS_REASONING_EFFORT", "true")
-	t.Setenv("BUILDER_MODEL_TIMEOUT_SECONDS", "123")
-	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
-	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "15")
+	t.Setenv("KENT_PROVIDER_CAPABILITY_ID", "custom-provider")
+	t.Setenv("KENT_MODEL_SUPPORTS_REASONING_EFFORT", "true")
+	t.Setenv("KENT_MODEL_TIMEOUT_SECONDS", "123")
+	t.Setenv("KENT_USE_NATIVE_COMPACTION", "true")
+	t.Setenv("KENT_REVIEWER_MAX_SUGGESTIONS", "15")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.ModelCapabilities.SupportsReasoningEffort {
@@ -262,7 +262,7 @@ func TestLoadAllowNonCwdEditsPrecedence(t *testing.T) {
 		t.Fatalf("expected allow_non_cwd_edits source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_ALLOW_NON_CWD_EDITS", "false")
+	t.Setenv("KENT_ALLOW_NON_CWD_EDITS", "false")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.AllowNonCwdEdits {
 		t.Fatalf("expected env allow_non_cwd_edits=false")
@@ -282,16 +282,16 @@ func TestLoadDebugPrecedenceAndValidation(t *testing.T) {
 	}
 	assertConfigSource(t, cfg, "debug", "file")
 
-	t.Setenv("BUILDER_DEBUG", "false")
+	t.Setenv("KENT_DEBUG", "false")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.Debug {
 		t.Fatalf("expected env debug=false")
 	}
 	assertConfigSource(t, cfg, "debug", "env")
 
-	t.Setenv("BUILDER_DEBUG", "broken")
+	t.Setenv("KENT_DEBUG", "broken")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid BUILDER_DEBUG error")
+		t.Fatal("expected invalid KENT_DEBUG error")
 	}
 }
 
@@ -306,8 +306,8 @@ func TestLoadServerHostPortPrecedenceAndValidation(t *testing.T) {
 	assertConfigSource(t, cfg, "server_host", "file")
 	assertConfigSource(t, cfg, "server_port", "file")
 
-	t.Setenv("BUILDER_SERVER_HOST", "::1")
-	t.Setenv("BUILDER_SERVER_PORT", "65432")
+	t.Setenv("KENT_SERVER_HOST", "::1")
+	t.Setenv("KENT_SERVER_PORT", "65432")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.ServerHost != "::1" || cfg.Settings.ServerPort != 65432 {
 		t.Fatalf("unexpected server settings from env: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
@@ -324,9 +324,9 @@ func TestLoadServerHostPortPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("ServerRPCURL = %q, want ws://[::1]:65432/rpc", got)
 	}
 
-	t.Setenv("BUILDER_SERVER_PORT", "broken")
+	t.Setenv("KENT_SERVER_PORT", "broken")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid BUILDER_SERVER_PORT error")
+		t.Fatal("expected invalid KENT_SERVER_PORT error")
 	}
 }
 
@@ -334,7 +334,7 @@ func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
 	writeConfigTestFile(t, configPath, `context_compaction_threshold_tokens = 123456`)
 
-	t.Setenv("BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS", "234567")
+	t.Setenv("KENT_CONTEXT_COMPACTION_THRESHOLD_TOKENS", "234567")
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.ContextCompactionThresholdTokens != 234567 {
 		t.Fatalf("expected env threshold override, got %d", cfg.Settings.ContextCompactionThresholdTokens)
@@ -354,7 +354,7 @@ func TestLoadCompactionModePrecedence(t *testing.T) {
 		t.Fatalf("expected compaction_mode source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_COMPACTION_MODE", "none")
+	t.Setenv("KENT_COMPACTION_MODE", "none")
 	cfg = loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.CompactionMode != CompactionModeNone {
 		t.Fatalf("expected env override compaction_mode=none, got %q", cfg.Settings.CompactionMode)
@@ -388,7 +388,7 @@ func TestLoadModelContextWindowPrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
 	writeConfigTestFile(t, configPath, "model_context_window = 350000\ncontext_compaction_threshold_tokens = 250000\n")
 
-	t.Setenv("BUILDER_MODEL_CONTEXT_WINDOW", "420000")
+	t.Setenv("KENT_MODEL_CONTEXT_WINDOW", "420000")
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.ModelContextWindow != 420000 {
 		t.Fatalf("expected env model context window override, got %d", cfg.Settings.ModelContextWindow)

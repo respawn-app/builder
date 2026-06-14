@@ -1,16 +1,16 @@
 package worktree
 
 import (
-	"builder/server/metadata"
-	"builder/server/primaryrun"
-	"builder/server/registry"
-	runtimepkg "builder/server/runtime"
-	"builder/server/session"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
 	"context"
+	"core/server/metadata"
+	"core/server/primaryrun"
+	"core/server/registry"
+	runtimepkg "core/server/runtime"
+	"core/server/session"
+	shelltool "core/server/tools/shell"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
 	"errors"
 	"fmt"
 	"os"
@@ -192,7 +192,7 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	argsPath := filepath.Join(t.TempDir(), "worktree-args.txt")
 	cwdPath := filepath.Join(t.TempDir(), "worktree-cwd.txt")
 	scriptRelpath := filepath.Join("scripts", "setup-worktree.sh")
-	writeExecutableFile(t, filepath.Join(env.workspaceRoot, scriptRelpath), fmt.Sprintf("#!/bin/sh\npwd > %q\nprintf '%%s\n%%s\n%%s\n' \"$1\" \"$2\" \"$3\" > %q\ncat > %q\nprintf '%%s' \"$BUILDER_WORKTREE_PAYLOAD_JSON\" > %q\n", cwdPath, argsPath, stdinPath, payloadPath))
+	writeExecutableFile(t, filepath.Join(env.workspaceRoot, scriptRelpath), fmt.Sprintf("#!/bin/sh\npwd > %q\nprintf '%%s\n%%s\n%%s\n' \"$1\" \"$2\" \"$3\" > %q\ncat > %q\nprintf '%%s' \"$KENT_WORKTREE_PAYLOAD_JSON\" > %q\n", cwdPath, argsPath, stdinPath, payloadPath))
 	env.service.setupScript = scriptRelpath
 
 	resp, err := env.service.CreateWorktree(env.ctx, serverapi.WorktreeCreateRequest{
@@ -212,8 +212,8 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	if !resp.SetupScheduled {
 		t.Fatal("expected setup script to be scheduled")
 	}
-	if !resp.Worktree.BuilderManaged {
-		t.Fatal("expected worktree builder_managed=true")
+	if !resp.Worktree.Managed {
+		t.Fatal("expected worktree managed=true")
 	}
 	if resp.Target.WorktreeID != resp.Worktree.WorktreeID {
 		t.Fatalf("create target worktree id = %q, want %q", resp.Target.WorktreeID, resp.Worktree.WorktreeID)
@@ -231,7 +231,7 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	if err != nil {
 		t.Fatalf("GetWorktreeRecordByID: %v", err)
 	}
-	if !record.BuilderManaged || !record.CreatedBranch || record.OriginSessionID != env.session.Meta().SessionID {
+	if !record.Managed || !record.CreatedBranch || record.OriginSessionID != env.session.Meta().SessionID {
 		t.Fatalf("unexpected worktree record: %+v", record)
 	}
 	payload := waitForSetupPayload(t, payloadPath)
@@ -270,7 +270,7 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	}
 	worktrees := mustListWorktrees(t, env)
 	created := findWorktreeByID(t, worktrees.Worktrees, resp.Worktree.WorktreeID)
-	if !created.BuilderManaged || !created.CreatedBranch || created.OriginSessionID != env.session.Meta().SessionID {
+	if !created.Managed || !created.CreatedBranch || created.OriginSessionID != env.session.Meta().SessionID {
 		t.Fatalf("sync lost worktree provenance: %+v", created)
 	}
 }
@@ -308,8 +308,8 @@ func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	if resp.Worktree.BranchName != "feature/existing-ref" {
 		t.Fatalf("branch name = %q, want feature/existing-ref", resp.Worktree.BranchName)
 	}
-	if !resp.Worktree.BuilderManaged {
-		t.Fatal("expected builder-managed worktree for existing ref")
+	if !resp.Worktree.Managed {
+		t.Fatal("expected managed worktree for existing ref")
 	}
 	record, err := env.store.GetWorktreeRecordByID(env.ctx, resp.Worktree.WorktreeID)
 	if err != nil {
@@ -320,7 +320,7 @@ func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	}
 }
 
-func TestSyncWorkspaceClearsStaleBuilderProvenanceWhenRootIsReused(t *testing.T) {
+func TestSyncWorkspaceClearsStaleManagedProvenanceWhenRootIsReused(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/provenance-stale")
 
@@ -332,8 +332,8 @@ func TestSyncWorkspaceClearsStaleBuilderProvenanceWhenRootIsReused(t *testing.T)
 		if strings.TrimSpace(worktree.CanonicalRoot) != strings.TrimSpace(created.CanonicalRoot) {
 			continue
 		}
-		if worktree.BuilderManaged || worktree.CreatedBranch || strings.TrimSpace(worktree.OriginSessionID) != "" {
-			t.Fatalf("expected stale builder provenance cleared for reused root, got %+v", worktree)
+		if worktree.Managed || worktree.CreatedBranch || strings.TrimSpace(worktree.OriginSessionID) != "" {
+			t.Fatalf("expected stale managed provenance cleared for reused root, got %+v", worktree)
 		}
 		return
 	}

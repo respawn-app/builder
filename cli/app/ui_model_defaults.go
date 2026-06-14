@@ -4,11 +4,11 @@ import (
 	"os"
 	"strings"
 
-	"builder/cli/app/commands"
-	appstatus "builder/cli/app/internal/status"
-	"builder/cli/tui"
-	"builder/shared/clientui"
-	"builder/shared/theme"
+	"core/cli/app/commands"
+	appstatus "core/cli/app/internal/status"
+	"core/cli/tui"
+	"core/shared/clientui"
+	"core/shared/theme"
 )
 
 func newUIModelDefaults(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent) *uiModel {
@@ -68,14 +68,14 @@ func newUISessionTransitionFeatureState() uiSessionTransitionFeatureState {
 }
 
 func newUIStatusFeatureState() uiStatusFeatureState {
-	debug := envFlagEnabled("BUILDER_DEBUG")
+	debug := envFlagEnabled("KENT_DEBUG")
 	return uiStatusFeatureState{
 		statusRepository:      appstatus.NewMemoryRepository(),
 		clipboardImagePaster:  newSystemClipboardImagePaster(),
 		clipboardTextCopier:   newSystemClipboardTextCopier(),
-		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugKeys:             envFlagEnabled("KENT_DEBUG_KEYS"),
 		debugMode:             debug,
-		transcriptDiagnostics: envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
+		transcriptDiagnostics: envFlagEnabled("KENT_TRANSCRIPT_DIAGNOSTICS"),
 	}
 }
 

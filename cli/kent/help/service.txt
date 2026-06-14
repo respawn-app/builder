@@ -1,0 +1,26 @@
+Usage of kent service:
+  kent service status [--json]
+  kent service install [--force] [--no-start]
+  kent service uninstall [--keep-running]
+  kent service start
+  kent service stop
+  kent service restart [--if-installed]
+
+What This Does:
+  Manage the Kent server background service for one shared local `kent serve`.
+  The service starts at login and is supervised by the OS.
+
+Backends:
+  macOS: launchd LaunchAgent.
+  Linux/WSL2: systemd --user unit.
+  Windows: Scheduled Task, with Startup folder fallback when needed.
+
+macOS Notes:
+  `restart --if-installed` rewrites the LaunchAgent, unloads the loaded job, and bootstraps it again.
+  `start` bootstraps an unloaded LaunchAgent; launchd starts it through RunAtLoad.
+
+Examples:
+  kent service status
+  kent service install
+  kent service restart
+

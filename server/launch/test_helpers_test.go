@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"builder/server/auth"
-	"builder/server/metadata"
-	"builder/server/session"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/toolspec"
+	"core/server/auth"
+	"core/server/metadata"
+	"core/server/session"
+	"core/shared/brand"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/toolspec"
 )
 
 const (
@@ -90,7 +91,7 @@ func loadLaunchConfigWithHome(t *testing.T, workspace string, configLines ...str
 
 func writeHomeConfig(t *testing.T, home, contents string) {
 	t.Helper()
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}

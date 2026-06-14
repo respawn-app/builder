@@ -1,8 +1,8 @@
 package app
 
 import (
-	"builder/shared/clientui"
-	"builder/shared/serverapi"
+	"core/shared/clientui"
+	"core/shared/serverapi"
 	"strings"
 	"testing"
 
@@ -74,7 +74,7 @@ func TestWorktreeDeleteDialogBranchPreviewFollowsSelectedAction(t *testing.T) {
 
 func TestWorktreeDeleteDialogPreviewOmitsBranchWhenActionKeepsBranch(t *testing.T) {
 	resp := testLinkedWorktreeListResponse()
-	resp.Worktrees[1].BuilderManaged = false
+	resp.Worktrees[1].Managed = false
 	resp.Worktrees[1].CreatedBranch = false
 	client := &worktreeCommandTestClient{listResp: resp}
 	m := newWorktreeTestModel(t, client)
@@ -356,7 +356,7 @@ func TestWorktreeDeleteDoneShowsBranchCleanupOutcome(t *testing.T) {
 		resp: serverapi.WorktreeDeleteResponse{
 			Target:               clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"},
 			Worktree:             serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
-			BranchCleanupMessage: "Kept branch feature-a: Builder cannot prove this worktree created it",
+			BranchCleanupMessage: "Kept branch feature-a: Kent cannot prove this worktree created it",
 		},
 	})
 	updated := next.(*uiModel)

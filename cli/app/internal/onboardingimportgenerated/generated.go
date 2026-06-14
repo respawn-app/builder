@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"builder/cli/app/internal/onboardingimportskills"
-	"builder/prompts"
+	"core/cli/app/internal/onboardingimportskills"
+	"core/prompts"
+	"core/shared/brand"
 
 	"gopkg.in/yaml.v3"
 )
@@ -42,7 +43,7 @@ func Discover() ([]Item, error) {
 		items = append(items, Item{
 			ID:            "generated:" + dirName,
 			ProviderLabel: "Preinstalled",
-			SourceDir:     filepath.ToSlash(filepath.Join("~", ".builder", ".generated", "skills", dirName)),
+			SourceDir:     filepath.ToSlash(filepath.Join("~", brand.ConfigDirName, ".generated", "skills", dirName)),
 			TargetDirName: dirName,
 			SkillName:     name,
 		})

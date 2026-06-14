@@ -1,11 +1,12 @@
 package runtime
 
 import (
-	"builder/server/llm"
-	"builder/server/tools"
-	shelltool "builder/server/tools/shell"
-	"builder/shared/toolspec"
 	"context"
+	"core/server/llm"
+	"core/server/tools"
+	shelltool "core/server/tools/shell"
+	"core/shared/brand"
+	"core/shared/toolspec"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	existingGlobalAgents := llm.Message{
 		Role:        llm.RoleDeveloper,
@@ -101,7 +102,7 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	existingEnv := llm.Message{
 		Role:        llm.RoleDeveloper,

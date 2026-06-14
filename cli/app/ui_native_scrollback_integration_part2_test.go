@@ -1,15 +1,15 @@
 package app
 
 import (
-	"builder/cli/tui"
-	"builder/server/llm"
-	"builder/server/runtime"
-	"builder/server/tools"
-	sharedclient "builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/toolspec"
 	"bytes"
 	"context"
+	"core/cli/tui"
+	"core/server/llm"
+	"core/server/runtime"
+	"core/server/tools"
+	sharedclient "core/shared/client"
+	"core/shared/clientui"
+	"core/shared/toolspec"
 	"errors"
 	"strings"
 	"testing"

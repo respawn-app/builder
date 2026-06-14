@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"builder/cli/app/internal/statuscollect"
-	"builder/server/auth"
-	"builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	sharedtheme "builder/shared/theme"
+	"core/cli/app/internal/statuscollect"
+	"core/server/auth"
+	"core/shared/client"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/serverapi"
+	sharedtheme "core/shared/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -112,7 +112,7 @@ func TestSessionPickerIgnoresMouseSGRRunes(t *testing.T) {
 func TestSessionPickerHeaderRendersStatusReportBox(t *testing.T) {
 	m := newSessionPickerModel(nil, "dark", sessionPickerHeaderInfo{
 		Version:    "1.2.3",
-		CWD:        "~/Developer/builder-cli",
+		CWD:        "~/Developer/kent-cli",
 		Branch:     "feature/session-picker",
 		Model:      "gpt-5 high",
 		Auth:       "OpenAI Subscription",
@@ -123,8 +123,8 @@ func TestSessionPickerHeaderRendersStatusReportBox(t *testing.T) {
 	plain := stripANSIAndTrimRight(m.renderHeader())
 	for _, want := range []string{
 		"┌",
-		"Builder v1.2.3",
-		"git feature/session-picker · ~/Developer/builder-cli",
+		"Kent v1.2.3",
+		"git feature/session-picker · ~/Developer/kent-cli",
 		"OpenAI Subscription · gpt-5 high",
 		"Server owned by this terminal",
 		"└",
@@ -181,7 +181,7 @@ func TestSessionPickerHeaderInitialAsyncPaintUsesOnlyStaticShell(t *testing.T) {
 	}
 
 	before := stripANSIAndTrimRight(m.View())
-	if !strings.Contains(before, "Builder v1.2.3") || !strings.Contains(before, "Server owned by this terminal") {
+	if !strings.Contains(before, "Kent v1.2.3") || !strings.Contains(before, "Server owned by this terminal") {
 		t.Fatalf("expected static shell before async status, got %q", before)
 	}
 	for _, unexpected := range []string{"git picker-branch", "No auth", "gpt-5 high", repoRoot} {
@@ -270,7 +270,7 @@ func TestSessionPickerHeaderReflowsMainInfoWhenNarrow(t *testing.T) {
 		t.Fatalf("expected narrow header to reflow main info, got %q", plain)
 	}
 	for _, want := range []string{
-		"Builder v1.2.3",
+		"Kent v1.2.3",
 		"git main",
 		"…",
 		"OpenAI API Key",

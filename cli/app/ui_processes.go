@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"builder/shared/clientui"
+	"core/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -488,8 +488,8 @@ func editorCommand(path string) (*exec.Cmd, error) {
 	if shellPath == "" {
 		shellPath = "/bin/sh"
 	}
-	cmd := exec.Command(shellPath, "-lc", `eval "$BUILDER_EDITOR \"$1\""`, "builder-editor", path)
-	cmd.Env = append(os.Environ(), "BUILDER_EDITOR="+editor)
+	cmd := exec.Command(shellPath, "-lc", `eval "$KENT_EDITOR \"$1\""`, "kent-editor", path)
+	cmd.Env = append(os.Environ(), "KENT_EDITOR="+editor)
 	return cmd, nil
 }
 

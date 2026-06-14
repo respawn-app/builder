@@ -9,14 +9,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"builder/server/auth"
-	serverbootstrap "builder/server/bootstrap"
-	"builder/server/generated"
-	"builder/server/metadata"
-	"builder/server/rootlock"
-	"builder/shared/clientui"
-	"builder/shared/serverapi"
-	"builder/shared/testopenai"
+	"core/server/auth"
+	serverbootstrap "core/server/bootstrap"
+	"core/server/generated"
+	"core/server/metadata"
+	"core/server/rootlock"
+	"core/shared/brand"
+	"core/shared/clientui"
+	"core/shared/serverapi"
+	"core/shared/testopenai"
 )
 
 func TestNewBuildsReusableServerCore(t *testing.T) {
@@ -311,10 +312,10 @@ func TestSessionLaunchClientForProjectWorkspaceUsesWorkspaceLocalConfig(t *testi
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Join(workspaceB, ".builder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceB, brand.ConfigDirName), 0o755); err != nil {
 		t.Fatalf("create workspace config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceB, ".builder", "config.toml"), []byte("model = \"workspace-b-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceB, brand.ConfigDirName, "config.toml"), []byte("model = \"workspace-b-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 

@@ -1,0 +1,4 @@
+Usage of kent service uninstall:
+  kent service uninstall [--keep-running]
+
+Flags:

@@ -1,25 +1,27 @@
 package app
 
 import (
-	"builder/cli/app/internal/daemonlaunch"
-	"builder/cli/app/internal/remoteattach"
-	"builder/server/auth"
-	"builder/server/authflow"
-	"builder/server/launch"
-	"builder/server/runprompt"
-	"builder/server/runtime"
-	"builder/server/serve"
-	"builder/server/session"
-	serverstartup "builder/server/startup"
-	"builder/server/tools/askquestion"
-	"builder/shared/client"
-	"builder/shared/clientui"
-	"builder/shared/config"
-	"builder/shared/protocol"
-	"builder/shared/serverapi"
-	"builder/shared/testopenai"
 	"bytes"
 	"context"
+	"core/cli/app/internal/daemonlaunch"
+	"core/cli/app/internal/remoteattach"
+	"core/server/auth"
+	"core/server/authflow"
+	"core/server/launch"
+	"core/server/runprompt"
+	"core/server/runtime"
+	"core/server/serve"
+	"core/server/session"
+	serverstartup "core/server/startup"
+	"core/server/tools/askquestion"
+	"core/shared/brand"
+	"core/shared/client"
+	"core/shared/clientui"
+	"core/shared/config"
+	"core/shared/protocol"
+	"core/shared/serverapi"
+	"core/shared/sessionenv"
+	"core/shared/testopenai"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -74,7 +76,7 @@ func saveReadyAppAuthState(t *testing.T, workspace string) {
 func TestLoadRemoteAttachConfigUsesSessionWorkspaceWhenWorkspaceImplicit(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	worktree := filepath.Join(home, brand.ConfigDirName, "worktrees", "project", "feature")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
@@ -115,8 +117,8 @@ func TestLoadRemoteAttachConfigRejectsStaleWorkspaceContextSession(t *testing.T)
 	if err == nil {
 		t.Fatal("expected stale workspace context session to fail")
 	}
-	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
-		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
+	if !strings.Contains(err.Error(), sessionenv.SessionIDEnv+" points to missing Kent session") {
+		t.Fatalf("error = %q, want %s context", err, sessionenv.SessionIDEnv)
 	}
 }
 
@@ -134,10 +136,10 @@ func TestLoadRemoteAttachConfigKeepsExplicitSessionLookupStrict(t *testing.T) {
 	}
 }
 
-func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
+func TestRunPromptFromWorktreeUsesKentSessionWorkspaceContext(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	worktree := filepath.Join(home, brand.ConfigDirName, "worktrees", "project", "feature")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
@@ -187,8 +189,8 @@ func TestRunPromptRejectsStaleWorkspaceContextSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected stale workspace context session to fail")
 	}
-	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
-		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
+	if !strings.Contains(err.Error(), sessionenv.SessionIDEnv+" points to missing Kent session") {
+		t.Fatalf("error = %q, want %s context", err, sessionenv.SessionIDEnv)
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("expected no llm calls, got %d", hits.Load())
@@ -814,7 +816,7 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	if closeFn != nil {
 		t.Fatal("expected no close function when startup fails")
 	}
-	if !strings.Contains(err.Error(), "builder project") || !strings.Contains(err.Error(), "builder attach") {
+	if !strings.Contains(err.Error(), "kent project") || !strings.Contains(err.Error(), "kent attach") {
 		t.Fatalf("expected recovery guidance in error, got %q", err)
 	}
 }

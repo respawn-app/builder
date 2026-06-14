@@ -8,14 +8,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/tools"
-	"builder/server/workflowruntime"
-	"builder/shared/clientui"
-	"builder/shared/compaction"
-	"builder/shared/config"
-	"builder/shared/toolspec"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/tools"
+	"core/server/workflowruntime"
+	"core/shared/brand"
+	"core/shared/clientui"
+	"core/shared/compaction"
+	"core/shared/config"
+	"core/shared/toolspec"
 
 	"github.com/google/uuid"
 )
@@ -23,7 +24,7 @@ import (
 const (
 	interruptMessage                  = "User interrupted you"
 	agentsFileName                    = "AGENTS.md"
-	agentsGlobalDirName               = ".builder"
+	agentsGlobalDirName               = brand.ConfigDirName
 	systemPromptFileName              = "SYSTEM.md"
 	agentsInjectedHeader              = "# Project context and authoritative instructions from the ./AGENTS.md file:"
 	agentsInjectedFenceLabel          = "md"

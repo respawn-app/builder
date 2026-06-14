@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"builder/server/workflow"
-	"builder/server/workflowstore"
-	"builder/shared/serverapi"
+	"core/server/workflow"
+	"core/server/workflowstore"
+	"core/shared/serverapi"
 )
 
 func TestEnsureTaskWorktreeCreatesShortIDBranchWithoutControllerLease(t *testing.T) {
@@ -27,8 +27,8 @@ func TestEnsureTaskWorktreeCreatesShortIDBranchWithoutControllerLease(t *testing
 	if !resp.Created || !resp.CreatedBranch {
 		t.Fatalf("created flags = created:%t branch:%t, want true/true", resp.Created, resp.CreatedBranch)
 	}
-	if !resp.Worktree.BuilderManaged || !resp.Worktree.CreatedBranch {
-		t.Fatalf("worktree provenance = %+v, want builder-managed created branch", resp.Worktree)
+	if !resp.Worktree.Managed || !resp.Worktree.CreatedBranch {
+		t.Fatalf("worktree provenance = %+v, want managed created branch", resp.Worktree)
 	}
 	if resp.Worktree.BranchName != task.ShortID {
 		t.Fatalf("branch name = %q, want task short id %q", resp.Worktree.BranchName, task.ShortID)

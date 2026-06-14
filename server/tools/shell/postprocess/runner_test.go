@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"builder/shared/config"
-	"builder/shared/toolspec"
+	"core/shared/config"
+	"core/shared/sessionenv"
+	"core/shared/toolspec"
 )
 
 func TestRunnerBuiltinGoTestSuccessCollapsesToPass(t *testing.T) {
@@ -453,7 +454,7 @@ func TestRunnerUserHookReplacesOutput(t *testing.T) {
 
 func TestRunnerUserHookInheritsOwnerSessionID(t *testing.T) {
 	hookPath := writeHookScript(t, `#!/bin/sh
-printf '{"processed":true,"replaced_output":"%s"}' "$BUILDER_SESSION_ID"
+printf '{"processed":true,"replaced_output":"%s"}' "$`+sessionenv.SessionIDEnv+`"
 `)
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})
 	result, err := runner.Apply(context.Background(), Request{

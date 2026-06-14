@@ -7,7 +7,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 read_version() {
-	local version="${BUILDER_VERSION:-}"
+	local version="${KENT_VERSION:-}"
 	if [ -z "$version" ] && [ -f VERSION ]; then
 		version="$(tr -d ' \n' <VERSION)"
 	fi
@@ -47,10 +47,10 @@ run_build() {
 	local version
 	version="$(read_version)"
 	if [ -n "$version" ]; then
-		BUILDER_VERSION="$version" bash scripts/build.sh --output ./bin/builder
+		KENT_VERSION="$version" bash scripts/build.sh --output ./bin/kent
 		return
 	fi
-	bash scripts/build.sh --output ./bin/builder
+	bash scripts/build.sh --output ./bin/kent
 }
 
 run_test() {

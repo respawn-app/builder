@@ -1,10 +1,10 @@
 package app
 
 import (
-	"builder/cli/tui"
-	"builder/server/llm"
-	"builder/server/runtime"
-	"builder/shared/clientui"
+	"core/cli/tui"
+	"core/server/llm"
+	"core/server/runtime"
+	"core/shared/clientui"
 	"fmt"
 	"strings"
 	"testing"
@@ -616,7 +616,7 @@ func TestAssistantCommentaryCommitPlusDeltaDoesNotSplitOngoingView(t *testing.T)
 		CommittedEntryCount:        1,
 		Message: llm.Message{
 			Role:    llm.RoleAssistant,
-			Content: "Decision: keep Builder tool name patch; expose custom tool with Lark grammar.",
+			Content: "Decision: keep tool name patch; expose custom tool with Lark grammar.",
 			Phase:   llm.MessagePhaseCommentary,
 		},
 	})

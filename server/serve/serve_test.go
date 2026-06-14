@@ -13,15 +13,16 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/auth"
-	"builder/server/authflow"
-	"builder/server/metadata"
-	"builder/server/rootlock"
-	"builder/server/startup"
-	"builder/shared/client"
-	"builder/shared/config"
-	"builder/shared/protocol"
-	"builder/shared/serverapi"
+	"core/server/auth"
+	"core/server/authflow"
+	"core/server/metadata"
+	"core/server/rootlock"
+	"core/server/startup"
+	"core/shared/brand"
+	"core/shared/client"
+	"core/shared/config"
+	"core/shared/protocol"
+	"core/shared/serverapi"
 )
 
 type envAuthHandler struct {
@@ -122,8 +123,8 @@ func configureServeTestServerPort(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	ReserveTestListenReservation(listener)
 	t.Cleanup(func() { ReleaseTestListenReservation(listener.Addr().String()) })
-	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
-	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+	t.Setenv("KENT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("KENT_SERVER_PORT", strconv.Itoa(port))
 }
 
 func TestReserveTestListenReservationDrainerStopsAfterRelease(t *testing.T) {
@@ -581,7 +582,7 @@ model = "blocked-model"
 
 func writeServeSettings(t *testing.T, home string, contents string) {
 	t.Helper()
-	settingsDir := filepath.Join(home, ".builder")
+	settingsDir := filepath.Join(home, brand.ConfigDirName)
 	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
 		t.Fatalf("create settings dir: %v", err)
 	}

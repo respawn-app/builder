@@ -1,12 +1,12 @@
 package runtime
 
 import (
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/tools"
-	"builder/shared/cachewarn"
-	"builder/shared/config"
 	"context"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/tools"
+	"core/shared/cachewarn"
+	"core/shared/config"
 	"encoding/json"
 	"testing"
 )

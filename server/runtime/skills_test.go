@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/llm"
+	"core/server/llm"
+	"core/shared/brand"
 )
 
 func TestSkillsContextMessageIncludesCodexPromptAndSkillEntries(t *testing.T) {
@@ -16,8 +17,8 @@ func TestSkillsContextMessageIncludesCodexPromptAndSkillEntries(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "home-skill", "from home")
-	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "home-skill"), "home-skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
@@ -50,7 +51,7 @@ func TestSkillsContextMessageSkipsInvalidSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	invalidSkillDir := filepath.Join(workspace, ".builder", "skills", "invalid")
+	invalidSkillDir := filepath.Join(workspace, brand.ConfigDirName, "skills", "invalid")
 	if err := os.MkdirAll(invalidSkillDir, 0o755); err != nil {
 		t.Fatalf("mkdir invalid skill dir: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestSkillsContextMessageLoadsSymlinkedSkillDirectory(t *testing.T) {
 
 	workspace := t.TempDir()
 	targetSkillPath := writeTestSkill(t, filepath.Join(t.TempDir(), "shared-skills", "linked-skill"), "linked-skill", "from symlink")
-	linkPath := filepath.Join(workspace, ".builder", "skills", "linked-skill")
+	linkPath := filepath.Join(workspace, brand.ConfigDirName, "skills", "linked-skill")
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatalf("mkdir symlink parent: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestSkillsContextMessageLoadsSkillFromSymlinkedGlobalSkillsRoot(t *testing.
 	if err := os.Symlink(filepath.Dir(targetSkillPath), filepath.Join(sharedSkillsRoot, "linked-skill")); err != nil {
 		t.Fatalf("symlink skill dir in global root: %v", err)
 	}
-	globalSkillsRoot := filepath.Join(home, ".builder", "skills")
+	globalSkillsRoot := filepath.Join(home, brand.ConfigDirName, "skills")
 	if err := os.MkdirAll(filepath.Dir(globalSkillsRoot), 0o755); err != nil {
 		t.Fatalf("mkdir global skills parent: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestResolveSkillDirUsesLstatWhenDirEntryTypeIsUnknown(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	brokenLinkPath := filepath.Join(workspace, brand.ConfigDirName, "skills", "broken-skill")
 	if err := os.MkdirAll(filepath.Dir(brokenLinkPath), 0o755); err != nil {
 		t.Fatalf("mkdir broken symlink parent: %v", err)
 	}
@@ -161,8 +162,8 @@ func TestSkillsContextMessageSkipsBrokenSymlinkedSkillDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	validSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "valid-skill"), "valid-skill", "from workspace")
-	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	validSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "valid-skill"), "valid-skill", "from workspace")
+	brokenLinkPath := filepath.Join(workspace, brand.ConfigDirName, "skills", "broken-skill")
 	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-skill-dir"), brokenLinkPath); err != nil {
 		t.Fatalf("symlink broken skill dir: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T)
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
 	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
@@ -215,7 +216,7 @@ func TestSkillsContextMessageFailsOnUnreadableSkillsDirectory(t *testing.T) {
 	workspace := t.TempDir()
 	prev := readSkillsDir
 	readSkillsDir = func(path string) ([]os.DirEntry, error) {
-		if path == filepath.Join(workspace, ".builder", "skills") {
+		if path == filepath.Join(workspace, brand.ConfigDirName, "skills") {
 			return nil, os.ErrPermission
 		}
 		return prev(path)
@@ -362,8 +363,8 @@ func TestSkillsContextMessageSkipsConfigDisabledSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "Home Skill", "from home")
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+	writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "home-skill"), "Home Skill", "from home")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "Workspace Skill", "from workspace")
 
 	content, found, err := skillsContextMessageWithDisabled(workspace, map[string]bool{"workspace skill": true})
 	if err != nil {
@@ -385,9 +386,9 @@ func TestGeneratedSkillsAreInjectedAfterUserSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "Home Skill", "from home")
-	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
-	generatedSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "home-skill"), "Home Skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+	generatedSkillPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, ".generated", "skills", "skill-creator"), "skill-creator", "generated")
 
 	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
@@ -419,8 +420,8 @@ func TestUserSkillDuplicateNameBehaviorIsUnchanged(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "same-skill-global"), "same-skill", "from home")
-	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "same-skill-workspace"), "same-skill", "from workspace")
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "same-skill-global"), "same-skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "same-skill-workspace"), "same-skill", "from workspace")
 
 	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
@@ -446,8 +447,8 @@ func TestGeneratedSkillIsShadowedByUserSkillName(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	userSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "skill-creator"), "skill-creator", "workspace")
-	writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+	userSkillPath := writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "skill-creator"), "skill-creator", "workspace")
+	writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, ".generated", "skills", "skill-creator"), "skill-creator", "generated")
 
 	content, found, err := skillsContextMessageWithDisabled(workspace, nil)
 	if err != nil {
@@ -469,7 +470,7 @@ func TestGeneratedSkillIsDisabledBySkillToggle(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+	writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, ".generated", "skills", "skill-creator"), "skill-creator", "generated")
 
 	content, found, err := skillsContextMessageWithDisabled(workspace, map[string]bool{"skill-creator": true})
 	if err != nil {
@@ -485,7 +486,7 @@ func TestInspectSkillsMarksConfigDisabledSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "Workspace Skill", "from workspace")
 
 	inspections, err := InspectSkills(workspace, map[string]bool{"workspace skill": true})
 	if err != nil {
@@ -507,8 +508,8 @@ func TestInspectSkillsMarksGeneratedShadowedAndDisabled(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "skill-creator"), "skill-creator", "workspace")
-	generatedPath := writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "skill-creator"), "skill-creator", "workspace")
+	generatedPath := writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, ".generated", "skills", "skill-creator"), "skill-creator", "generated")
 
 	inspections, err := InspectSkills(workspace, map[string]bool{"skill-creator": true})
 	if err != nil {
@@ -535,7 +536,7 @@ func TestInspectSkillsLoadsSymlinkedSkillDirectory(t *testing.T) {
 
 	workspace := t.TempDir()
 	targetSkillPath := writeTestSkill(t, filepath.Join(t.TempDir(), "shared-skills", "linked-skill"), "linked-skill", "from symlink")
-	linkPath := filepath.Join(workspace, ".builder", "skills", "linked-skill")
+	linkPath := filepath.Join(workspace, brand.ConfigDirName, "skills", "linked-skill")
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatalf("mkdir symlink parent: %v", err)
 	}
@@ -563,7 +564,7 @@ func TestInspectSkillsReportsBrokenSymlinkedSkillDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	brokenLinkPath := filepath.Join(workspace, brand.ConfigDirName, "skills", "broken-skill")
 	if err := os.MkdirAll(filepath.Dir(brokenLinkPath), 0o755); err != nil {
 		t.Fatalf("mkdir broken symlink parent: %v", err)
 	}
@@ -595,8 +596,8 @@ func TestBuildReviewerRequestMessagesSkipsDisabledSkillsWhenBackfillingMeta(t *t
 	t.Setenv("HOME", home)
 
 	workspace := t.TempDir()
-	writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "Home Skill", "from home")
-	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+	writeTestSkill(t, filepath.Join(home, brand.ConfigDirName, "skills", "home-skill"), "Home Skill", "from home")
+	writeTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "workspace-skill"), "Workspace Skill", "from workspace")
 
 	messages := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
 	got, err := buildReviewerRequestMessagesWithBuilder(

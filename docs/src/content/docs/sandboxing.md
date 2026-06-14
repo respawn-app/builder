@@ -1,17 +1,17 @@
 ---
 title: Sandboxing and Security
-description: Builder's default trust model, outside-workspace edit prompts, and remote/container server setup.
+description: Kent's default trust model, outside-workspace edit prompts, and remote/container server setup.
 ---
 
-Builder is YOLO by default: it does not run tools inside a built-in sandbox.
-The agent executes shell commands and file tools in the environment where the Builder server runs.
+Kent is YOLO by default: it does not run tools inside a built-in sandbox.
+The agent executes shell commands and file tools in the environment where the Kent server runs.
 If that environment can read secrets, reach networks, or modify files, the agent can ask tools to do the same.
 
-However, Builder's [client-server](../server/) architecture makes it easy to run Builder in a **completely isolated, secure container or VM**.
+However, Kent's [client-server](../server/) architecture makes it easy to run Kent in a **completely isolated, secure container or VM**.
 
 ## Outside-Workspace Edits
 
-Builder has a small convenience guard for first-class file edit tools.
+Kent has a small convenience guard for first-class file edit tools.
 By default, native edit tools prompt before modifying files outside the session workspace root. To disable, set config:
 
 ```toml
@@ -22,14 +22,14 @@ This is not sandboxing: the agent can easily bypass this with shell. It's intend
 
 ## Server Boundary
 
-Builder separates frontend clients from the server that owns work.
+Kent separates frontend clients from the server that owns work.
 The terminal UI, headless runs, and other surfaces connect to the configured server when one is available.
 The server owns sessions, project/workspace bindings, shell processes, tool execution, and persistence.
 
 That split makes the server environment the useful security boundary:
 
-- Run `builder serve` on a VM and connect from your laptop.
-- Run `builder serve` in Docker and expose only the Builder port.
+- Run `kent serve` on a VM and connect from your laptop.
+- Run `kent serve` in Docker and expose only the Kent port.
 - Run several isolated servers on different ports for different trust zones.
 
 Paths are resolved on the server.
@@ -37,12 +37,12 @@ When you create or attach a project against a remote/container server, the works
 
 ## Container Image Shape
 
-A Builder sandbox image should contain:
+A Kent sandbox image should contain:
 
-- A `builder` binary compatible with the client version you use.
+- A `kent` binary compatible with the client version you use.
 - Runtime tools the agent may need: shell, Git, language toolchains, package managers, `rg`, `fd`, `jq`, `patch`, `curl`, `gh`, `wget`, `python` and project-specific CLIs.
 - An ideally persistent workspace directory such as `/workspace`.
-- A writable Builder persistence root, usually under the sandbox user's home.
+- A writable Kent persistence root, usually under the sandbox user's home.
 - Credentials mounted or injected only when you intend the sandbox to use them.
 - Network policy that matches the task; disable or restrict egress when needed.
 
@@ -58,9 +58,9 @@ Add the language runtimes and project tools your workflows need.
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HOME=/home/builder
+ENV HOME=/home/kent
 ENV SHELL=/bin/bash
-ARG BUILDER_VERSION=
+ARG KENT_VERSION=
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -87,42 +87,42 @@ RUN apt-get update \
     xz-utils \
     zip \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
-  && useradd --create-home --shell /bin/bash builder \
-  && mkdir -p /workspace /home/builder/.builder \
-  && chown -R builder:builder /workspace /home/builder
+  && useradd --create-home --shell /bin/bash kent \
+  && mkdir -p /workspace /home/kent/.kent \
+  && chown -R kent:kent /workspace /home/kent
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -fsSL https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.sh \
-  | BUILDER_PREFIX=/usr/local BUILDER_VERSION="${BUILDER_VERSION}" sh
+RUN curl -fsSL https://raw.githubusercontent.com/respawn-llc/kent/main/scripts/install.sh \
+  | KENT_PREFIX=/usr/local KENT_VERSION="${KENT_VERSION}" sh
 
-USER builder
+USER kent
 WORKDIR /workspace
 EXPOSE 53082
 
 ENTRYPOINT ["tini", "--"]
-CMD ["builder", "serve"]
+CMD ["kent", "serve"]
 ```
 
 The image installs the latest release by default.
-Build with `docker build --build-arg BUILDER_VERSION=vX.Y.Z -t builder-sandbox .` if you need to pin one Builder release.
+Build with `docker build --build-arg KENT_VERSION=vX.Y.Z -t kent-sandbox .` if you need to pin one Kent release.
 Package-manager cache cleanup is useful for smaller images but omitted here for clarity.
 
 Run the server so it listens inside the container and is reachable from the host:
 
 ```bash
-docker run --name builder-sandbox --rm -it \
+docker run --name kent-sandbox --rm -it \
   -p 127.0.0.1:53082:53082 \
-  -e BUILDER_SERVER_HOST=0.0.0.0 \
-  -e BUILDER_SERVER_PORT=53082 \
+  -e KENT_SERVER_HOST=0.0.0.0 \
+  -e KENT_SERVER_PORT=53082 \
   -v "$PWD:/workspace" \
-  builder-sandbox
+  kent-sandbox
 ```
 
 In another terminal, point the local client at that server:
 
 ```bash
-BUILDER_SERVER_HOST=127.0.0.1 BUILDER_SERVER_PORT=53082 builder project create --path /workspace --name sandbox
-BUILDER_SERVER_HOST=127.0.0.1 BUILDER_SERVER_PORT=53082 builder
+KENT_SERVER_HOST=127.0.0.1 KENT_SERVER_PORT=53082 kent project create --path /workspace --name sandbox
+KENT_SERVER_HOST=127.0.0.1 KENT_SERVER_PORT=53082 kent
 ```
 
 The project path is `/workspace` because that is the path visible to the server.
@@ -130,6 +130,6 @@ The project path is `/workspace` because that is the path visible to the server.
 ## Existing Repository Example
 
 The repository includes a Docker example under `scripts/sandbox`.
-Treat it as a Builder development fixture, not a recommended user image.
-It copies this repository into the image, seeds a workspace, and starts `builder serve`.
+Treat it as a Kent development fixture, not a recommended user image.
+It copies this repository into the image, seeds a workspace, and starts `kent serve`.
 Use it to understand one possible entrypoint shape, then build an image for your own toolchain and isolation policy.

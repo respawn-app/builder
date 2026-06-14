@@ -1,11 +1,11 @@
 package metadata
 
 import (
-	"builder/server/metadata/sqlitegen"
-	"builder/server/session"
-	"builder/shared/clientui"
-	"builder/shared/config"
 	"context"
+	"core/server/metadata/sqlitegen"
+	"core/server/session"
+	"core/shared/clientui"
+	"core/shared/config"
 	"database/sql"
 	"os"
 	"path/filepath"

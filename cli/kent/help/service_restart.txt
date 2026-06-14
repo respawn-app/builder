@@ -1,0 +1,7 @@
+Usage of kent service restart:
+  kent service restart [--if-installed]
+
+Notes:
+  Refuses to run inside Kent shell commands to avoid halting active agent work.
+
+Flags:

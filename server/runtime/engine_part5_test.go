@@ -1,12 +1,12 @@
 package runtime
 
 import (
-	"builder/prompts"
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/tools"
-	"builder/shared/toolspec"
 	"context"
+	"core/prompts"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/tools"
+	"core/shared/toolspec"
 	"encoding/json"
 	"os"
 	"path/filepath"

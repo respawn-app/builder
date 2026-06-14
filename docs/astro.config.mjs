@@ -58,7 +58,7 @@ export default defineConfig({
           link: '/sandboxing/',
         },
         {
-          label: 'Builder Server',
+          label: 'Kent Server',
           link: '/server/',
         },
         {
@@ -106,7 +106,7 @@ export default defineConfig({
         }),
         starlightLlmsTxt({
           projectName: docsConfig.siteTitle,
-          description: 'Builder terminal coding agent documentation.',
+          description: 'Kent terminal coding agent documentation.',
           rawContent: true,
         }),
       ],
@@ -159,7 +159,7 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             property: 'og:image:alt',
-            content: 'Builder social preview',
+            content: 'Kent social preview',
           },
         },
         {

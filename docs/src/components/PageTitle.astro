@@ -2,7 +2,7 @@
 const PAGE_TITLE_ID = '_top';
 
 const { id, entry } = Astro.locals.starlightRoute;
-const pageTitle = id === 'docs' ? 'Builder' : entry.data.title;
+const pageTitle = id === 'docs' ? 'Kent' : entry.data.title;
 ---
 
 <h1 id={PAGE_TITLE_ID}>{pageTitle}</h1>

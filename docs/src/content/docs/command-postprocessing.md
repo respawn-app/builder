@@ -1,27 +1,27 @@
 ---
 title: Bash Hooks
-description: Configure Builder's shell command post-processing and ship your own hook.
+description: Configure Kent's shell command post-processing and ship your own hook.
 ---
 
 ## Overview
 
-Builder can post-process shell command output before it is shown to the model.
+Kent can post-process shell command output before it is shown to the model.
 It normalizes terminal output, reduces command noise, and adds useful execution context.
-Builder keeps this separate from command execution itself:
+Kent keeps this separate from command execution itself:
 
 - command runs normally
-- Builder runs the configured post-processing chain
+- Kent runs the configured post-processing chain
 - successful commands omit the exit-code header; failed commands include `Exit code N, output:`
 - The model can disable that when it needs the full output
 
 ## Config
 
-Configure command post-processing under `[shell]` in `~/.builder/config.toml`:
+Configure command post-processing under `[shell]` in `~/.kent/config.toml`:
 
 ```toml
 [shell]
 postprocessing_mode = "all" # none | builtin | user | all
-postprocess_hook = "~/.builder/shell_postprocess_hook"
+postprocess_hook = "~/.kent/shell_postprocess_hook"
 ```
 
 ### `postprocessing_mode`
@@ -29,9 +29,9 @@ postprocess_hook = "~/.builder/shell_postprocess_hook"
 Allowed values:
 
 - `none`: disable command post-processing
-- `builtin`: run Builder's sanitizer and built-in processors
-- `user`: run Builder's sanitizer, then your configured hook
-- `all`: run Builder's sanitizer, built-ins, then your configured hook
+- `builtin`: run Kent's sanitizer and built-in processors
+- `user`: run Kent's sanitizer, then your configured hook
+- `all`: run Kent's sanitizer, built-ins, then your configured hook
 
 `raw: true` on a shell tool call bypasses command post-processing for that call. `raw: true` and `postprocessing_mode = "none"` preserve ANSI/style sequences in command output, subject to JSON result encoding and output truncation.
 
@@ -45,7 +45,7 @@ Allowed values:
 
 ### Input
 
-Builder sends JSON like:
+Kent sends JSON like:
 
 ```json
 {
@@ -64,10 +64,10 @@ Builder sends JSON like:
 
 Your hook receives both:
 
-- `original_output`: sanitized command output before Builder semantic shaping
-- `current_output`: current Builder output after built-ins, or the same as `original_output` if no built-in handled it
+- `original_output`: sanitized command output before Kent semantic shaping
+- `current_output`: current Kent output after built-ins, or the same as `original_output` if no built-in handled it
 
-This lets your hook either add on top of Builder defaults or replace them completely.
+This lets your hook either add on top of Kent defaults or replace them completely.
 In `all` mode, the hook runs after built-ins even when a built-in processor stops the built-in chain.
 
 Hook **must** return JSON like:
@@ -79,4 +79,4 @@ Hook **must** return JSON like:
 }
 ```
 
-Return `{"processed": false}` for no-op passthrough. If the hook is missing, times out, exits nonzero, or returns invalid JSON, Builder falls back to the current output and reports a warning.
+Return `{"processed": false}` for no-op passthrough. If the hook is missing, times out, exits nonzero, or returns invalid JSON, Kent falls back to the current output and reports a warning.

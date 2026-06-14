@@ -1,13 +1,14 @@
 package app
 
 import (
-	"builder/server/llm"
-	"builder/server/metadata"
-	"builder/server/session"
-	"builder/shared/config"
-	"builder/shared/serverapi"
-	"builder/shared/testopenai"
 	"context"
+	"core/server/llm"
+	"core/server/metadata"
+	"core/server/session"
+	"core/shared/brand"
+	"core/shared/config"
+	"core/shared/serverapi"
+	"core/shared/testopenai"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -108,7 +109,7 @@ func TestRunPromptWorkspaceContextCreatesChildWithParentWorktreeContext(t *testi
 	ctx := context.Background()
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	worktree := filepath.Join(home, brand.ConfigDirName, "worktrees", "project", "feature")
 	worktreeSubdir := filepath.Join(worktree, "pkg")
 	if err := os.MkdirAll(worktreeSubdir, 0o755); err != nil {
 		t.Fatalf("mkdir worktree subdir: %v", err)
@@ -190,7 +191,7 @@ func TestRunPromptFastRoleUsesRoleLevelProviderSettingsForHeuristics(t *testing.
 	home, workspace := newRegisteredAppWorkspace(t)
 	saveReadyAppAuthState(t, workspace)
 
-	configPath := filepath.Join(home, ".builder", "config.toml")
+	configPath := filepath.Join(home, brand.ConfigDirName, "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}

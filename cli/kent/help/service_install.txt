@@ -1,0 +1,4 @@
+Usage of kent service install:
+  kent service install [--force] [--no-start]
+
+Flags:

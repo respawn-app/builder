@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"builder/prompts"
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/workflowruntime"
-	"builder/shared/config"
-	"builder/shared/toolspec"
+	"core/prompts"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/workflowruntime"
+	"core/shared/config"
+	"core/shared/toolspec"
 )
 
 type metaContextKind uint8
@@ -274,7 +274,7 @@ func (b metaContextBuilder) subagentsMetaMessage() (llm.Message, bool) {
 		lines = append(lines, "- `"+role.Name+"`: "+role.Description)
 	}
 	lines = append(lines, "---")
-	lines = append(lines, "Invoke with `"+prompts.BuilderCommand()+" run --agent=<role> \"<prompt>\"`.")
+	lines = append(lines, "Invoke with `"+prompts.LaunchCommand()+" run --agent=<role> \"<prompt>\"`.")
 	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSubagents, Content: strings.Join(lines, "\n")}, true
 }
 

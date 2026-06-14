@@ -1,12 +1,12 @@
 package runtime
 
 import (
-	"builder/prompts"
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/tools"
-	"builder/shared/toolspec"
 	"context"
+	"core/prompts"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/tools"
+	"core/shared/toolspec"
 	"encoding/json"
 	"errors"
 	"os"
@@ -787,7 +787,7 @@ func TestSystemPromptSnapshotUsesLocalFileAndSurvivesMidSessionFileChanges(t *te
 	}
 	writeTestFile(t, filepath.Join(home, agentsGlobalDirName, systemPromptFileName), "global system")
 	localPath := filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName)
-	writeTestFile(t, localPath, "local {{.EstimatedToolCallsForContext}} {{.BuilderCommand}} run")
+	writeTestFile(t, localPath, "local {{.EstimatedToolCallsForContext}} {{.LaunchCommand}} run")
 
 	store := mustCreateNamedTestSession(t, "ws", workspace)
 	client := &fakeClient{responses: []llm.Response{{

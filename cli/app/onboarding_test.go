@@ -3,14 +3,15 @@ package app
 import (
 	"context"
 
-	"builder/cli/app/internal/onboardingimportfs"
-	"builder/cli/app/internal/onboardingimportproviders"
-	"builder/prompts"
-	"builder/server/generated"
-	"builder/server/runtime"
-	"builder/shared/config"
-	"builder/shared/theme"
-	"builder/shared/toolspec"
+	"core/cli/app/internal/onboardingimportfs"
+	"core/cli/app/internal/onboardingimportproviders"
+	"core/prompts"
+	"core/server/generated"
+	"core/server/runtime"
+	"core/shared/brand"
+	"core/shared/config"
+	"core/shared/theme"
+	"core/shared/toolspec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -548,7 +549,7 @@ func TestBuildSkillSelectionScreenAddsToggleAllOptionWhenThereAreMoreThanTwoItem
 func TestDiscoverOnboardingImportsIncludesGeneratedSkillCandidates(t *testing.T) {
 	home := newAppTestHome(t)
 
-	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, ".builder"), "")
+	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, brand.ConfigDirName), "")
 	if discovery.err != nil {
 		t.Fatalf("discover onboarding imports: %v", discovery.err)
 	}
@@ -563,7 +564,7 @@ func TestDiscoverOnboardingImportsIncludesGeneratedSkillCandidates(t *testing.T)
 			t.Fatalf("expected generated skill provider label Preinstalled, got %+v", item)
 		}
 	}
-	for _, name := range []string{"builder-dogfooding", "creating-skills"} {
+	for _, name := range []string{"kent-dogfooding", "creating-skills"} {
 		if !seen[name] {
 			t.Fatalf("expected generated skill %q in onboarding candidates, got %+v", name, discovery.generatedSkillItems)
 		}
@@ -573,7 +574,7 @@ func TestDiscoverOnboardingImportsIncludesGeneratedSkillCandidates(t *testing.T)
 func TestBuildSkillSelectionScreenShowsGeneratedSkillsWithoutImport(t *testing.T) {
 	state := &onboardingFlowState{
 		imports: onboardingImportDiscovery{generatedSkillItems: []onboardingSkillImportItem{
-			{ID: "generated:builder-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "builder-dogfooding", SkillName: "builder-dogfooding"},
+			{ID: "generated:kent-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "kent-dogfooding", SkillName: "kent-dogfooding"},
 			{ID: "generated:creating-skills", ProviderLabel: "Preinstalled", TargetDirName: "creating-skills", SkillName: "creating-skills"},
 		}},
 		skillImport: onboardingImportSelection{Mode: onboardingImportModeNone},
@@ -582,7 +583,7 @@ func TestBuildSkillSelectionScreenShowsGeneratedSkillsWithoutImport(t *testing.T
 	if len(screen.Options) != 2 {
 		t.Fatalf("expected generated skills as selectable options, got %+v", screen.Options)
 	}
-	for _, want := range []string{"Preinstalled / builder-dogfooding", "Preinstalled / creating-skills"} {
+	for _, want := range []string{"Preinstalled / kent-dogfooding", "Preinstalled / creating-skills"} {
 		found := false
 		for _, option := range screen.Options {
 			if option.Title == want {
@@ -598,14 +599,14 @@ func TestBuildSkillSelectionScreenShowsGeneratedSkillsWithoutImport(t *testing.T
 func TestBuildSkillTogglesCanDisableGeneratedSkillWithoutImport(t *testing.T) {
 	state := &onboardingFlowState{
 		imports: onboardingImportDiscovery{generatedSkillItems: []onboardingSkillImportItem{
-			{ID: "generated:builder-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "builder-dogfooding", SkillName: "builder-dogfooding"},
+			{ID: "generated:kent-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "kent-dogfooding", SkillName: "kent-dogfooding"},
 			{ID: "generated:creating-skills", ProviderLabel: "Preinstalled", TargetDirName: "creating-skills", SkillName: "creating-skills"},
 		}},
 		skillImport: onboardingImportSelection{Mode: onboardingImportModeNone},
 	}
 	toggles := buildSkillToggles(state, map[string]bool{
-		"generated:builder-dogfooding": true,
-		"generated:creating-skills":    false,
+		"generated:kent-dogfooding": true,
+		"generated:creating-skills": false,
 	})
 	disabled, ok := toggles["creating-skills"]
 	if len(toggles) != 1 || !ok || disabled {
@@ -616,9 +617,9 @@ func TestBuildSkillTogglesCanDisableGeneratedSkillWithoutImport(t *testing.T) {
 func TestSkillSelectionCandidatesHideGeneratedSkillsShadowedByExistingSkills(t *testing.T) {
 	state := &onboardingFlowState{
 		imports: onboardingImportDiscovery{
-			existingSkillNames: map[string]bool{"builder-dogfooding": true},
+			existingSkillNames: map[string]bool{"kent-dogfooding": true},
 			generatedSkillItems: []onboardingSkillImportItem{
-				{ID: "generated:builder-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "builder-dogfooding", SkillName: "builder-dogfooding"},
+				{ID: "generated:kent-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "kent-dogfooding", SkillName: "kent-dogfooding"},
 				{ID: "generated:creating-skills", ProviderLabel: "Preinstalled", TargetDirName: "creating-skills", SkillName: "creating-skills"},
 			},
 		},
@@ -632,15 +633,15 @@ func TestSkillSelectionCandidatesHideGeneratedSkillsShadowedByExistingSkills(t *
 func TestDiscoverOnboardingImportsHidesGeneratedSkillsShadowedByWorkspaceSkills(t *testing.T) {
 	home := newAppTestHome(t)
 	workspace := t.TempDir()
-	writeOnboardingTestSkill(t, filepath.Join(workspace, ".builder", "skills", "builder-dogfooding"), "builder-dogfooding", "workspace override")
+	writeOnboardingTestSkill(t, filepath.Join(workspace, brand.ConfigDirName, "skills", "kent-dogfooding"), "kent-dogfooding", "workspace override")
 
-	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, ".builder"), workspace)
+	discovery := discoverOnboardingImportsForWorkspace(filepath.Join(home, brand.ConfigDirName), workspace)
 	if discovery.err != nil {
 		t.Fatalf("discover onboarding imports: %v", discovery.err)
 	}
 	for _, item := range skillSelectionCandidates(&onboardingFlowState{imports: discovery}) {
-		if strings.ToLower(strings.Join(strings.Fields(item.SkillName), " ")) == "builder-dogfooding" {
-			t.Fatalf("expected workspace skill to shadow generated builder-dogfooding, got %+v", item)
+		if strings.ToLower(strings.Join(strings.Fields(item.SkillName), " ")) == "kent-dogfooding" {
+			t.Fatalf("expected workspace skill to shadow generated kent-dogfooding, got %+v", item)
 		}
 	}
 }
@@ -653,12 +654,12 @@ func TestReviewSummaryIncludesGeneratedSkillSelectionWithoutImport(t *testing.T)
 			EnabledTools: map[toolspec.ID]bool{},
 		},
 		imports: onboardingImportDiscovery{generatedSkillItems: []onboardingSkillImportItem{
-			{ID: "generated:builder-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "builder-dogfooding", SkillName: "builder-dogfooding"},
+			{ID: "generated:kent-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "kent-dogfooding", SkillName: "kent-dogfooding"},
 			{ID: "generated:creating-skills", ProviderLabel: "Preinstalled", TargetDirName: "creating-skills", SkillName: "creating-skills"},
 		}},
 		skillSelection: map[string]bool{
-			"generated:builder-dogfooding": true,
-			"generated:creating-skills":    false,
+			"generated:kent-dogfooding": true,
+			"generated:creating-skills": false,
 		},
 	}
 	lines := reviewSummaryLines(state)
@@ -688,16 +689,16 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 	state := onboardingFlowState{
 		settings: defaultCfg.Settings,
 		imports: onboardingImportDiscovery{generatedSkillItems: []onboardingSkillImportItem{
-			{ID: "generated:builder-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "builder-dogfooding", SkillName: "builder-dogfooding"},
+			{ID: "generated:kent-dogfooding", ProviderLabel: "Preinstalled", TargetDirName: "kent-dogfooding", SkillName: "kent-dogfooding"},
 			{ID: "generated:creating-skills", ProviderLabel: "Preinstalled", TargetDirName: "creating-skills", SkillName: "creating-skills"},
 		}},
 		skillSelection: map[string]bool{
-			"generated:builder-dogfooding": false,
-			"generated:creating-skills":    true,
+			"generated:kent-dogfooding": false,
+			"generated:creating-skills": true,
 		},
 	}
 	state.settings.SkillToggles = buildSkillToggles(&state, state.skillSelection)
-	model := newOnboardingModelForWorkspace(filepath.Join(home, ".builder"), "", state)
+	model := newOnboardingModelForWorkspace(filepath.Join(home, brand.ConfigDirName), "", state)
 	msg := model.finalizeCmd(false)()
 	done, ok := msg.(onboardingFinalizeDoneMsg)
 	if !ok {
@@ -711,7 +712,7 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 		t.Fatalf("load written config: %v", err)
 	}
 	disabled := config.DisabledSkillToggles(cfg.Settings)
-	if !disabled["builder-dogfooding"] {
+	if !disabled["kent-dogfooding"] {
 		t.Fatalf("expected disabled generated skill in loaded config, got toggles=%+v disabled=%+v", cfg.Settings.SkillToggles, disabled)
 	}
 	inspections, err := runtime.InspectSkills("", disabled)
@@ -720,12 +721,12 @@ func TestOnboardingFinalWritePersistsDisabledGeneratedSkillAndRuntimeHonorsIt(t 
 	}
 	foundDisabled := false
 	for _, inspection := range inspections {
-		if inspection.SourceKind == "generated" && inspection.Name == "builder-dogfooding" {
+		if inspection.SourceKind == "generated" && inspection.Name == "kent-dogfooding" {
 			foundDisabled = inspection.Disabled
 		}
 	}
 	if !foundDisabled {
-		t.Fatalf("expected runtime inspection to mark generated builder-dogfooding disabled, got %+v", inspections)
+		t.Fatalf("expected runtime inspection to mark generated kent-dogfooding disabled, got %+v", inspections)
 	}
 }
 

@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"builder/prompts"
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/tools"
-	"builder/shared/toolspec"
-	"builder/shared/transcript"
+	"core/prompts"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/tools"
+	"core/shared/brand"
+	"core/shared/toolspec"
+	"core/shared/transcript"
 )
 
 // This regression test guards prompt-cache continuity across restarts.
@@ -188,10 +189,10 @@ func newPromptCacheContinuityFixture(t *testing.T) *promptCacheContinuityFixture
 	persistenceRoot := filepath.Join(root, "sessions")
 	for _, dir := range []string{
 		home,
-		filepath.Join(home, ".builder"),
-		filepath.Join(home, ".builder", "skills", "global-cache-skill"),
+		filepath.Join(home, brand.ConfigDirName),
+		filepath.Join(home, brand.ConfigDirName, "skills", "global-cache-skill"),
 		workspaceRoot,
-		filepath.Join(workspaceRoot, ".builder", "skills", "workspace-cache-skill"),
+		filepath.Join(workspaceRoot, brand.ConfigDirName, "skills", "workspace-cache-skill"),
 		persistenceRoot,
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -201,10 +202,10 @@ func newPromptCacheContinuityFixture(t *testing.T) *promptCacheContinuityFixture
 	t.Setenv("HOME", home)
 	t.Setenv("SHELL", "/bin/zsh")
 	t.Chdir(workspaceRoot)
-	writeTestFile(t, filepath.Join(home, ".builder", "AGENTS.md"), "global prompt cache rule")
+	writeTestFile(t, filepath.Join(home, brand.ConfigDirName, "AGENTS.md"), "global prompt cache rule")
 	writeTestFile(t, filepath.Join(workspaceRoot, "AGENTS.md"), "workspace prompt cache rule")
-	writeTestFile(t, filepath.Join(home, ".builder", "skills", "global-cache-skill", "SKILL.md"), skillFixtureMarkdown("global-cache-skill", "Global prompt-cache continuity skill."))
-	writeTestFile(t, filepath.Join(workspaceRoot, ".builder", "skills", "workspace-cache-skill", "SKILL.md"), skillFixtureMarkdown("workspace-cache-skill", "Workspace prompt-cache continuity skill."))
+	writeTestFile(t, filepath.Join(home, brand.ConfigDirName, "skills", "global-cache-skill", "SKILL.md"), skillFixtureMarkdown("global-cache-skill", "Global prompt-cache continuity skill."))
+	writeTestFile(t, filepath.Join(workspaceRoot, brand.ConfigDirName, "skills", "workspace-cache-skill", "SKILL.md"), skillFixtureMarkdown("workspace-cache-skill", "Workspace prompt-cache continuity skill."))
 
 	store := mustCreateNamedTestSessionAt(t, persistenceRoot, "ws", workspaceRoot)
 	clientCaps := llm.ProviderCapabilities{

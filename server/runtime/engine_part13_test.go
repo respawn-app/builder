@@ -1,14 +1,14 @@
 package runtime
 
 import (
-	"builder/prompts"
-	"builder/server/llm"
-	"builder/server/session"
-	"builder/server/tools"
-	triggerhandofftool "builder/server/tools/triggerhandoff"
-	"builder/shared/toolspec"
-	"builder/shared/transcript"
 	"context"
+	"core/prompts"
+	"core/server/llm"
+	"core/server/session"
+	"core/server/tools"
+	triggerhandofftool "core/server/tools/triggerhandoff"
+	"core/shared/toolspec"
+	"core/shared/transcript"
 	"encoding/json"
 	"errors"
 	"strings"
