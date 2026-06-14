@@ -254,7 +254,6 @@ worktrees, and config, run the one-time Builder 2.0 migration BEFORE using kent:
        chmod +x /tmp/builder-migrate
        /tmp/builder-migrate migrate
   3. Re-run this installer if needed.
-Migration guide: https://kent.sh/
 EOF
 fi
 

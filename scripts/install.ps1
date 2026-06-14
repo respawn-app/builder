@@ -650,7 +650,6 @@ try {
             Write-Output ("       Invoke-WebRequest -Uri '" + $compatUrl + "' -OutFile '.\builder-migrate.exe'")
             Write-Output "       .\builder-migrate.exe migrate"
             Write-Output "  3. Re-run this installer if needed."
-            Write-Output "Migration guide: https://kent.sh/"
         }
     }
 } finally {
