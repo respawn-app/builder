@@ -33,12 +33,11 @@ func writeMigrationNotice(w io.Writer) {
 	fmt.Fprint(w, `Builder has been renamed to Kent. This command is to help you migrate.
 
 To finish migrating:
-  1. Uninstall the old Builder background service:  builder service uninstall
-  2. Run the migration:  builder migrate
-  3. Install Kent (pick one):
+  1. Run the migration:  builder migrate
+  2. Install Kent (pick one):
        Homebrew:  brew install respawn-llc/homebrew-tap/kent
        Script:    see https://kent.sh/quickstart/ for the install command
-  4. Remove this builder binary once Kent works:  rm "$(command -v builder)"
+  3. Remove this builder binary once Kent works:  rm "$(command -v builder)"
 `)
 }
 
