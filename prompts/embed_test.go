@@ -24,6 +24,23 @@ func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
 	}
 }
 
+func TestSystemPromptRendersDeprecatedBuilderCommandAlias(t *testing.T) {
+	// Custom prompts migrated from Builder may still use the deprecated
+	// {{.BuilderCommand}} placeholder; it must render identically to
+	// {{.LaunchCommand}} in both the default-prompt and explicit-default paths
+	// so those sessions keep starting through the rebrand window.
+	for _, defaultPrompt := range []string{"", "base default prompt"} {
+		alias := renderSystemPromptTemplate("cmd={{.BuilderCommand}}", SystemPromptTemplateArgs{}, defaultPrompt)
+		launch := renderSystemPromptTemplate("cmd={{.LaunchCommand}}", SystemPromptTemplateArgs{}, defaultPrompt)
+		if alias != launch {
+			t.Fatalf("BuilderCommand alias = %q, want identical to LaunchCommand %q (defaultPrompt=%q)", alias, launch, defaultPrompt)
+		}
+		if !strings.Contains(alias, selfcmd.LaunchCommand()) {
+			t.Fatalf("expected alias render to contain launch command, got %q", alias)
+		}
+	}
+}
+
 func TestCustomSystemPromptResolvesDefaultSystemPromptPlaceholder(t *testing.T) {
 	defaultPrompt := BaseSystemPrompt(SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,

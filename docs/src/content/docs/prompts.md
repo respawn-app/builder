@@ -33,7 +33,7 @@ Kent reads and renders the selected system prompt file once when the session sen
 
 System prompt files use Go template syntax with these fields:
 
-- `{{.LaunchCommand}}` - Kent executable command, e.g. `path/to/kent.exe`. Add the subcommand you need, such as `{{.LaunchCommand}} run "<prompt>"` for subagents.
+- `{{.LaunchCommand}}` - Kent executable command, e.g. `path/to/kent.exe`. Add the subcommand you need, such as `{{.LaunchCommand}} run "<prompt>"` for subagents. (Migrating from Builder: the old `{{.BuilderCommand}}` placeholder still renders as a deprecated alias during the migration window — rename it to `{{.LaunchCommand}}`.)
 - `{{.EstimatedToolCallsForContext}}` - estimated function/tool-call budget before compaction/handoff, exact number that varies with model context window, like `185`.
 - `{{.EditingToolName}}` - name of the tool the agent uses to modify files, like `edit` or `patch`. Varies per model.
 - `{{.DefaultSystemPrompt}}` - full text of the built-in Kent system prompt.
