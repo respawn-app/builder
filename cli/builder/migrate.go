@@ -30,18 +30,15 @@ type migrateOptions struct {
 // 2.0 compat build refuses to run. It does not try to detect how the binary was
 // installed (unreliable); it lists both install channels and lets the user pick.
 func writeMigrationNotice(w io.Writer) {
-	fmt.Fprint(w, `This is builder 2.0 — a migration-only build. Builder has been renamed to Kent.
-
-It does not start a server or run agents. The only commands available are:
-  builder migrate            Move ~/.builder to ~/.kent and rebase stored state.
-  builder service uninstall  Remove the old Builder background service.
+	fmt.Fprint(w, `Builder has been renamed to Kent. This command is to help you migrate.
 
 To finish migrating:
-  1. Run:  builder migrate
-  2. Install Kent (pick one):
+  1. Uninstall the old Builder background service:  builder service uninstall
+  2. Run the migration:  builder migrate
+  3. Install Kent (pick one):
        Homebrew:  brew install respawn-llc/homebrew-tap/kent
        Script:    see https://kent.sh/quickstart/ for the install command
-  3. Remove this builder binary once Kent works:  rm "$(command -v builder)"
+  4. Remove this builder binary once Kent works:  rm "$(command -v builder)"
 `)
 }
 
