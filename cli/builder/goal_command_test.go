@@ -287,6 +287,7 @@ func TestGoalCompleteHelpExposesConfirmFlag(t *testing.T) {
 }
 
 func TestGoalCommandSubprocessTargetsLiveSessionFromUnboundWorktree(t *testing.T) {
+	t.Skip("builder 2.0 is a migration-only compat build that refuses all subcommands except migrate and service uninstall; goal subprocess behavior is exercised on the kent branch")
 	builderPath := filepath.Join(t.TempDir(), "builder")
 	buildCmd := exec.Command("go", "build", "-o", builderPath, ".")
 	if output, err := buildCmd.CombinedOutput(); err != nil {
@@ -432,6 +433,7 @@ func TestGoalCommandSubprocessTargetsLiveSessionFromUnboundWorktree(t *testing.T
 }
 
 func TestGoalCommandSubprocessSetPersistsWhilePrimaryRunActive(t *testing.T) {
+	t.Skip("builder 2.0 is a migration-only compat build that refuses all subcommands except migrate and service uninstall; goal subprocess behavior is exercised on the kent branch")
 	builderPath := filepath.Join(t.TempDir(), "builder")
 	buildCmd := exec.Command("go", "build", "-o", builderPath, ".")
 	if output, err := buildCmd.CombinedOutput(); err != nil {

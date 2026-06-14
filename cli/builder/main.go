@@ -71,7 +71,12 @@ var runInteractiveApp = app.Run
 var runPromptApp = app.RunPrompt
 
 func main() {
-	if exitCode := rootCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); exitCode != 0 {
+	// builder 2.0 is a migration-only compatibility build: Builder has been
+	// renamed to Kent. The compat gate runs before the original command
+	// dispatch (preserved verbatim in rootCommand for reference/tests) and
+	// allows only `builder migrate` and `builder service uninstall`; every other
+	// invocation prints the migration notice and exits non-zero.
+	if exitCode := runCompatGate(os.Args[1:], os.Stdout, os.Stderr); exitCode != 0 {
 		os.Exit(exitCode)
 	}
 }
@@ -86,6 +91,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	if stderr == nil {
 		stderr = io.Discard
 	}
+
 	if len(args) > 0 && args[0] == "run" {
 		return runSubcommand(args[1:])
 	}
