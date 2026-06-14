@@ -26,7 +26,7 @@ class BuilderCli < Formula
   license "AGPL-3.0-only"
 
   # Replacement is the `kent` formula; users install it explicitly.
-  deprecate! date: "2026-06-14", because: "Builder was renamed to Kent; run `builder migrate`, then install `kent`"
+  deprecate! date: "2026-06-14", because: "was renamed to Kent; run `builder migrate`, then install `kent`"
 
   on_macos do
     on_arm do
