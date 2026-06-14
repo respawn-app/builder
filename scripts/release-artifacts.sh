@@ -49,7 +49,7 @@ require_option_arg() {
 
 clean_dist_release_artifacts() {
 	local dist_path="$1"
-	find "$dist_path" -maxdepth 1 -type f \( -name 'builder_*.tar.gz' -o -name 'builder_*.zip' -o -name 'checksums.txt' \) -delete
+	find "$dist_path" -maxdepth 1 -type f \( -name 'kent_*.tar.gz' -o -name 'kent_*.zip' -o -name 'checksums.txt' \) -delete
 }
 
 release_targets() {
@@ -84,13 +84,13 @@ build_archives() {
 			archive_ext="tar.gz"
 		fi
 
-		out="builder_${version}_${build_os}_${build_arch}"
+		out="kent_${version}_${build_os}_${build_arch}"
 		if [ "$frontend_build_done" -eq 0 ]; then
-			env GOOS="$build_os" GOARCH="$build_arch" BUILDER_VERSION="$version" \
+			env GOOS="$build_os" GOARCH="$build_arch" KENT_VERSION="$version" \
 				bash scripts/build.sh --output "$staging_dir/${out}${ext}"
 			frontend_build_done=1
 		else
-			env GOOS="$build_os" GOARCH="$build_arch" BUILDER_VERSION="$version" BUILDER_SKIP_FRONTEND=1 \
+			env GOOS="$build_os" GOARCH="$build_arch" KENT_VERSION="$version" KENT_SKIP_FRONTEND=1 \
 				bash scripts/build.sh --output "$staging_dir/${out}${ext}"
 		fi
 
@@ -109,7 +109,7 @@ build_archives() {
 
 	(
 		cd "$dist_path"
-		shasum -a 256 "builder_${version}_"*.tar.gz "builder_${version}_"*.zip >checksums.txt
+		shasum -a 256 "kent_${version}_"*.tar.gz "kent_${version}_"*.zip >checksums.txt
 	)
 }
 
@@ -133,10 +133,10 @@ verify_linux_static() {
 
 	local build_arch archive_path binary_path file_output
 	for build_arch in amd64 arm64; do
-		archive_path="$dist_path/builder_${version}_linux_${build_arch}.tar.gz"
+		archive_path="$dist_path/kent_${version}_linux_${build_arch}.tar.gz"
 		tar -xzf "$archive_path" -C "$staging_dir"
 
-		binary_path="$staging_dir/builder_${version}_linux_${build_arch}"
+		binary_path="$staging_dir/kent_${version}_linux_${build_arch}"
 		file_output="$(file "$binary_path")"
 		echo "$file_output"
 
@@ -167,7 +167,7 @@ smoke_test() {
 	dist_path="$(resolve_path "$dist_dir")"
 
 	local asset_base archive_path smoke_dir binary_path
-	asset_base="builder_${version}_${goos}_${goarch}"
+	asset_base="kent_${version}_${goos}_${goarch}"
 	archive_path="$dist_path/${asset_base}.${archive_ext}"
 	smoke_dir="$(mktemp -d)"
 
@@ -216,7 +216,7 @@ smoke_windows_installer() {
 	dist_path="$(resolve_path "$dist_dir")"
 	normalized="${version#v}"
 	tag="v${normalized}"
-	asset="builder_${normalized}_windows_${goarch}.zip"
+	asset="kent_${normalized}_windows_${goarch}.zip"
 	archive_path="$dist_path/$asset"
 	if [ ! -f "$archive_path" ]; then
 		echo "missing Windows release archive: $archive_path" >&2
@@ -236,7 +236,7 @@ smoke_windows_installer() {
 	cp "$dist_path/checksums.txt" "$release_dir/checksums.txt"
 	install_script="$(to_powershell_path "$repo_root/scripts/install.ps1")"
 
-	BUILDER_RELEASE_BASE="$(to_powershell_path "$release_base")" \
+	KENT_RELEASE_BASE="$(to_powershell_path "$release_base")" \
 		powershell -NoProfile -ExecutionPolicy Bypass -File "$install_script" \
 		-Version "$normalized" \
 		-InstallDir "$(to_powershell_path "$install_dir")" \

@@ -6,16 +6,16 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$repo_root"
 
-if [ "${BUILDER_TEST_INHERIT_ENV:-}" != "1" ]; then
+if [ "${KENT_TEST_INHERIT_ENV:-}" != "1" ]; then
     while IFS= read -r name; do
         case "$name" in
-            BUILDER_SKIP_FRONTEND|BUILDER_TEST_DISABLE_WALL_CLOCK_CAP|BUILDER_TEST_FRONTEND|BUILDER_TEST_INHERIT_ENV|BUILDER_TEST_TIMEOUT_SECONDS)
+            KENT_SKIP_FRONTEND|KENT_TEST_DISABLE_WALL_CLOCK_CAP|KENT_TEST_FRONTEND|KENT_TEST_INHERIT_ENV|KENT_TEST_TIMEOUT_SECONDS)
                 ;;
-            BUILDER_*)
+            KENT_*)
                 unset "$name"
                 ;;
         esac
-    done < <(compgen -e BUILDER_ || true)
+    done < <(compgen -e KENT_ || true)
 fi
 
 go_log_file="$(mktemp -t kent-go-test.XXXXXX.log)"
@@ -48,31 +48,31 @@ handle_term() {
 trap handle_interrupt INT
 trap handle_term TERM
 
-disable_wall_clock_cap="${BUILDER_TEST_DISABLE_WALL_CLOCK_CAP:-0}"
+disable_wall_clock_cap="${KENT_TEST_DISABLE_WALL_CLOCK_CAP:-0}"
 case "$disable_wall_clock_cap" in
     0|1)
         ;;
     *)
-        printf 'BUILDER_TEST_DISABLE_WALL_CLOCK_CAP must be 0 or 1\n' >&2
+        printf 'KENT_TEST_DISABLE_WALL_CLOCK_CAP must be 0 or 1\n' >&2
         exit 2
         ;;
 esac
 
-timeout_seconds="${BUILDER_TEST_TIMEOUT_SECONDS:-120}"
+timeout_seconds="${KENT_TEST_TIMEOUT_SECONDS:-120}"
 if [ "$disable_wall_clock_cap" != "1" ]; then
     case "$timeout_seconds" in
         ''|*[!0-9]*)
-            printf 'BUILDER_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
+            printf 'KENT_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
             exit 2
             ;;
     esac
     if [ "$timeout_seconds" -le 0 ] || [ "$timeout_seconds" -gt 120 ]; then
-        printf 'BUILDER_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
+        printf 'KENT_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
         exit 2
     fi
 fi
 args=("$@")
-run_frontend="${BUILDER_TEST_FRONTEND:-auto}"
+run_frontend="${KENT_TEST_FRONTEND:-auto}"
 if [ ${#args[@]} -eq 0 ]; then
     args=(./...)
     if [ "$run_frontend" = "auto" ]; then
@@ -83,7 +83,7 @@ elif [ "$run_frontend" = "auto" ]; then
 fi
 
 run_frontend_tests() {
-    if [ "${BUILDER_SKIP_FRONTEND:-0}" = "1" ]; then
+    if [ "${KENT_SKIP_FRONTEND:-0}" = "1" ]; then
         return
     fi
     if [ "$run_frontend" != "1" ]; then
@@ -93,7 +93,7 @@ run_frontend_tests() {
         return
     fi
     if ! command -v pnpm >/dev/null 2>&1; then
-        printf 'pnpm is required to run frontend tests. Install pnpm or set BUILDER_SKIP_FRONTEND=1.\n' >&2
+        printf 'pnpm is required to run frontend tests. Install pnpm or set KENT_SKIP_FRONTEND=1.\n' >&2
         exit 2
     fi
     if pnpm --dir apps install --frozen-lockfile >"$frontend_log_file" 2>&1 &&

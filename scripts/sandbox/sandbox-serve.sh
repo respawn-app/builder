@@ -15,34 +15,34 @@ require_option_arg() {
 usage() {
 	cat <<'USAGE'
 Usage:
-  scripts/sandbox/sandbox-serve.sh up [options] [-- <builder-serve-args...>]
+  scripts/sandbox/sandbox-serve.sh up [options] [-- <kent-serve-args...>]
   scripts/sandbox/sandbox-serve.sh down [options]
   scripts/sandbox/sandbox-serve.sh logs [options] [-- <docker-logs-args...>]
   scripts/sandbox/sandbox-serve.sh shell [options] [-- <command...>]
   scripts/sandbox/sandbox-serve.sh env [options]
 
-Start an isolated Docker sandbox that builds `builder` from the same repo
-snapshot copied into the image, clones a sandboxed Builder repo into the
+Start an isolated Docker sandbox that builds `kent` from the same repo
+snapshot copied into the image, clones a sandboxed Kent repo into the
 container workspace path, seeds only `config.toml` and `auth.json` into an
-isolated home volume on first boot, registers project `builder`, and exposes
+isolated home volume on first boot, registers project `kent`, and exposes
 the JSON-RPC WebSocket gateway to the host machine.
 
 Seed files are copied only when missing inside the sandbox home volume. Use
 `down --reset` to discard sandbox state and re-seed from host files.
 
 Options:
-  --name NAME             Container name. Default: builder-sandbox
-  --image TAG             Image tag. Default: builder-sandbox:local
+  --name NAME             Container name. Default: kent-sandbox
+  --image TAG             Image tag. Default: kent-sandbox:local
   --host-port PORT        Host port to expose. Default: 53082
   --container-port PORT   Container listen port. Default: 53082
   --platform PLATFORM     Docker platform. Default: linux/<host-arch>
   --workspace-root PATH   Absolute container workspace path.
-                          Default: /workspace/builder
-  --project-name NAME     Server-side project display name. Default: builder
-  --config-seed PATH      Host config.toml copied once into sandbox /home/builder/.builder/
-                          Default: $HOME/.builder/config.toml
-  --auth-seed PATH        Host auth.json copied once into sandbox /home/builder/.builder/
-                          Default: $HOME/.builder/auth.json
+                          Default: /workspace/kent
+  --project-name NAME     Server-side project display name. Default: kent
+  --config-seed PATH      Host config.toml copied once into sandbox /home/kent/.kent/
+                          Default: $HOME/.kent/config.toml
+  --auth-seed PATH        Host auth.json copied once into sandbox /home/kent/.kent/
+                          Default: $HOME/.kent/auth.json
   --workspace-volume VOL  Named volume for sandbox workspace.
                           Default: <name>-workspace
   --home-volume VOL       Named volume for sandbox home/persistence.
@@ -53,7 +53,7 @@ Options:
 
 Examples:
   scripts/sandbox/sandbox-serve.sh up
-  scripts/sandbox/sandbox-serve.sh up --host-port 53100 --project-name builder -- --model gpt-5.5
+  scripts/sandbox/sandbox-serve.sh up --host-port 53100 --project-name kent -- --model gpt-5.5
   scripts/sandbox/sandbox-serve.sh env --host-port 53100
   scripts/sandbox/sandbox-serve.sh down --reset
 USAGE
@@ -192,14 +192,14 @@ wait_for_ready() {
 
 print_env_exports() {
 	cat <<EOF
-export BUILDER_SERVER_HOST=127.0.0.1
-export BUILDER_SERVER_PORT=${host_port}
+export KENT_SERVER_HOST=127.0.0.1
+export KENT_SERVER_PORT=${host_port}
 EOF
 }
 
 collect_container_env() {
 	container_env=()
-	for key in OPENAI_API_KEY BUILDER_OAUTH_CLIENT_ID BUILDER_PROVIDER_OVERRIDE BUILDER_OPENAI_BASE_URL; do
+	for key in OPENAI_API_KEY KENT_OAUTH_CLIENT_ID KENT_PROVIDER_OVERRIDE KENT_OPENAI_BASE_URL; do
 		value="${!key:-}"
 		if [ -n "$value" ]; then
 			container_env+=("-e" "${key}")
@@ -211,11 +211,11 @@ collect_seed_mounts() {
 	seed_mounts=()
 	if [ -n "$config_seed" ] && [ -f "$config_seed" ]; then
 		config_seed="$(canonical_file_path "$config_seed")"
-		seed_mounts+=("-v" "${config_seed}:/opt/builder-sandbox-seeds/config.toml:ro" "-e" "SANDBOX_CONFIG_SEED_PATH=/opt/builder-sandbox-seeds/config.toml")
+		seed_mounts+=("-v" "${config_seed}:/opt/kent-sandbox-seeds/config.toml:ro" "-e" "SANDBOX_CONFIG_SEED_PATH=/opt/kent-sandbox-seeds/config.toml")
 	fi
 	if [ -n "$auth_seed" ] && [ -f "$auth_seed" ]; then
 		auth_seed="$(canonical_file_path "$auth_seed")"
-		seed_mounts+=("-v" "${auth_seed}:/opt/builder-sandbox-seeds/auth.json:ro" "-e" "SANDBOX_AUTH_SEED_PATH=/opt/builder-sandbox-seeds/auth.json")
+		seed_mounts+=("-v" "${auth_seed}:/opt/kent-sandbox-seeds/auth.json:ro" "-e" "SANDBOX_AUTH_SEED_PATH=/opt/kent-sandbox-seeds/auth.json")
 	fi
 }
 
@@ -223,7 +223,7 @@ build_image() {
 	log "build sandbox image ${image_tag}"
 	run docker build \
 		--platform "$platform" \
-		-f "$repo_root/scripts/sandbox/builder-sandbox.Dockerfile" \
+		-f "$repo_root/scripts/sandbox/kent-sandbox.Dockerfile" \
 		--build-arg "SANDBOX_SNAPSHOT_REF=$(snapshot_ref)" \
 		-t "$image_tag" \
 		"$repo_root"
@@ -250,16 +250,16 @@ run_up() {
 		--name "$container_name" \
 		--platform "$platform" \
 		-p "${host_port}:${container_port}" \
-		-e "BUILDER_SERVER_HOST=0.0.0.0" \
-		-e "BUILDER_SERVER_PORT=${container_port}" \
+		-e "KENT_SERVER_HOST=0.0.0.0" \
+		-e "KENT_SERVER_PORT=${container_port}" \
 		-e "SANDBOX_WORKSPACE_ROOT=${workspace_root}" \
-		-e "SANDBOX_SEED_ROOT=/opt/builder-sandbox-seed" \
+		-e "SANDBOX_SEED_ROOT=/opt/kent-sandbox-seed" \
 		-e "SANDBOX_PROJECT_NAME=${project_name}" \
-		-e "HOME=/home/builder" \
+		-e "HOME=/home/kent" \
 		"${container_env[@]}" \
 		"${seed_mounts[@]}" \
 		-v "${workspace_volume}:${workspace_root}" \
-		-v "${home_volume}:/home/builder" \
+		-v "${home_volume}:/home/kent" \
 		"$image_tag" \
 		"${serve_args[@]}"
 	wait_for_ready
@@ -332,15 +332,15 @@ fi
 
 shift || true
 
-container_name="builder-sandbox"
-image_tag="builder-sandbox:local"
+container_name="kent-sandbox"
+image_tag="kent-sandbox:local"
 host_port="53082"
 container_port="53082"
 platform="$(default_platform)"
-workspace_root="/workspace/builder"
-project_name="builder"
-config_seed="${HOME:-}/.builder/config.toml"
-auth_seed="${HOME:-}/.builder/auth.json"
+workspace_root="/workspace/kent"
+project_name="kent"
+config_seed="${HOME:-}/.kent/config.toml"
+auth_seed="${HOME:-}/.kent/auth.json"
 workspace_volume=""
 home_volume=""
 dry_run="false"

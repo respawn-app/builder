@@ -3,20 +3,20 @@
 set -euo pipefail
 
 workspace_root="${SANDBOX_WORKSPACE_ROOT:-/workspace}"
-seed_root="${SANDBOX_SEED_ROOT:-/opt/builder-sandbox-seed}"
+seed_root="${SANDBOX_SEED_ROOT:-/opt/kent-sandbox-seed}"
 config_seed_path="${SANDBOX_CONFIG_SEED_PATH:-}"
 auth_seed_path="${SANDBOX_AUTH_SEED_PATH:-}"
-project_name="${SANDBOX_PROJECT_NAME:-builder}"
-server_port="${BUILDER_SERVER_PORT:-53082}"
-sandbox_home="${SANDBOX_HOME:-/home/builder}"
-builder_bin="${BUILDER_SANDBOX_BUILDER_BIN:-/usr/local/bin/builder}"
+project_name="${SANDBOX_PROJECT_NAME:-kent}"
+server_port="${KENT_SERVER_PORT:-53082}"
+sandbox_home="${SANDBOX_HOME:-/home/kent}"
+kent_bin="${KENT_SANDBOX_BIN:-/usr/local/bin/kent}"
 
 if [ "$(id -u)" -eq 0 ]; then
 	mkdir -p "$(dirname -- "$workspace_root")"
 	mkdir -p "$workspace_root"
-	mkdir -p "$sandbox_home/.builder"
-	chown -R builder:builder "$workspace_root" "$sandbox_home"
-	exec runuser -u builder -- "$0" "$@"
+	mkdir -p "$sandbox_home/.kent"
+	chown -R kent:kent "$workspace_root" "$sandbox_home"
+	exec runuser -u kent -- "$0" "$@"
 fi
 
 copy_seed_file_if_missing() {
@@ -53,10 +53,10 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$(dirname -- "$workspace_root")"
 mkdir -p "$workspace_root"
-mkdir -p "$sandbox_home/.builder"
+mkdir -p "$sandbox_home/.kent"
 
-copy_seed_file_if_missing "$sandbox_home/.builder/config.toml" "$config_seed_path"
-copy_seed_file_if_missing "$sandbox_home/.builder/auth.json" "$auth_seed_path"
+copy_seed_file_if_missing "$sandbox_home/.kent/config.toml" "$config_seed_path"
+copy_seed_file_if_missing "$sandbox_home/.kent/auth.json" "$auth_seed_path"
 
 if [ -z "$(find "$workspace_root" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
 	git clone --quiet "$seed_root" "$workspace_root"
@@ -64,7 +64,7 @@ fi
 
 cd "$workspace_root"
 
-HOME="$sandbox_home" "$builder_bin" serve "$@" &
+HOME="$sandbox_home" "$kent_bin" serve "$@" &
 server_pid=$!
 
 ready_status=0
@@ -73,15 +73,15 @@ if [ "$ready_status" -ne 0 ]; then
 	if [ "$ready_status" -eq 2 ]; then
 		wait "$server_pid"
 		exit_code=$?
-		echo "sandbox bootstrap failed because builder serve exited before transport readiness on 127.0.0.1:${server_port}" >&2
+		echo "sandbox bootstrap failed because kent serve exited before transport readiness on 127.0.0.1:${server_port}" >&2
 		exit "$exit_code"
 	fi
-	echo "sandbox bootstrap timed out waiting for builder serve transport readiness on 127.0.0.1:${server_port}" >&2
+	echo "sandbox bootstrap timed out waiting for kent serve transport readiness on 127.0.0.1:${server_port}" >&2
 	exit 1
 fi
 
-if ! HOME="$sandbox_home" BUILDER_SERVER_HOST=127.0.0.1 BUILDER_SERVER_PORT="$server_port" "$builder_bin" project "$workspace_root" >/dev/null 2>&1; then
-	HOME="$sandbox_home" BUILDER_SERVER_HOST=127.0.0.1 BUILDER_SERVER_PORT="$server_port" "$builder_bin" project create --path "$workspace_root" --name "$project_name"
+if ! HOME="$sandbox_home" KENT_SERVER_HOST=127.0.0.1 KENT_SERVER_PORT="$server_port" "$kent_bin" project "$workspace_root" >/dev/null 2>&1; then
+	HOME="$sandbox_home" KENT_SERVER_HOST=127.0.0.1 KENT_SERVER_PORT="$server_port" "$kent_bin" project create --path "$workspace_root" --name "$project_name"
 fi
 
 wait "$server_pid"

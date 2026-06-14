@@ -1,37 +1,37 @@
-param([string]$Version = $env:BUILDER_VERSION, [string]$InstallDir = "",
+param([string]$Version = $env:KENT_VERSION, [string]$InstallDir = "",
     [switch]$Yes, [switch]$NoPath, [switch]$NoDeps, [switch]$Uninstall,
     [switch]$Force, [switch]$NoServiceRestart, [switch]$Help)
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
-$DefaultRepo = "respawn-llc/builder"
-$Repo = $env:BUILDER_REPO
+$DefaultRepo = "respawn-llc/kent"
+$Repo = $env:KENT_REPO
 if ([string]::IsNullOrWhiteSpace($Repo)) {
     $Repo = $DefaultRepo
 }
-$ReleaseBase = $env:BUILDER_RELEASE_BASE
+$ReleaseBase = $env:KENT_RELEASE_BASE
 if ([string]::IsNullOrWhiteSpace($ReleaseBase)) {
     $ReleaseBase = "https://github.com/$Repo/releases/download"
 }
-$InstallMarkerName = "builder-install.json"; $UninstallScriptName = "uninstall.ps1"
-$UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Builder"; $UninstallRegistryDisplayName = "Builder"
+$InstallMarkerName = "kent-install.json"; $UninstallScriptName = "uninstall.ps1"
+$UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Kent"; $UninstallRegistryDisplayName = "Kent"
 function Write-Usage {
     Write-Output @"
 Usage: install.ps1 [options]
-Installs Builder for the current Windows user.
+Installs Kent for the current Windows user.
 Options:
   -Version <vX.Y.Z|X.Y.Z>  Release tag to install. Defaults to latest.
-  -InstallDir <path>       Install directory. Defaults to ~/.builder/bin.
+  -InstallDir <path>       Install directory. Defaults to ~/.kent/bin.
   -Yes                     Accept prompts.
   -NoPath                  Do not add install directory to User PATH.
   -NoDeps                  Do not offer to install git/rg through winget.
-  -Uninstall               Remove Builder binary and installer-owned metadata.
-  -Force                   Overwrite an existing builder.exe or symlink.
-  -NoServiceRestart        Do not restart an already-installed Builder service.
+  -Uninstall               Remove Kent binary and installer-owned metadata.
+  -Force                   Overwrite an existing kent.exe or symlink.
+  -NoServiceRestart        Do not restart an already-installed Kent service.
   -Help                    Show this help.
 Environment:
-  BUILDER_VERSION       Override version.
-  BUILDER_REPO          Override repo. Default: respawn-llc/builder.
-  BUILDER_RELEASE_BASE  Override release base URL.
+  KENT_VERSION       Override version.
+  KENT_REPO          Override repo. Default: respawn-llc/kent.
+  KENT_RELEASE_BASE  Override release base URL.
   GITHUB_TOKEN          GitHub token for API rate limits.
   GH_TOKEN              GitHub token for API rate limits.
 "@
@@ -56,7 +56,7 @@ function Get-UserHome {
 function Resolve-InstallDir([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
         $userHome = Get-UserHome
-        return [System.IO.Path]::GetFullPath((Join-Path (Join-Path $userHome ".builder") "bin"))
+        return [System.IO.Path]::GetFullPath((Join-Path (Join-Path $userHome ".kent") "bin"))
     }
     $expanded = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Value)
     return [System.IO.Path]::GetFullPath($expanded)
@@ -150,7 +150,7 @@ function Resolve-Arch {
         $signature = @'
 using System;
 using System.Runtime.InteropServices;
-public static class BuilderNativeArchitecture {
+public static class KentNativeArchitecture {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
 }
@@ -158,7 +158,7 @@ public static class BuilderNativeArchitecture {
         Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
         $processMachine = 0
         $nativeMachine = 0
-        $ok = [BuilderNativeArchitecture]::IsWow64Process2([System.Diagnostics.Process]::GetCurrentProcess().Handle, [ref]$processMachine, [ref]$nativeMachine)
+        $ok = [KentNativeArchitecture]::IsWow64Process2([System.Diagnostics.Process]::GetCurrentProcess().Handle, [ref]$processMachine, [ref]$nativeMachine)
         if ($ok) {
             if ($nativeMachine -eq 0xAA64) { return "arm64" }
             if ($nativeMachine -eq 0x8664) { return "amd64" }
@@ -174,7 +174,7 @@ public static class BuilderNativeArchitecture {
 }
 function New-TempDirectory {
     $parent = [System.IO.Path]::GetTempPath()
-    $name = "builder-install-" + [System.Guid]::NewGuid().ToString("N")
+    $name = "kent-install-" + [System.Guid]::NewGuid().ToString("N")
     $path = Join-Path $parent $name
     New-Item -ItemType Directory -Path $path | Out-Null
     return $path
@@ -292,8 +292,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 $InstallDir = '__INSTALL_DIR__'
-$MarkerPath = Join-Path $InstallDir 'builder-install.json'
-$RegistryPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Builder'
+$MarkerPath = Join-Path $InstallDir 'kent-install.json'
+$RegistryPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Kent'
 function Confirm-RemovePath([string]$Question) {
     if ($Yes) { return $true }
     if (-not [Environment]::UserInteractive) { return $false }
@@ -343,8 +343,8 @@ if (Test-Path -LiteralPath $MarkerPath) {
         $pathAdded = $false
     }
 }
-if (Test-Path -LiteralPath (Join-Path $InstallDir 'builder.exe')) {
-    Remove-Item -LiteralPath (Join-Path $InstallDir 'builder.exe') -Force
+if (Test-Path -LiteralPath (Join-Path $InstallDir 'kent.exe')) {
+    Remove-Item -LiteralPath (Join-Path $InstallDir 'kent.exe') -Force
 }
 if (Test-Path -LiteralPath $MarkerPath) {
     Remove-Item -LiteralPath $MarkerPath -Force
@@ -356,7 +356,7 @@ if ($pathAdded -and (Confirm-RemovePath "Remove $InstallDir from your User PATH?
     [void](Remove-UserPathEntry $InstallDir)
 }
 $scriptPath = $MyInvocation.MyCommand.Path
-Write-Output "Uninstalled Builder. User data under ~/.builder was not removed."
+Write-Output "Uninstalled Kent. User data under ~/.kent was not removed."
 if (Test-Path -LiteralPath $scriptPath) {
     try {
         Remove-Item -LiteralPath $scriptPath -Force
@@ -398,7 +398,7 @@ function Write-UninstallRegistry([string]$Directory, [string]$VersionValue) {
     $command = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$uninstallPath`""
     $strings = @{
         DisplayName = $UninstallRegistryDisplayName; DisplayVersion = $VersionValue; Publisher = "Respawn"
-        InstallLocation = $Directory; UninstallString = $command; DisplayIcon = (Join-Path $Directory "builder.exe")
+        InstallLocation = $Directory; UninstallString = $command; DisplayIcon = (Join-Path $Directory "kent.exe")
     }
     foreach ($name in $strings.Keys) {
         New-ItemProperty -Path $UninstallRegistryPath -Name $name -Value $strings[$name] -PropertyType String -Force | Out-Null
@@ -417,7 +417,7 @@ function Invoke-Uninstall([string]$Directory) {
         & powershell @args
         exit $LASTEXITCODE
     }
-    $target = Join-Path $Directory "builder.exe"
+    $target = Join-Path $Directory "kent.exe"
     $marker = Join-Path $Directory $InstallMarkerName
     $pathAdded = $false
     if (Test-Path -LiteralPath $marker) {
@@ -440,7 +440,7 @@ function Invoke-Uninstall([string]$Directory) {
     if ($pathAdded -and (Confirm-Action "Remove $Directory from your User PATH?" $true)) {
         [void](Remove-UserPathEntry $Directory)
     }
-    Write-Output "Uninstalled Builder. User data under ~/.builder was not removed."
+    Write-Output "Uninstalled Kent. User data under ~/.kent was not removed."
 }
 function Install-ArchiveBinary([string]$Source, [string]$Target) {
     if (Test-Path -LiteralPath $Target) {
@@ -479,82 +479,82 @@ function Install-MissingDependencies {
     }
     $names = @($missing | ForEach-Object { $_.Name }) -join ", "
     if (-not (Test-CommandExists "winget")) {
-        Warn "Missing dependencies: $names. Install git and ripgrep manually; Builder can run, but agent search/repo workflows will be degraded."
+        Warn "Missing dependencies: $names. Install git and ripgrep manually; Kent can run, but agent search/repo workflows will be degraded."
         return
     }
-    if (-not (Confirm-Action "Builder works best with $names. Install missing dependencies with winget now?" $true)) {
-        Warn "Builder can run, but agent search/repo workflows will be degraded until git and ripgrep are installed."
+    if (-not (Confirm-Action "Kent works best with $names. Install missing dependencies with winget now?" $true)) {
+        Warn "Kent can run, but agent search/repo workflows will be degraded until git and ripgrep are installed."
         return
     }
     foreach ($dependency in $missing) {
         Write-Output "Installing $($dependency.Name) through winget..."
         & winget install --id $dependency.Package --exact --source winget --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) {
-            Warn "winget failed to install $($dependency.Name). Builder can run, but agent search/repo workflows may be degraded."
+            Warn "winget failed to install $($dependency.Name). Kent can run, but agent search/repo workflows may be degraded."
         }
     }
 }
-function Get-ServiceStatusForUpdate([string]$BuilderPath) {
-    if (-not (Test-Path -LiteralPath $BuilderPath)) { return $null }
+function Get-ServiceStatusForUpdate([string]$KentPath) {
+    if (-not (Test-Path -LiteralPath $KentPath)) { return $null }
     try {
-        $statusResult = & $BuilderPath service status --json 2>&1
+        $statusResult = & $KentPath service status --json 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Warn "Could not inspect Builder background service before update: $statusResult"
+            Warn "Could not inspect Kent background service before update: $statusResult"
             return $null
         }
         return (($statusResult | Out-String) | ConvertFrom-Json)
     } catch {
-        Warn "Could not inspect Builder background service before update: $($_.Exception.Message)"
+        Warn "Could not inspect Kent background service before update: $($_.Exception.Message)"
         return $null
     }
 }
-function Test-ServiceCommandUsesBuilderPath([object]$Status, [string]$BuilderPath) {
+function Test-ServiceCommandUsesKentPath([object]$Status, [string]$KentPath) {
     if ($Status -eq $null -or $Status.command -eq $null) { return $false }
     $command = @($Status.command)
     if ($command.Count -eq 0) { return $false }
     try {
         $registered = Normalize-PathDirectory ([string]$command[0])
-        $target = Normalize-PathDirectory $BuilderPath
+        $target = Normalize-PathDirectory $KentPath
         return [string]::Equals($registered, $target, [System.StringComparison]::OrdinalIgnoreCase)
     } catch { return $false }
 }
-function Stop-ServiceForUpdate([string]$BuilderPath) {
-    $status = Get-ServiceStatusForUpdate $BuilderPath
+function Stop-ServiceForUpdate([string]$KentPath) {
+    $status = Get-ServiceStatusForUpdate $KentPath
     if ($null -eq $status -or -not [bool]$status.installed) { return $false }
-    if (-not (Test-ServiceCommandUsesBuilderPath $status $BuilderPath)) { return $false }
+    if (-not (Test-ServiceCommandUsesKentPath $status $KentPath)) { return $false }
     if (-not [bool]$status.running) { return $false }
     if ($NoServiceRestart) {
-        Fail "Builder background service is running from $BuilderPath. Stop it before updating, or rerun without -NoServiceRestart."
+        Fail "Kent background service is running from $KentPath. Stop it before updating, or rerun without -NoServiceRestart."
     }
-    Write-Host "Stopping Builder background service before update..."
-    $stopOutput = & $BuilderPath service stop 2>&1
-    if ($LASTEXITCODE -ne 0) { Fail "Failed to stop Builder background service before update: $stopOutput" }
+    Write-Host "Stopping Kent background service before update..."
+    $stopOutput = & $KentPath service stop 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "Failed to stop Kent background service before update: $stopOutput" }
     return $true
 }
-function Restart-ServiceAfterFailedUpdate([string]$BuilderPath) {
-    if (-not (Test-Path -LiteralPath $BuilderPath)) {
-        Warn "Builder background service was stopped before update, but $BuilderPath is missing; service may be left stopped."
+function Restart-ServiceAfterFailedUpdate([string]$KentPath) {
+    if (-not (Test-Path -LiteralPath $KentPath)) {
+        Warn "Kent background service was stopped before update, but $KentPath is missing; service may be left stopped."
         return
     }
     try {
-        $output = & $BuilderPath service restart --if-installed 2>&1
-        if ($LASTEXITCODE -ne 0) { Warn "Builder background service was stopped before update and restart failed: $output" }
-    } catch { Warn "Builder background service was stopped before update and restart failed: $($_.Exception.Message)" }
+        $output = & $KentPath service restart --if-installed 2>&1
+        if ($LASTEXITCODE -ne 0) { Warn "Kent background service was stopped before update and restart failed: $output" }
+    } catch { Warn "Kent background service was stopped before update and restart failed: $($_.Exception.Message)" }
 }
-function Restart-ServiceIfInstalled([string]$BuilderPath) {
+function Restart-ServiceIfInstalled([string]$KentPath) {
     if ($NoServiceRestart) { return }
     try {
-        $output = & $BuilderPath service restart --if-installed 2>&1
+        $output = & $KentPath service restart --if-installed 2>&1
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
-            Warn "Builder background service restart failed after update: $output"
+            Warn "Kent background service restart failed after update: $output"
             return
         }
         if (-not [string]::IsNullOrWhiteSpace(($output | Out-String))) {
             Write-Output $output
         }
     } catch {
-        Warn "Builder background service restart failed after update: $($_.Exception.Message)"
+        Warn "Kent background service restart failed after update: $($_.Exception.Message)"
     }
 }
 if ($Help) {
@@ -578,7 +578,7 @@ if (-not $tag.StartsWith("v")) {
 }
 $normalizedVersion = Normalize-Version $tag
 $arch = Resolve-Arch
-$assetBase = "builder_${normalizedVersion}_windows_${arch}"
+$assetBase = "kent_${normalizedVersion}_windows_${arch}"
 $archiveName = "$assetBase.zip"
 $binaryName = "$assetBase.exe"
 $archiveUrl = Join-ReleaseResource $ReleaseBase $tag $archiveName
@@ -599,7 +599,7 @@ try {
         Fail "Archive $archiveName did not contain $binaryName."
     }
     New-Item -ItemType Directory -Path $resolvedInstallDir -Force | Out-Null
-    $target = Join-Path $resolvedInstallDir "builder.exe"
+    $target = Join-Path $resolvedInstallDir "kent.exe"
     $serviceStoppedForUpdate = [bool](Stop-ServiceForUpdate $target)
     Install-ArchiveBinary $extractedBinary $target
     $versionResult = & $target --version 2>&1
@@ -612,23 +612,23 @@ try {
     if (-not $NoPath) {
         if (Test-PathEntry $resolvedInstallDir) {
             Write-Output "$resolvedInstallDir is already on User PATH."
-        } elseif (Confirm-Action "Add $resolvedInstallDir to your User PATH so 'builder' works in new terminals?" $true) {
+        } elseif (Confirm-Action "Add $resolvedInstallDir to your User PATH so 'kent' works in new terminals?" $true) {
             $pathAdded = Add-UserPathEntry $resolvedInstallDir
-            Write-Output "Added $resolvedInstallDir to User PATH. Restart your terminal to use builder from PATH."
+            Write-Output "Added $resolvedInstallDir to User PATH. Restart your terminal to use kent from PATH."
         } else {
-            Write-Output "Skipped PATH update. Run builder with $target or add $resolvedInstallDir to your User PATH."
+            Write-Output "Skipped PATH update. Run kent with $target or add $resolvedInstallDir to your User PATH."
         }
     }
     Write-InstallMetadata $resolvedInstallDir $normalizedVersion $pathAdded
     try {
         Write-UninstallRegistry $resolvedInstallDir $normalizedVersion
     } catch {
-        Warn "Could not register Builder in Windows Apps & Features: $($_.Exception.Message)"
+        Warn "Could not register Kent in Windows Apps & Features: $($_.Exception.Message)"
     }
     Install-MissingDependencies
     Restart-ServiceIfInstalled $target
     $installSucceeded = $true
-    Write-Output "Installed builder $normalizedVersion to $target"
+    Write-Output "Installed kent $normalizedVersion to $target"
 } finally {
     if ($serviceStoppedForUpdate -and -not $installSucceeded) {
         Restart-ServiceAfterFailedUpdate $target

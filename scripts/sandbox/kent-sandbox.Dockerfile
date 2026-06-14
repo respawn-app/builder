@@ -7,7 +7,7 @@ WORKDIR /src
 
 COPY . /src
 
-RUN BUILDER_SKIP_FRONTEND=1 /src/scripts/build.sh --output /out/builder
+RUN KENT_SKIP_FRONTEND=1 /src/scripts/build.sh --output /out/kent
 
 FROM debian:bookworm-slim
 
@@ -15,10 +15,10 @@ ARG SANDBOX_SNAPSHOT_REF=local
 ARG SANDBOX_UV_VERSION=0.11.7
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HOME=/home/builder
+ENV HOME=/home/kent
 ENV SHELL=/bin/bash
 ENV GOPATH=/go
-ENV SANDBOX_SEED_ROOT=/opt/builder-sandbox-seed
+ENV SANDBOX_SEED_ROOT=/opt/kent-sandbox-seed
 ENV PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
@@ -57,8 +57,8 @@ RUN apt-get update \
 		zip \
 		zsh \
 	&& python3 -m pip install --break-system-packages --no-cache-dir "uv==${SANDBOX_UV_VERSION}" \
-	&& useradd --create-home --shell /bin/bash builder \
-	&& mkdir -p /go/bin /go/pkg /opt/builder-sandbox-seed /workspace \
+	&& useradd --create-home --shell /bin/bash kent \
+	&& mkdir -p /go/bin /go/pkg /opt/kent-sandbox-seed /workspace \
 	&& ln -sf /usr/bin/fdfind /usr/local/bin/fd \
 	&& ln -sf /usr/bin/pip3 /usr/local/bin/pip \
 	&& ln -sf /usr/bin/python3 /usr/local/bin/python \
@@ -66,18 +66,18 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/local/go /usr/local/go
-COPY --from=build /out/builder /usr/local/bin/builder
-COPY --from=build /src /opt/builder-sandbox-seed
-COPY scripts/sandbox/builder-sandbox-entrypoint.sh /usr/local/bin/builder-sandbox-entrypoint
+COPY --from=build /out/kent /usr/local/bin/kent
+COPY --from=build /src /opt/kent-sandbox-seed
+COPY scripts/sandbox/kent-sandbox-entrypoint.sh /usr/local/bin/kent-sandbox-entrypoint
 
-WORKDIR /opt/builder-sandbox-seed
+WORKDIR /opt/kent-sandbox-seed
 
-RUN chmod +x /usr/local/bin/builder /usr/local/bin/builder-sandbox-entrypoint \
-	&& git -C /opt/builder-sandbox-seed init -q \
-	&& git -C /opt/builder-sandbox-seed config user.name "Builder Sandbox" \
-	&& git -C /opt/builder-sandbox-seed config user.email "builder-sandbox@local" \
-	&& git -C /opt/builder-sandbox-seed add -A \
-	&& git -C /opt/builder-sandbox-seed commit -qm "chore: sandbox seed ${SANDBOX_SNAPSHOT_REF}" \
-	&& chown -R builder:builder /go /home/builder /opt/builder-sandbox-seed /workspace
+RUN chmod +x /usr/local/bin/kent /usr/local/bin/kent-sandbox-entrypoint \
+	&& git -C /opt/kent-sandbox-seed init -q \
+	&& git -C /opt/kent-sandbox-seed config user.name "Kent Sandbox" \
+	&& git -C /opt/kent-sandbox-seed config user.email "kent-sandbox@local" \
+	&& git -C /opt/kent-sandbox-seed add -A \
+	&& git -C /opt/kent-sandbox-seed commit -qm "chore: sandbox seed ${SANDBOX_SNAPSHOT_REF}" \
+	&& chown -R kent:kent /go /home/kent /opt/kent-sandbox-seed /workspace
 
-ENTRYPOINT ["tini", "--", "/usr/local/bin/builder-sandbox-entrypoint"]
+ENTRYPOINT ["tini", "--", "/usr/local/bin/kent-sandbox-entrypoint"]

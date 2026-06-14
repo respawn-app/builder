@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO="${BUILDER_REPO:-respawn-llc/builder}"
-VERSION="${BUILDER_VERSION:-${VERSION:-}}"
-PREFIX="${BUILDER_PREFIX:-}"
-RELEASE_BASE="${BUILDER_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
+REPO="${KENT_REPO:-respawn-llc/kent}"
+VERSION="${KENT_VERSION:-${VERSION:-}}"
+PREFIX="${KENT_PREFIX:-}"
+RELEASE_BASE="${KENT_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
 
 usage() {
 	cat <<EOF
@@ -15,10 +15,10 @@ Options:
   --prefix   Install prefix (defaults to /usr/local or ~/.local)
 
 Environment:
-  BUILDER_VERSION       Override version
-  BUILDER_PREFIX        Override prefix
-  BUILDER_REPO          Override repo (default: respawn-llc/builder)
-  BUILDER_RELEASE_BASE  Override release base URL
+  KENT_VERSION       Override version
+  KENT_PREFIX        Override prefix
+  KENT_REPO          Override repo (default: respawn-llc/kent)
+  KENT_RELEASE_BASE  Override release base URL
   GITHUB_TOKEN          GitHub token for API rate limits
   GH_TOKEN              GitHub token for API rate limits
 EOF
@@ -142,7 +142,7 @@ arm64 | aarch64) arch="arm64" ;;
 esac
 
 ver="${tag#v}"
-base_name="builder_${ver}_${os}_${arch}"
+base_name="kent_${ver}_${os}_${arch}"
 if [ "$os" = "windows" ]; then
 	archive="${base_name}.zip"
 	bin_name="${base_name}.exe"
@@ -210,9 +210,9 @@ case "$bin_dir" in
 esac
 
 mkdir -p "$bin_dir"
-target_name="builder"
+target_name="kent"
 if [ "$os" = "windows" ]; then
-	target_name="builder.exe"
+	target_name="kent.exe"
 fi
 target="$bin_dir/$target_name"
 if [ -e "$target" ]; then
@@ -228,7 +228,35 @@ if [ -e "$target" ]; then
 fi
 install -m 755 "$tmpdir/$bin_name" "$target"
 
-echo "Installed builder to $target"
+echo "Installed kent to $target"
 if ! echo "$PATH" | tr ':' '\n' | grep -q "^${bin_dir}$"; then
 	echo "Note: $bin_dir is not on PATH. Add it to your shell profile."
+fi
+
+# Upgrade safety net for users coming from the old Builder release. Kent never
+# reads ~/.builder and this installer never runs the migration for you (it
+# mutates your DB and filesystem). Surface the steps so the user runs them
+# explicitly. A ~/.builder that is a symlink (the post-migration compat link to
+# ~/.kent) is benign and intentionally ignored here.
+if [ -d "$HOME/.builder" ] && [ ! -L "$HOME/.builder" ]; then
+	cat >&2 <<EOF
+
+Found an existing ~/.builder from the previous Builder release.
+Kent uses ~/.kent and does not read ~/.builder. To migrate your sessions,
+worktrees, and config, run the one-time Builder 2.0 migration BEFORE using kent:
+  1. Stop any running Builder activity (server/agents).
+  2. Get the Builder 2.0 migration binary and run: builder migrate
+  3. Re-run this installer if needed.
+Migration guide: https://kent.sh/
+EOF
+fi
+
+# Clean up the superseded 'builder' binary once kent is installed. Removing a
+# binary the installer did not place is surprising, so print the command
+# instead of deleting it.
+old_builder="$(command -v builder 2>/dev/null || true)"
+if [ -n "$old_builder" ] && [ "$old_builder" != "$target" ]; then
+	echo "" >&2
+	echo "A previous 'builder' binary is still on PATH at $old_builder." >&2
+	echo "After migrating, remove it with:  rm \"$old_builder\"" >&2
 fi

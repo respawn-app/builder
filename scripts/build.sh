@@ -8,13 +8,13 @@ cd "$repo_root"
 
 usage() {
 	cat <<'USAGE'
-Usage: scripts/build.sh --output /path/to/builder [--version vX.Y.Z|X.Y.Z] [--package ./cli/kent] [--skip-frontend]
+Usage: scripts/build.sh --output /path/to/kent [--version vX.Y.Z|X.Y.Z] [--package ./cli/kent] [--skip-frontend]
 
-Builds frontend assets and a release-profile Builder binary using a static Go toolchain configuration.
+Builds frontend assets and a release-profile Kent binary using a static Go toolchain configuration.
 
 Options:
   --output   Output path for the compiled binary.
-  --version  Override the embedded Builder version. Defaults to BUILDER_VERSION or VERSION.
+  --version  Override the embedded Kent version. Defaults to KENT_VERSION or VERSION.
   --package  Main package to build. Defaults to ./cli/kent.
   --skip-frontend
             Skip frontend asset build.
@@ -22,7 +22,7 @@ USAGE
 }
 
 read_version() {
-	local version="${BUILDER_VERSION:-}"
+	local version="${KENT_VERSION:-}"
 	if [ -z "$version" ] && [ -f VERSION ]; then
 		version="$(tr -d '[:space:]' <VERSION)"
 	fi
@@ -30,14 +30,14 @@ read_version() {
 }
 
 run_frontend_build() {
-	if [ "${BUILDER_SKIP_FRONTEND:-0}" = "1" ]; then
+	if [ "${KENT_SKIP_FRONTEND:-0}" = "1" ]; then
 		return
 	fi
 	if [ ! -f apps/package.json ]; then
 		return
 	fi
 	if ! command -v pnpm >/dev/null 2>&1; then
-		echo "pnpm is required to build frontend assets. Install pnpm or set BUILDER_SKIP_FRONTEND=1." >&2
+		echo "pnpm is required to build frontend assets. Install pnpm or set KENT_SKIP_FRONTEND=1." >&2
 		exit 2
 	fi
 
@@ -56,7 +56,7 @@ run_frontend_build() {
 output=""
 package_path="./cli/kent"
 version=""
-skip_frontend="${BUILDER_SKIP_FRONTEND:-0}"
+skip_frontend="${KENT_SKIP_FRONTEND:-0}"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -98,7 +98,7 @@ if [ -z "$version" ]; then
 	version="$(read_version)"
 fi
 version="${version#v}"
-export BUILDER_SKIP_FRONTEND="$skip_frontend"
+export KENT_SKIP_FRONTEND="$skip_frontend"
 
 mkdir -p "$(dirname -- "$output")"
 
